@@ -1,0 +1,22 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+.env
+*.log
+config.py
+
+# Local database and NocoDB data should not be committed.
+../postgres-data/
+../nocodb-data/
+postgres-data/
+nocodb-data/
+
+# Database exports can contain private business data and credentials.
+*.sql
+
+# Local editor and temporary files.
+.vscode/
+.idea/
+tmp/
+temp/

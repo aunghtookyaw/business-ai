@@ -1,0 +1,7 @@
+python-telegram-bot==13.15
+requests==2.31.0
+urllib3<2
+pandas==1.5.3
+numpy==1.24.4
+flask==3.0.3
+psycopg2-binary==2.9.9

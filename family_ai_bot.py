@@ -1,0 +1,197 @@
+import os
+
+from telegram import Update
+from telegram.ext import CallbackContext, CommandHandler, Filters, MessageHandler, Updater
+from tools.openclaw_client import ask_ai
+from tools.web_scraper import extract_urls, scrape_urls_from_text
+
+try:
+    import config
+except ImportError:
+    config = None
+
+
+def _setting(name, default=None, aliases=None):
+    for candidate in [name] + list(aliases or []):
+        value = os.getenv(candidate)
+        if value not in (None, ""):
+            return value
+
+    if config is not None:
+        for candidate in [name] + list(aliases or []):
+            value = getattr(config, candidate, None)
+            if value not in (None, ""):
+                return value
+
+    return default
+
+
+TELEGRAM_BOT_TOKEN = _setting(
+    "FAMILY_TELEGRAM_BOT_TOKEN",
+    aliases=["BIGSHOT_GUY_BOT_TOKEN"],
+)
+TELEGRAM_ALLOWED_CHAT_ID = _setting("FAMILY_ALLOWED_CHAT_ID")
+TELEGRAM_ALLOWED_THREAD_ID = _setting("FAMILY_ALLOWED_THREAD_ID")
+TELEGRAM_IGNORED_THREAD_IDS = _setting("FAMILY_IGNORED_THREAD_IDS", "")
+AI_MODEL = _setting("FAMILY_AI_MODEL", "gemma4:e4b")
+
+
+def _optional_int(value):
+    if value in (None, ""):
+        return None
+    return int(value)
+
+
+def _optional_int_set(value):
+    if value in (None, ""):
+        return set()
+    return {
+        int(item.strip())
+        for item in value.split(",")
+        if item.strip()
+    }
+
+
+def _message_thread_id(message):
+    return getattr(message, "message_thread_id", None)
+
+
+def _message_reject_reason(message):
+    allowed_chat_id = _optional_int(TELEGRAM_ALLOWED_CHAT_ID)
+    allowed_thread_id = _optional_int(TELEGRAM_ALLOWED_THREAD_ID)
+    ignored_thread_ids = _optional_int_set(TELEGRAM_IGNORED_THREAD_IDS)
+    message_thread_id = _message_thread_id(message)
+
+    if allowed_chat_id is not None and message.chat_id != allowed_chat_id:
+        return f"chat_id {message.chat_id} does not match {allowed_chat_id}"
+
+    if allowed_thread_id is not None and message_thread_id != allowed_thread_id:
+        return f"thread_id {message_thread_id} does not match {allowed_thread_id}"
+
+    if message_thread_id in ignored_thread_ids:
+        return f"thread_id {message_thread_id} is ignored"
+
+    return None
+
+
+def _is_allowed_message(message):
+    if _message_reject_reason(message):
+        return False
+
+    return True
+
+
+def _split_message(text, size=3900):
+    return [
+        text[i:i + size]
+        for i in range(0, len(text), size)
+    ]
+
+
+def _scraped_context(question):
+    if not extract_urls(question):
+        return ""
+
+    scrape_result = scrape_urls_from_text(question)
+    sections = []
+
+    for page in scrape_result["pages"]:
+        sections.append(
+            "URL: {url}\nStatus: {status_code}\nContent-Type: {content_type}\nText:\n{text}".format(
+                url=page["url"],
+                status_code=page["status_code"],
+                content_type=page["content_type"],
+                text=page["text"],
+            )
+        )
+
+    for error in scrape_result["errors"]:
+        sections.append(
+            "URL: {url}\nScrape error: {error}".format(
+                url=error["url"],
+                error=error["error"],
+            )
+        )
+
+    if not sections:
+        return ""
+
+    return "\n\nWeb page content:\n" + "\n\n---\n\n".join(sections)
+
+
+def ask_family_ai(question):
+    web_context = _scraped_context(question)
+    prompt = f"""
+You are BigShot_Guy_Bot, the BigShot Family AI Assistant.
+
+Rules:
+- Help with family conversation, planning, explanation, writing, and general questions.
+- Do not answer business finance questions; tell the user to ask big_lady_bot in the Finance topic.
+- Do not claim access to files or private chats unless the user pasted the content.
+- When web page content is provided, answer only from that content and clearly say if the page could not be read.
+- Keep answers clear and practical.
+
+Question:
+{question}
+{web_context}
+"""
+    return ask_ai(prompt, model=AI_MODEL, timeout=120).strip()
+
+
+def whereami(update: Update, context: CallbackContext):
+    message = update.message
+    reject_reason = _message_reject_reason(message)
+    if reject_reason:
+        print(f"Ignoring /whereami: {reject_reason}", flush=True)
+        return
+
+    message.reply_text(
+        "chat_id: {chat_id}\nthread_id: {thread_id}".format(
+            chat_id=message.chat_id,
+            thread_id=_message_thread_id(message),
+        )
+    )
+
+
+def handle_message(update: Update, context: CallbackContext):
+    message = update.message
+    print(
+        "Received text chat_id={chat_id} thread_id={thread_id}".format(
+            chat_id=message.chat_id,
+            thread_id=_message_thread_id(message),
+        ),
+        flush=True,
+    )
+
+    reject_reason = _message_reject_reason(message)
+    if reject_reason:
+        print(f"Ignoring text: {reject_reason}", flush=True)
+        return
+
+    try:
+        answer = ask_family_ai(message.text)
+        for part in _split_message(answer):
+            message.reply_text(part)
+    except Exception as e:
+        message.reply_text(f"Error: {str(e)}")
+
+
+def main():
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("FAMILY_TELEGRAM_BOT_TOKEN is required.")
+    if not TELEGRAM_ALLOWED_CHAT_ID:
+        raise RuntimeError("FAMILY_ALLOWED_CHAT_ID is required.")
+
+    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
+
+    dispatcher.add_handler(CommandHandler("whereami", whereami))
+    dispatcher.add_handler(MessageHandler(Filters.text, handle_message))
+
+    print("Family AI Bot Running...", flush=True)
+    updater.start_polling()
+    updater.idle()
+
+
+if __name__ == "__main__":
+    main()
