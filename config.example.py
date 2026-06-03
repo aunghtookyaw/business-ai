@@ -34,6 +34,11 @@ MYANMAR_VEGETABLE_PRICE_URLS = os.getenv(
     "https://www.selinawamucii.com/insights/prices/myanmar/lettuce/,https://www.selinawamucii.com/insights/prices/myanmar/vegetables/",
 )
 
+MYANMAR_RETAIL_VEGETABLE_PRICE_URLS = os.getenv(
+    "MYANMAR_RETAIL_VEGETABLE_PRICE_URLS",
+    "https://www.makropro.com.mm/en/c/fruit-vegetables/vegetables,https://www.citymall.com.mm/citymall/my/%E1%80%95%E1%80%85%E1%80%B9%E1%80%85%E1%80%8A%E1%80%BA%E1%80%B8%E1%80%A1%E1%80%99%E1%80%BB%E1%80%AD%E1%80%AF%E1%80%B8%E1%80%A1%E1%80%85%E1%80%AC%E1%80%B8%E1%80%99%E1%80%BB%E1%80%AC%E1%80%B8/Brands/City-Farm/c/C0392",
+)
+
 NOCODB_URL = os.getenv("NOCODB_URL", "http://localhost:8080")
 
 NOCODB_API_TOKEN = os.getenv("NOCODB_API_TOKEN", "PUT_YOUR_NOCODB_TOKEN_HERE")

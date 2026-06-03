@@ -269,13 +269,36 @@ class FamilyAiBotFilterTest(unittest.TestCase):
                 "source": "https://example.com/myanmar",
             },
         ]
+        retail_rows = [
+            {
+                "market": "Makro PRO Myanmar",
+                "name": "Cabbage pack 500-700 g",
+                "quantity": "500-700 g 1 unit(s)",
+                "price_mmk": 4000.0,
+                "unit": "500 g",
+                "price_mmk_per_kg": 8000.0,
+                "source": "https://example.com/makro",
+            },
+            {
+                "market": "City Mart / City Mall",
+                "name": "City Farm ဆလပ်ရွက်",
+                "quantity": "200.0 Gram",
+                "price_mmk": 4000.0,
+                "unit": "200 g",
+                "price_mmk_per_kg": 20000.0,
+                "source": "https://example.com/citymall",
+            },
+        ]
 
         with patch.object(live_info, "_fetch_price_rows", return_value=(thai_rows, [])):
             with patch.object(live_info, "_fetch_myanmar_price_rows", return_value=(myanmar_rows, [])):
-                with patch.object(live_info, "get_thb_mmk_rate", return_value=(80.0, "test-date")):
-                    answer = live_info.answer_live_info("Makro lettuce deal price negotiation")
+                with patch.object(live_info, "_fetch_retail_myanmar_price_rows", return_value=(retail_rows, [])):
+                    with patch.object(live_info, "get_thb_mmk_rate", return_value=(80.0, "test-date")):
+                        answer = live_info.answer_live_info("Makro and City Mart lettuce deal price negotiation")
 
-        self.assertIn("Makro price negotiation signal", answer)
+        self.assertIn("Retail price negotiation signal", answer)
+        self.assertIn("Makro PRO Myanmar", answer)
+        self.assertIn("City Mart / City Mall", answer)
         self.assertIn("25.00 THB/kg ~= 2,000 MMK/kg", answer)
         self.assertIn("1,000-4,000 MMK/kg", answer)
         self.assertIn("Do not reduce supplied product/quality", answer)
@@ -292,29 +315,64 @@ class FamilyAiBotFilterTest(unittest.TestCase):
 
         with patch.object(live_info, "_fetch_price_rows", return_value=(thai_rows, [])):
             with patch.object(live_info, "_fetch_myanmar_price_rows", return_value=([], [])):
-                with patch.object(live_info, "get_thb_mmk_rate", return_value=(80.0, "test-date")):
-                    context = live_info.live_info_context("Makro lettuce deal price negotiation")
+                with patch.object(live_info, "_fetch_retail_myanmar_price_rows", return_value=([], [])):
+                    with patch.object(live_info, "get_thb_mmk_rate", return_value=(80.0, "test-date")):
+                        context = live_info.live_info_context("Makro lettuce deal price negotiation")
 
         self.assertEqual("market_negotiation", context["type"])
         self.assertIn("No exact Thailand match", "\n".join(context["notes"]))
         self.assertEqual("มะเขือเทศ", context["thailand_rows"][0]["name"])
 
+    def test_citymall_retail_rows_are_parsed_with_price_per_kg(self):
+        text = """
+City Farm
+City Farm ဆလပ်ရွက်
+200.0 Gram
+4,000 Ks
+Sold by CMHL
+"""
+
+        rows = live_info._parse_retail_myanmar_price_rows(
+            text,
+            "https://www.citymall.com.mm/cityfarm",
+        )
+
+        self.assertEqual("City Mart / City Mall", rows[0]["market"])
+        self.assertEqual("City Farm ဆလပ်ရွက်", rows[0]["name"])
+        self.assertEqual(4000.0, rows[0]["price_mmk"])
+        self.assertEqual(20000.0, rows[0]["price_mmk_per_kg"])
+
+    def test_makro_retail_rows_are_parsed_with_price_per_kg(self):
+        text = "Cabbage pack 500 g 1 unit(s)MAKRO Ks 4,000 LOCAL POTATO KG 1 unit(s)MAKRO Ks 6,700"
+
+        rows = live_info._parse_retail_myanmar_price_rows(
+            text,
+            "https://www.makropro.com.mm/en/c/fruit-vegetables/vegetables",
+        )
+
+        self.assertEqual("Makro PRO Myanmar", rows[0]["market"])
+        self.assertIn("Cabbage", rows[0]["name"])
+        self.assertEqual(4000.0, rows[0]["price_mmk"])
+        self.assertEqual(8000.0, rows[0]["price_mmk_per_kg"])
+
     def test_ask_family_ai_prompt_mentions_makro_negotiation_rules(self):
         live_context = {
             "type": "market_negotiation",
-            "question": "Makro lettuce deal price negotiation",
+            "question": "Makro and City Mart lettuce deal price negotiation",
             "exchange_rate": {"rate": 80.0, "date": "test-date"},
             "thailand_rows": [],
+            "myanmar_retail_rows": [],
             "myanmar_rows": [],
             "sources": {},
         }
 
         with patch.object(family_ai_bot, "live_info_context", return_value=live_context):
             with patch.object(family_ai_bot, "ask_ai", return_value="negotiation advice") as ask_ai:
-                answer = family_ai_bot.ask_family_ai("Makro lettuce deal price negotiation")
+                answer = family_ai_bot.ask_family_ai("Makro and City Mart lettuce deal price negotiation")
 
         self.assertEqual("negotiation advice", answer)
-        self.assertIn("retail seller negotiation", ask_ai.call_args.args[0])
+        self.assertIn("Makro, City Mart, or retail seller negotiation", ask_ai.call_args.args[0])
+        self.assertIn("Makro/City Mart Myanmar retail rows", ask_ai.call_args.args[0])
         self.assertIn("product reduction risk", ask_ai.call_args.args[0])
         self.assertIn("Do not summarize away the actual live rows", ask_ai.call_args.args[0])
 

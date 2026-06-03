@@ -19,6 +19,11 @@ DEFAULT_MYANMAR_PRICE_URLS = (
     "https://www.selinawamucii.com/insights/prices/myanmar/vegetables/",
 )
 
+DEFAULT_MYANMAR_RETAIL_PRICE_URLS = (
+    "https://www.makropro.com.mm/en/c/fruit-vegetables/vegetables",
+    "https://www.citymall.com.mm/citymall/my/%E1%80%95%E1%80%85%E1%80%B9%E1%80%85%E1%80%8A%E1%80%BA%E1%80%B8%E1%80%A1%E1%80%99%E1%80%BB%E1%80%AD%E1%80%AF%E1%80%B8%E1%80%A1%E1%80%85%E1%80%AC%E1%80%B8%E1%80%99%E1%80%BB%E1%80%AC%E1%80%B8/Brands/City-Farm/c/C0392",
+)
+
 VEGETABLE_ALIASES = {
     "tomato": "มะเขือเทศ",
     "cabbage": "กะหล่ำปลี",
@@ -44,10 +49,37 @@ VEGETABLE_ALIASES = {
     "celery": "คื่นช่าย",
 }
 
+RETAIL_VEGETABLE_ALIASES = {
+    "tomato": ("tomato", "ခရမ်းချဉ်", "မะเขือเทศ"),
+    "cabbage": ("cabbage", "ဂေါ်ဖီ", "กะหล่ำปลี"),
+    "green cabbage": ("cabbage", "ဂေါ်ဖီ", "กะหล่ำปลี"),
+    "chinese cabbage": ("chinese cabbage", "ผักกาดขาว"),
+    "lettuce": ("lettuce", "ဆလပ်", "ผักกาดหอม"),
+    "green oak": ("green oak", "ဂရင်းအုပ်", "กรีนโอ๊ค"),
+    "red oak": ("red oak", "เรดโอ๊ค"),
+    "cos": ("cos", "romaine", "คอส"),
+    "romaine": ("romaine", "cos", "คอส"),
+    "butterhead": ("butterhead", "butter head", "บัตเตอร์เฮด"),
+    "carrot": ("carrot", "မုန်လာဥနီ", "แครอท"),
+    "cucumber": ("cucumber", "သခွား", "แตงกวา"),
+    "potato": ("potato", "အာလူး", "มันฝรั่ง"),
+    "garlic": ("garlic", "ကြက်သွန်ဖြူ", "กระเทียม"),
+    "onion": ("onion", "ကြက်သွန်နီ", "หัวหอม"),
+    "shallot": ("shallot", "ကြက်သွန်နီ", "หอมแดง"),
+    "broccoli": ("broccoli", "ဘရိုကိုလီ", "บล็อคโคลี่"),
+    "chili": ("chili", "chilli", "ငရုတ်", "พริก"),
+    "mushroom": ("mushroom", "မှို", "เห็ด"),
+    "celery": ("celery", "ကင်ချိုင်း", "คื่นช่าย"),
+}
+
 WEATHER_WORDS = ("weather", "forecast", "မိုးလေဝသ", "ရာသီဥတု", "temperature", "rain", "မိုး")
 PRICE_WORDS = ("vegetable", "veggie", "price", "စျေး", "ဈေး", "ผัก")
 NEGOTIATION_WORDS = (
     "makro",
+    "citymart",
+    "city mart",
+    "citymall",
+    "city mall",
     "negotiation",
     "negotiate",
     "deal",
@@ -107,6 +139,13 @@ def _looks_like_price(question):
     return any(word in text for word in PRICE_WORDS) and (
         "thai" in text
         or "thailand" in text
+        or "myanmar" in text
+        or "makro" in text
+        or "citymart" in text
+        or "city mart" in text
+        or "citymall" in text
+        or "city mall" in text
+        or "lettuce" in text
         or "ထိုင်း" in text
         or "ผัก" in text
         or "vegetable" in text
@@ -320,11 +359,26 @@ def _myanmar_price_source_urls():
     return list(DEFAULT_MYANMAR_PRICE_URLS)
 
 
+def _myanmar_retail_price_source_urls():
+    configured = _setting("MYANMAR_RETAIL_VEGETABLE_PRICE_URLS")
+    if configured:
+        return [url.strip() for url in configured.split(",") if url.strip()]
+    return list(DEFAULT_MYANMAR_RETAIL_PRICE_URLS)
+
+
 def _wanted_vegetable(question):
     text = _normalize(question)
     for alias, thai_name in VEGETABLE_ALIASES.items():
         if alias in text or thai_name in question:
             return thai_name
+    return None
+
+
+def _wanted_retail_terms(question):
+    text = _normalize(question)
+    for alias, terms in RETAIL_VEGETABLE_ALIASES.items():
+        if alias in text or any(term.lower() in text for term in terms):
+            return terms
     return None
 
 
@@ -346,6 +400,166 @@ def _parse_price_rows(text, source_url):
             "source": source_url,
         })
     return rows
+
+
+def _source_market_name(source_url):
+    if "makropro.com.mm" in source_url:
+        return "Makro PRO Myanmar"
+    if "citymall.com.mm" in source_url:
+        return "City Mart / City Mall"
+    return source_url
+
+
+def _normalize_retail_unit(quantity):
+    text = " ".join((quantity or "").split())
+    lower = text.lower()
+    unit = text or "unit"
+    multiplier = None
+
+    number_match = re.search(r"(\d+(?:\.\d+)?)", lower)
+    value = float(number_match.group(1)) if number_match else None
+    if value is not None:
+        if "kilo" in lower or "kg" in lower:
+            unit = "kg" if value == 1 else f"{value:g} kg"
+            multiplier = 1 / value if value else None
+        elif "gram" in lower or re.search(r"\d\s*g\b", lower) or re.search(r"\d+g\b", lower):
+            unit = "g" if value == 1 else f"{value:g} g"
+            multiplier = 1000 / value if value else None
+        elif "viss" in lower:
+            unit = "viss" if value == 1 else f"{value:g} viss"
+            multiplier = 1 / (value * 1.63293) if value else None
+        elif "pc" in lower or "pcs" in lower:
+            unit = "pc" if value == 1 else f"{value:g} pcs"
+
+    return unit, multiplier
+
+
+def _retail_row(name, quantity, price_mmk, source_url):
+    unit, per_kg_multiplier = _normalize_retail_unit(quantity)
+    row = {
+        "market": _source_market_name(source_url),
+        "name": " ".join(name.split()).strip(" -|"),
+        "quantity": " ".join((quantity or "").split()),
+        "price_mmk": float(price_mmk),
+        "unit": unit,
+        "source": source_url,
+    }
+    if per_kg_multiplier:
+        row["price_mmk_per_kg"] = row["price_mmk"] * per_kg_multiplier
+    return row
+
+
+def _parse_citymall_retail_rows(text, source_url):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    rows = []
+    for index, line in enumerate(lines):
+        if not re.match(r"^[\d,]+(?:\.\d+)?\s*Ks$", line):
+            continue
+
+        price = float(line.split()[0].replace(",", ""))
+        quantity = ""
+        name = ""
+        for back_index in range(index - 1, max(-1, index - 8), -1):
+            candidate = lines[back_index]
+            if re.search(r"\b(?:Gram|Kilo|KG|G|Viss|PCS?|ထုပ်|လုံး)\b", candidate, re.IGNORECASE):
+                quantity = candidate
+                continue
+            if candidate.startswith("Image:") or "ရောင်းချသူ" in candidate or candidate.startswith("Sold by"):
+                continue
+            if not name and not re.match(r"^[\d,]+(?:\.\d+)?\s*Ks$", candidate):
+                name = candidate
+                break
+
+        if not name or "seed" in name.lower() or "မျိုးစေ့" in name:
+            continue
+        rows.append(_retail_row(name, quantity, price, source_url))
+    return rows
+
+
+def _parse_makro_retail_rows(text, source_url):
+    rows = _parse_makro_retail_json_rows(text, source_url)
+    if rows:
+        return rows
+
+    compact = " ".join(text.split())
+    pattern = re.compile(
+        r"([A-Za-z0-9#/().,&'\-\s]{2,80}?)\s+((?:\d+(?:\.\d+)?\s*)?(?:kg|g|pc|pcs|pack|unit\(s\)|viss)[A-Za-z0-9()/.\-\s]*)\s*(?:MAKRO|GO GREEN|ARO|UNITED MUSHROOM|BURMA BUTCHER)\s+Ks\s*([\d,]+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+    rows = []
+    for name, quantity, price in pattern.findall(compact):
+        clean_name = " ".join(name.split()).strip(" -|")
+        if len(clean_name) < 2 or clean_name.lower().startswith(("showing products", "sort by", "product list")):
+            continue
+        rows.append(_retail_row(clean_name, quantity, float(price.replace(",", "")), source_url))
+    return rows
+
+
+def _makro_quantity_from_name(name, unit_size):
+    text = name or ""
+    patterns = (
+        r"(\d+(?:\.\d+)?\s*(?:kg|g|viss|pc|pcs))\b",
+        r"(\d+(?:\.\d+)?\s*(?:KG|G|VISS|PC|PCS))\b",
+        r"\b(KG)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return "1 kg" if match.group(1).lower() == "kg" else match.group(1)
+    return unit_size or "1 unit(s)"
+
+
+def _parse_makro_retail_json_rows(html, source_url):
+    rows = []
+    pattern = re.compile(
+        r'"displayPrice"\s*:\s*([\d.]+).*?'
+        r'"priceUnit"\s*:\s*"MMK".*?'
+        r'"seller"\s*:\s*"([^"]+)".*?'
+        r'"title"\s*:\s*"([^"]*)"\s*,\s*"titleEn"\s*:\s*"([^"]+)".*?'
+        r'"unitSize"\s*:\s*"([^"]*)"',
+        re.DOTALL,
+    )
+    seen = set()
+    for price, seller, title, title_en, unit_size in pattern.findall(html):
+        name = title_en or title
+        if "seed" in name.lower() or "မျိုးစေ့" in title:
+            continue
+        key = (name, price)
+        if key in seen:
+            continue
+        seen.add(key)
+        quantity = _makro_quantity_from_name(name, unit_size)
+        rows.append(_retail_row(name, quantity, float(price), source_url))
+        rows[-1]["seller"] = seller
+    return rows
+
+
+def _parse_retail_myanmar_price_rows(text, source_url):
+    if "makropro.com.mm" in source_url:
+        return _parse_makro_retail_rows(text, source_url)
+    if "makro.pro" in source_url:
+        return _parse_makro_retail_rows(text, source_url)
+    if "citymall.com.mm" in source_url:
+        return _parse_citymall_retail_rows(text, source_url)
+    return _parse_citymall_retail_rows(text, source_url) + _parse_makro_retail_rows(text, source_url)
+
+
+def _fetch_retail_myanmar_price_rows(timeout=20):
+    rows = []
+    errors = []
+    for url in _myanmar_retail_price_source_urls():
+        try:
+            response = requests.get(
+                url,
+                headers={"User-Agent": "BigShot-Guy-Bot/1.0"},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            source_text = response.text if "makro" in url else _html_to_text(response.text)
+            rows.extend(_parse_retail_myanmar_price_rows(source_text, url))
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+    return rows, errors
 
 
 def _parse_myanmar_price_rows(text, source_url):
@@ -417,6 +631,27 @@ def _filter_thai_rows_for_question(rows, question):
     return rows, None
 
 
+def _filter_retail_rows_for_question(rows, question):
+    terms = _wanted_retail_terms(question)
+    if not terms:
+        return rows, None
+    matched = [
+        row for row in rows
+        if any(term.lower() in row["name"].lower() for term in terms)
+    ]
+    if not matched:
+        return matched, terms
+
+    matched_markets = {row["market"] for row in matched}
+    supplemental = []
+    for row in rows:
+        if row["market"] in matched_markets:
+            continue
+        supplemental.append(row)
+        matched_markets.add(row["market"])
+    return matched + supplemental, terms
+
+
 def get_vegetable_price_answer(question, timeout=20):
     context = get_vegetable_price_context(question, timeout=timeout)
     return format_vegetable_price_answer(context)
@@ -474,9 +709,12 @@ def get_market_negotiation_context(question, timeout=20):
     selected_thai_rows = matched_thai_rows or thai_rows
 
     myanmar_rows, myanmar_errors = _fetch_myanmar_price_rows(timeout=timeout)
+    retail_rows, retail_errors = _fetch_retail_myanmar_price_rows(timeout=timeout)
+    matched_retail_rows, wanted_retail_terms = _filter_retail_rows_for_question(retail_rows, question)
+    selected_retail_rows = matched_retail_rows or retail_rows
 
-    if not selected_thai_rows and not myanmar_rows:
-        error_text = "\n".join((thai_errors + myanmar_errors)[:4]) or "No rows parsed."
+    if not selected_thai_rows and not myanmar_rows and not selected_retail_rows:
+        error_text = "\n".join((thai_errors + myanmar_errors + retail_errors)[:6]) or "No rows parsed."
         return {
             "type": "market_negotiation",
             "question": question,
@@ -500,20 +738,37 @@ def get_market_negotiation_context(question, timeout=20):
         if row["source"] not in myanmar_sources:
             myanmar_sources.append(row["source"])
 
+    retail_sources = []
+    for row in selected_retail_rows:
+        if row["source"] not in retail_sources:
+            retail_sources.append(row["source"])
+
     notes = [
         "Use these rows as negotiation signals, not a guaranteed contract price.",
-        "For Makro retail seller negotiation, compare their quote against Thai market rows converted to MMK and Myanmar Kyat/kg ranges.",
+        "For Makro or City Mart retail seller negotiation, compare their quote against Myanmar retail rows, Thai market rows converted to MMK, and Myanmar Kyat/kg ranges.",
         "Do not reduce quality or committed quantity unless the quoted price is above the market signal or the grade/spec is weaker than agreed.",
     ]
     if wanted and not matched_thai_rows:
         notes.append(f"No exact Thailand match was parsed for {wanted}; showing available vegetable rows instead.")
+    if wanted_retail_terms and not matched_retail_rows:
+        notes.append("No exact Makro/City Mart retail match was parsed for " + ", ".join(wanted_retail_terms[:3]) + "; showing available retail vegetable rows instead.")
+    if wanted_retail_terms and matched_retail_rows and len(selected_retail_rows) > len(matched_retail_rows):
+        exact_markets = sorted({row["market"] for row in matched_retail_rows})
+        notes.append(
+            "Exact retail match was parsed from "
+            + ", ".join(exact_markets)
+            + "; extra rows from other retail sources are comparison signals only."
+        )
     if myanmar_errors:
         notes.append("Some Myanmar price sources could not be read: " + "; ".join(myanmar_errors[:2]))
+    if retail_errors:
+        notes.append("Some Makro/City Mart retail sources could not be read: " + "; ".join(retail_errors[:2]))
 
     return {
         "type": "market_negotiation",
         "question": question,
         "wanted_thai_name": wanted,
+        "wanted_retail_terms": wanted_retail_terms,
         "exchange_rate": {
             "base": "THB",
             "quote": "MMK",
@@ -521,13 +776,16 @@ def get_market_negotiation_context(question, timeout=20):
             "date": rate_date,
         },
         "thailand_rows": priced_thai_rows,
+        "myanmar_retail_rows": selected_retail_rows[:18],
         "myanmar_rows": myanmar_rows[:12],
         "sources": {
             "thailand": thai_sources,
+            "myanmar_retail": retail_sources,
             "myanmar": myanmar_sources,
         },
         "source_errors": {
             "thailand": thai_errors,
+            "myanmar_retail": retail_errors,
             "myanmar": myanmar_errors,
         },
         "notes": notes,
@@ -540,11 +798,25 @@ def format_market_negotiation_answer(context):
 
     rate = context["exchange_rate"]["rate"]
     lines = [
-        "Makro price negotiation signal",
+        "Retail price negotiation signal",
         f"Exchange rate: 1 THB = {rate:,.2f} MMK",
         f"Rate date: {context['exchange_rate']['date']}",
-        "Thailand market rows:",
+        "Makro / City Mart Myanmar retail rows:",
     ]
+    for row in context.get("myanmar_retail_rows") or []:
+        price_detail = f"{row['price_mmk']:,.0f} MMK"
+        if row.get("price_mmk_per_kg"):
+            price_detail += f" ~= {row['price_mmk_per_kg']:,.0f} MMK/kg"
+        lines.append(
+            f"- {row['market']} - {row['name']}: {price_detail}"
+            f" ({row.get('quantity') or row.get('unit')})"
+        )
+    if not context.get("myanmar_retail_rows"):
+        lines.append("- No Makro/City Mart retail rows parsed.")
+
+    lines.extend([
+        "Thailand market rows:",
+    ])
     for row in context.get("thailand_rows") or []:
         lines.append(
             f"- {row['name']}: {row['price_thb']:,.2f} THB/{row['unit']} "
@@ -561,7 +833,9 @@ def format_market_negotiation_answer(context):
         lines.append("- No Myanmar rows parsed. Set MYANMAR_VEGETABLE_PRICE_URLS for your preferred local source.")
 
     lines.append("Negotiation use:")
-    lines.append("- Ask Makro for product, grade, packing, delivery place, payment term, and rejection rule before agreeing price.")
+    for note in context.get("notes") or []:
+        lines.append(f"- {note}")
+    lines.append("- Ask Makro/City Mart for product, grade, packing, delivery place, payment term, and rejection rule before agreeing price.")
     lines.append("- Do not reduce supplied product/quality unless the quote is above the market signal or the specification changed.")
     lines.append("Sources: " + str(context.get("sources") or {}))
     return "\n".join(lines)

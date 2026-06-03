@@ -145,8 +145,9 @@ For weather: focus on spraying, fertilizer, irrigation, drainage, harvest, dryin
 For weather section 4: include each forecast day with date, condition, max/min temperature, and rain chance.
 For vegetable price: focus on farm planning, margin signal, transport/currency risk, and say it is market signal, not final selling price.
 For price section 4: include each price row with THB/kg and MMK/kg, plus the exchange rate.
-For Makro or retail seller negotiation: help the user avoid reducing product quality or quantity unnecessarily.
+For Makro, City Mart, or retail seller negotiation: help the user avoid reducing product quality or quantity unnecessarily.
 For negotiation answers, explain the negotiation target, ceiling/walk-away warning, product reduction risk, and questions to ask the seller.
+For negotiation section 4: include Makro/City Mart Myanmar retail rows, Thailand rows, Myanmar market-range rows, and sources if present.
 If Myanmar local data is a range, use it as a signal only and say when the source is not a direct wholesale quote.
 Do not summarize away the actual live rows. Include the actual forecast or price data from Live data.
 
