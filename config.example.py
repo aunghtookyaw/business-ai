@@ -22,6 +22,18 @@ FAMILY_IGNORED_THREAD_IDS = os.getenv("FAMILY_IGNORED_THREAD_IDS", "5")
 
 FAMILY_AI_MODEL = os.getenv("FAMILY_AI_MODEL", "gemma4:e4b")
 
+FAMILY_DEFAULT_WEATHER_LOCATION = os.getenv("FAMILY_DEFAULT_WEATHER_LOCATION", "Yangon")
+
+THAILAND_VEGETABLE_PRICE_URLS = os.getenv(
+    "THAILAND_VEGETABLE_PRICE_URLS",
+    "https://checkraka.app/price/vegetable-today/makro/,https://checkraka.app/price/vegetable-today/simummuang/",
+)
+
+MYANMAR_VEGETABLE_PRICE_URLS = os.getenv(
+    "MYANMAR_VEGETABLE_PRICE_URLS",
+    "https://www.selinawamucii.com/insights/prices/myanmar/lettuce/,https://www.selinawamucii.com/insights/prices/myanmar/vegetables/",
+)
+
 NOCODB_URL = os.getenv("NOCODB_URL", "http://localhost:8080")
 
 NOCODB_API_TOKEN = os.getenv("NOCODB_API_TOKEN", "PUT_YOUR_NOCODB_TOKEN_HERE")

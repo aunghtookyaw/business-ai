@@ -1,7 +1,9 @@
 import os
+import json
 
 from telegram import Update
 from telegram.ext import CallbackContext, CommandHandler, Filters, MessageHandler, Updater
+from tools.live_info import format_live_info_answer, live_info_context
 from tools.openclaw_client import ask_ai
 from tools.web_scraper import extract_urls, scrape_urls_from_text
 
@@ -120,6 +122,49 @@ def _scraped_context(question):
 
 
 def ask_family_ai(question):
+    live_context = live_info_context(question)
+    if live_context:
+        fallback_answer = format_live_info_answer(live_context)
+        if live_context.get("error"):
+            return fallback_answer
+
+        prompt = f"""
+You are BigShot_Guy_Bot helping a farming family.
+
+Use only the live data below. Do not invent weather, prices, exchange rates, or sources.
+
+Answer for agricultural use in this exact shape:
+1. Main risk / market signal
+2. What to do today
+3. What to avoid
+4. Weather / price data
+5. Source
+
+Keep it short and practical. If the user writes Burmese, answer in Burmese. If English, answer in English.
+For weather: focus on spraying, fertilizer, irrigation, drainage, harvest, drying, and storage decisions.
+For weather section 4: include each forecast day with date, condition, max/min temperature, and rain chance.
+For vegetable price: focus on farm planning, margin signal, transport/currency risk, and say it is market signal, not final selling price.
+For price section 4: include each price row with THB/kg and MMK/kg, plus the exchange rate.
+For Makro or retail seller negotiation: help the user avoid reducing product quality or quantity unnecessarily.
+For negotiation answers, explain the negotiation target, ceiling/walk-away warning, product reduction risk, and questions to ask the seller.
+If Myanmar local data is a range, use it as a signal only and say when the source is not a direct wholesale quote.
+Do not summarize away the actual live rows. Include the actual forecast or price data from Live data.
+
+Question:
+{question}
+
+Live data:
+{json.dumps(live_context, indent=2, ensure_ascii=False, default=str)}
+"""
+        try:
+            answer = ask_ai(prompt, model=AI_MODEL, timeout=120).strip()
+            if answer:
+                return answer
+        except Exception:
+            pass
+
+        return fallback_answer
+
     web_context = _scraped_context(question)
     prompt = f"""
 You are BigShot_Guy_Bot, the BigShot Family AI Assistant.
