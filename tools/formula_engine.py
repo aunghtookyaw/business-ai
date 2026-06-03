@@ -11,8 +11,11 @@ import config
 MONTH_ALIASES = {
     "jan": 1,
     "january": 1,
+    "janurary": 1,
     "feb": 2,
     "february": 2,
+    "febuary": 2,
+    "feburary": 2,
     "mar": 3,
     "march": 3,
     "mrch": 3,
@@ -35,6 +38,7 @@ MONTH_ALIASES = {
     "dec": 12,
     "december": 12,
 }
+MONTH_PATTERN = "|".join(sorted(MONTH_ALIASES, key=len, reverse=True))
 
 SECTOR_ALIASES = {
     "farm": "Farm",
@@ -42,20 +46,23 @@ SECTOR_ALIASES = {
     "extension": "SP Extension",
     "sp production": "SP Production",
     "production": "SP Production",
-    "sotephwar": "SP Production",
-    "sote phwar": "SP Production",
+    "sotephwar": "Sote Phwar",
+    "sote phwar": "Sote Phwar",
 }
 
 CATEGORY_ALIASES = {
-    "agrochemical": "Agrochemicals",
-    "agrochemicals": "Agrochemicals",
+    "machinery equipment and maintenance": "Machinery equipment and maintenance",
+    "machinary equipment and maintenance": "Machinery equipment and maintenance",
+    "machinery maintenance": "Machinery equipment and maintenance",
+    "machinary maintenance": "Machinery equipment and maintenance",
+    "machinery equipment": "Machinery equipment and maintenance",
+    "machinary equipment": "Machinery equipment and maintenance",
+    "machinery": "Machinery equipment and maintenance",
+    "machinary": "Machinery equipment and maintenance",
+    "agrochemical": "Agrochemical",
+    "agrochemicals": "Agrochemical",
     "bonus labour": "Bonus for Labour",
     "bonus for labour": "Bonus for Labour",
-    "machinary": "Machinary Equipment ",
-    "machinery": "Machinary Equipment ",
-    "equipment": "Machinary Equipment ",
-    "machinary equipment": "Machinary Equipment ",
-    "machinery equipment": "Machinary Equipment ",
 }
 
 DIMENSION_VALUES_TTL_SECONDS = 300
@@ -75,6 +82,16 @@ _DIMENSION_VALUES_CACHE = {
 def _table_ref():
     schema = config.TRANSACTION_SCHEMA.replace('"', '""')
     table = config.TRANSACTION_TABLE.replace('"', '""')
+    return f'"{schema}"."{table}"'
+
+
+def _sotephwar_transection_table_ref():
+    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    table = getattr(
+        config,
+        "SOTEPHWAR_TRANSECTION_TABLE",
+        "Sotephwar_Transection",
+    ).replace('"', '""')
     return f'"{schema}"."{table}"'
 
 
@@ -103,10 +120,18 @@ def _fetch_one(sql, params=None):
 def _period_dates(period):
     today = date.today()
 
+    date_match = re.fullmatch(r"date:(\d{4})-(\d{2})-(\d{2})", period)
     month_match = re.fullmatch(r"month:(\d{4})-(\d{2})", period)
     year_match = re.fullmatch(r"year:(\d{4})", period)
 
-    if month_match:
+    if date_match:
+        start_date = date(
+            int(date_match.group(1)),
+            int(date_match.group(2)),
+            int(date_match.group(3)),
+        )
+        end_date = start_date + timedelta(days=1)
+    elif month_match:
         year = int(month_match.group(1))
         month = int(month_match.group(2))
         start_date = date(year, month, 1)
@@ -167,11 +192,15 @@ def _period_dates(period):
 
 
 def _date_filter(period):
+    return _date_filter_for_column(period, '"Date"')
+
+
+def _date_filter_for_column(period, column_name):
     start, end = _period_dates(period)
     if start is None:
         return "", {}
 
-    return 'AND "Date" >= %(start)s AND "Date" < %(end)s', {
+    return f"AND {column_name} >= %(start)s AND {column_name} < %(end)s", {
         "start": start,
         "end": end,
     }
@@ -238,8 +267,15 @@ def _known_dimension_values():
 
 
 def _find_known_value(text, values):
-    for value in values:
+    sorted_values = sorted(
+        values,
+        key=lambda item: len(_normalized_text(item)),
+        reverse=True,
+    )
+    for value in sorted_values:
         normalized_value = _normalized_text(value).strip()
+        if len(normalized_value) < 3 or normalized_value.isdigit():
+            continue
         if normalized_value and _contains_phrase(text, normalized_value):
             return value
 
@@ -324,9 +360,186 @@ def _with_filters(result, filters):
     return result
 
 
+def is_sotephwar_transection_question(question):
+    text = _normalized_text(question)
+    return (
+        "sotephwar transection" in text
+        or "sotephwar transaction" in text
+        or "sote phwar transection" in text
+        or "sote phwar transaction" in text
+        or "sotephwar table" in text
+        or "sote phwar table" in text
+    )
+
+
+def _mentions_sotephwar(question):
+    text = _normalized_text(question)
+    return "sotephwar" in text or "sote phwar" in text
+
+
+def _sotephwar_unpaid_filter(question):
+    text = _normalized_text(question)
+    return (
+        "unpaid" in text
+        or "outstanding" in text
+        or "amount remained" in text
+        or "amount remain" in text
+        or "debt" in text
+        or "receivable" in text
+        or "not yet received" in text
+        or "not received" in text
+        or "still has" in text
+    )
+
+
+def _sotephwar_note_requested(question):
+    text = _normalized_text(question)
+    return "note" in text or "notes" in text
+
+
+def _sotephwar_voucher_question(question):
+    text = _normalized_text(question)
+    return _mentions_sotephwar(question) and (
+        "voucher" in text
+        or "invoice" in text
+        or "customer" in text
+        or _sotephwar_unpaid_filter(question)
+    )
+
+
+def _sotephwar_invoice_numbers(question):
+    text = _normalized_text(question)
+    matches = []
+    for match in re.finditer(r"\b(?:voucher|invoice)\s+((?:\d+\s*)+(?:and\s+\d+\s*)*)", text):
+        matches.extend(re.findall(r"\d+", match.group(1)))
+    return list(dict.fromkeys(matches))
+
+
+SOTEPHWAR_CUSTOMER_STOPWORDS = {
+    "show",
+    "list",
+    "tell",
+    "me",
+    "please",
+    "sotephwar",
+    "sote",
+    "phwar",
+    "transection",
+    "transaction",
+    "table",
+    "voucher",
+    "vouchers",
+    "invoice",
+    "invoices",
+    "customer",
+    "customers",
+    "name",
+    "by",
+    "for",
+    "of",
+    "from",
+    "in",
+    "the",
+    "unpaid",
+    "outstanding",
+    "amount",
+    "remained",
+    "remain",
+    "debt",
+    "receivable",
+    "note",
+    "notes",
+    "and",
+}
+SOTEPHWAR_CUSTOMER_STOPWORDS.update(MONTH_ALIASES)
+
+
+def _sotephwar_customer_search_text(question):
+    words = [
+        word
+        for word in _normalized_text(question).split()
+        if word not in SOTEPHWAR_CUSTOMER_STOPWORDS and not word.isdigit()
+    ]
+    return " ".join(words)
+
+
+def _sotephwar_item_filter(question):
+    text = _normalized_text(question)
+    if re.search(r"(^|\s)4\s*l($|\s)", text) or "4l" in text:
+        return "Sote Phwar 4L"
+    if re.search(r"(^|\s)1\s*l($|\s)", text) or "1l" in text:
+        return "Sote Phwar 1L"
+    if "500 ml" in text or "500ml" in text or "500 m l" in text:
+        return "Sote Phwar 500 mL"
+    return None
+
+
+def _sotephwar_customer_filter(question):
+    text = _normalized_text(question)
+    try:
+        rows = _fetch_all(
+            f'''
+            SELECT DISTINCT "Customer_Name" AS customer_name
+            FROM {_sotephwar_transection_table_ref()}
+            WHERE COALESCE(__nc_deleted, false) = false
+              AND NULLIF(TRIM("Customer_Name"), '') IS NOT NULL
+            ORDER BY "Customer_Name"
+            '''
+        )
+    except Exception:
+        return None
+
+    for row in rows:
+        customer_name = row["customer_name"]
+        normalized_customer = _normalized_text(customer_name)
+        if normalized_customer and _contains_phrase(text, normalized_customer):
+            return customer_name
+
+    search_text = _sotephwar_customer_search_text(question)
+    if len(search_text) >= 3:
+        matches = []
+        for row in rows:
+            customer_name = row["customer_name"]
+            normalized_customer = _normalized_text(customer_name)
+            if _contains_phrase(normalized_customer, search_text):
+                matches.append(customer_name)
+
+        if len(matches) == 1:
+            return matches[0]
+
+    return None
+
+
 def normalize_period(question):
-    text = question.lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    raw_text = question.lower()
+
+    iso_match = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", raw_text)
+    if iso_match:
+        return "date:{year}-{month:02d}-{day:02d}".format(
+            year=int(iso_match.group(1)),
+            month=int(iso_match.group(2)),
+            day=int(iso_match.group(3)),
+        )
+
+    slash_match = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", raw_text)
+    if slash_match:
+        return "date:{year}-{month:02d}-{day:02d}".format(
+            year=int(slash_match.group(3)),
+            month=int(slash_match.group(2)),
+            day=int(slash_match.group(1)),
+        )
+
+    month_date_match = re.search(
+        rf"\b({MONTH_PATTERN})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:\s+(\d{{4}}))?\b",
+        raw_text,
+    )
+    if month_date_match:
+        year = int(month_date_match.group(3) or date.today().year)
+        month = MONTH_ALIASES[month_date_match.group(1)]
+        day = int(month_date_match.group(2))
+        return f"date:{year}-{month:02d}-{day:02d}"
+
+    text = re.sub(r"[^a-z0-9\s]", " ", raw_text)
     words = text.split()
 
     for index, word in enumerate(words):
@@ -368,6 +581,27 @@ def normalize_period(question):
         return "this_year"
 
     return "all_time"
+
+
+def extract_top_limit(question, default=5, maximum=50):
+    text = question.lower()
+    patterns = (
+        r"\btop\s+(\d{1,2})\b",
+        r"\b(\d{1,2})\s+(?:top|biggest|largest|highest)\b",
+        r"\b(?:top|biggest|largest|highest)\s+expenses?\s+(\d{1,2})\b",
+    )
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+
+        limit = int(match.group(1))
+        if limit < 1:
+            return default
+        return min(limit, maximum)
+
+    return default
 
 
 def sales_total(period="all_time", filters=None):
@@ -606,19 +840,303 @@ def top_expenses(period="all_time", filters=None, limit=5):
         FROM {_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           AND "Income_Expense" = 'Expense'
+          AND "Amount" IS NOT NULL
           {filter_sql}
           {date_sql}
-        ORDER BY "Amount" DESC
+        ORDER BY "Amount" DESC NULLS LAST
         LIMIT %(limit)s
         ''',
         params,
     )
+
+    for row in rows:
+        row["amount"] = int(row["amount"] or 0)
 
     return _with_filters({
         "formula": "top_expenses",
         "period": period,
         "expenses": rows,
     }, filters)
+
+
+def top_income(period="all_time", filters=None, limit=5):
+    date_sql, params = _date_filter(period)
+    filter_sql, filter_params = _dimension_filter(filters)
+    params.update(filter_params)
+    params["limit"] = limit
+    rows = _fetch_all(
+        f'''
+        SELECT
+          "Date",
+          COALESCE("Sector", 'Unknown') AS sector,
+          COALESCE("Categorization", 'Unknown') AS category,
+          COALESCE("Item_Description", '') AS item,
+          "Amount" AS amount,
+          COALESCE("Payment_Method", 'Unknown') AS payment_method
+        FROM {_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          AND "Income_Expense" = 'Income'
+          AND "Amount" IS NOT NULL
+          {filter_sql}
+          {date_sql}
+        ORDER BY "Amount" DESC NULLS LAST
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+
+    for row in rows:
+        row["amount"] = int(row["amount"] or 0)
+
+    return _with_filters({
+        "formula": "top_income",
+        "period": period,
+        "income": rows,
+    }, filters)
+
+
+def list_transactions(period="all_time", filters=None, limit=20):
+    date_sql, params = _date_filter(period)
+    filter_sql, filter_params = _dimension_filter(filters)
+    params.update(filter_params)
+    params["limit"] = limit
+    rows = _fetch_all(
+        f'''
+        SELECT
+          "Date",
+          COALESCE("Income_Expense", '') AS income_expense,
+          COALESCE("Sector", 'Unknown') AS sector,
+          COALESCE("Categorization", 'Unknown') AS category,
+          COALESCE("Item_Description", '') AS item,
+          "Amount" AS amount,
+          COALESCE("Payment_Method", 'Unknown') AS payment_method
+        FROM {_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          {filter_sql}
+          {date_sql}
+        ORDER BY "Date" DESC NULLS LAST, id DESC
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+
+    for row in rows:
+        row["amount"] = int(row["amount"] or 0)
+
+    return _with_filters({
+        "formula": "list_transactions",
+        "period": period,
+        "transactions": rows,
+    }, filters)
+
+
+def sotephwar_transection_summary(period="all_time"):
+    date_sql, params = _date_filter_for_column(period, '"Invoice_Date"')
+    row = _fetch_one(
+        f'''
+        SELECT
+          COUNT(*) AS invoice_count,
+          COALESCE(SUM("Total_Amount"), 0) AS total_amount,
+          COALESCE(SUM("Amount_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0)), 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          {date_sql}
+        ''',
+        params,
+    )
+
+    return {
+        "formula": "sotephwar_transection_summary",
+        "period": period,
+        "invoice_count": int(row["invoice_count"] or 0),
+        "total_amount": int(row["total_amount"] or 0),
+        "amount_received": int(row["amount_received"] or 0),
+        "outstanding_amount": int(row["outstanding_amount"] or 0),
+    }
+
+
+def sotephwar_transection_top(period="all_time", limit=5):
+    date_sql, params = _date_filter_for_column(period, '"Invoice_Date"')
+    params["limit"] = limit
+    rows = _fetch_all(
+        f'''
+        SELECT
+          "Invoice_Date" AS invoice_date,
+          COALESCE("Invoice_Number", '') AS invoice_number,
+          COALESCE("Customer_Name", '') AS customer_name,
+          COALESCE("Item", '') AS item,
+          COALESCE("Note", '') AS note,
+          "Quantity" AS quantity,
+          "Total_Amount" AS total_amount,
+          "Amount_Received" AS amount_received,
+          COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          AND "Total_Amount" IS NOT NULL
+          {date_sql}
+        ORDER BY "Total_Amount" DESC NULLS LAST
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+
+    for row in rows:
+        row["quantity"] = int(row["quantity"] or 0)
+        row["total_amount"] = int(row["total_amount"] or 0)
+        row["amount_received"] = int(row["amount_received"] or 0)
+        row["outstanding_amount"] = int(row["outstanding_amount"] or 0)
+
+    return {
+        "formula": "sotephwar_transection_top",
+        "period": period,
+        "invoices": rows,
+    }
+
+
+def sotephwar_transection_list(period="all_time", limit=20, unpaid_only=False):
+    date_sql, params = _date_filter_for_column(period, '"Invoice_Date"')
+    params["limit"] = limit
+    unpaid_sql = ""
+    if unpaid_only:
+        unpaid_sql = 'AND COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) > 0'
+
+    rows = _fetch_all(
+        f'''
+        SELECT
+          "Invoice_Date" AS invoice_date,
+          COALESCE("Invoice_Number", '') AS invoice_number,
+          COALESCE("Customer_Name", '') AS customer_name,
+          COALESCE("Item", '') AS item,
+          COALESCE("Note", '') AS note,
+          "Quantity" AS quantity,
+          "Total_Amount" AS total_amount,
+          "Amount_Received" AS amount_received,
+          COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          {unpaid_sql}
+          {date_sql}
+        ORDER BY "Invoice_Date" DESC NULLS LAST, id DESC
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+
+    for row in rows:
+        row["quantity"] = int(row["quantity"] or 0)
+        row["total_amount"] = int(row["total_amount"] or 0)
+        row["amount_received"] = int(row["amount_received"] or 0)
+        row["outstanding_amount"] = int(row["outstanding_amount"] or 0)
+
+    return {
+        "formula": "sotephwar_transection_list",
+        "period": period,
+        "unpaid_only": unpaid_only,
+        "invoices": rows,
+    }
+
+
+def sotephwar_transection_quantity(period="all_time", item=None):
+    date_sql, params = _date_filter_for_column(period, '"Invoice_Date"')
+    item_sql = ""
+    if item:
+        item_sql = 'AND "Item" = %(item)s'
+        params["item"] = item
+
+    row = _fetch_one(
+        f'''
+        SELECT
+          COALESCE("Item", 'All items') AS item,
+          COUNT(*) AS invoice_count,
+          COALESCE(SUM("Quantity"), 0) AS quantity,
+          COALESCE(SUM("Total_Amount"), 0) AS total_amount,
+          COALESCE(SUM("Amount_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0)), 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          {item_sql}
+          {date_sql}
+        GROUP BY COALESCE("Item", 'All items')
+        ORDER BY quantity DESC
+        LIMIT 1
+        ''',
+        params,
+    )
+
+    return {
+        "formula": "sotephwar_transection_quantity",
+        "period": period,
+        "item": item or (row.get("item") if row else "All items"),
+        "invoice_count": int(row.get("invoice_count") or 0),
+        "quantity": int(row.get("quantity") or 0),
+        "total_amount": int(row.get("total_amount") or 0),
+        "amount_received": int(row.get("amount_received") or 0),
+        "outstanding_amount": int(row.get("outstanding_amount") or 0),
+    }
+
+
+def sotephwar_transection_customer(
+    period="all_time",
+    customer=None,
+    limit=20,
+    unpaid_only=False,
+    invoice_numbers=None,
+    include_note=False,
+):
+    date_sql, params = _date_filter_for_column(period, '"Invoice_Date"')
+    params["limit"] = limit
+    customer_sql = ""
+    if customer:
+        customer_sql = 'AND "Customer_Name" ILIKE %(customer_pattern)s'
+        params["customer_pattern"] = f"%{customer}%"
+    unpaid_sql = ""
+    if unpaid_only:
+        unpaid_sql = 'AND COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) > 0'
+    invoice_sql = ""
+    if invoice_numbers:
+        invoice_sql = 'AND "Invoice_Number"::text = ANY(%(invoice_numbers)s)'
+        params["invoice_numbers"] = invoice_numbers
+
+    rows = _fetch_all(
+        f'''
+        SELECT
+          "Invoice_Date" AS invoice_date,
+          COALESCE("Invoice_Number", '') AS invoice_number,
+          COALESCE("Customer_Name", '') AS customer_name,
+          COALESCE("Item", '') AS item,
+          COALESCE("Note", '') AS note,
+          "Quantity" AS quantity,
+          "Total_Amount" AS total_amount,
+          "Amount_Received" AS amount_received,
+          COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          {customer_sql}
+          {unpaid_sql}
+          {invoice_sql}
+          {date_sql}
+        ORDER BY "Customer_Name", "Invoice_Date", id
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+
+    for row in rows:
+        row["quantity"] = int(row["quantity"] or 0)
+        row["total_amount"] = int(row["total_amount"] or 0)
+        row["amount_received"] = int(row["amount_received"] or 0)
+        row["outstanding_amount"] = int(row["outstanding_amount"] or 0)
+
+    return {
+        "formula": "sotephwar_transection_customer",
+        "period": period,
+        "customer": customer,
+        "unpaid_only": unpaid_only,
+        "invoice_numbers": invoice_numbers or [],
+        "include_note": include_note,
+        "invoices": rows,
+    }
 
 
 FORMULAS = {
@@ -630,18 +1148,88 @@ FORMULAS = {
     "sector_summary": sector_summary,
     "category_summary": category_summary,
     "top_expenses": top_expenses,
+    "top_income": top_income,
+    "list_transactions": list_transactions,
+    "sotephwar_transection_summary": sotephwar_transection_summary,
+    "sotephwar_transection_top": sotephwar_transection_top,
+    "sotephwar_transection_list": sotephwar_transection_list,
+    "sotephwar_transection_quantity": sotephwar_transection_quantity,
+    "sotephwar_transection_customer": sotephwar_transection_customer,
 }
 
 
 def choose_formula_by_keywords(question):
     text = question.lower()
+    period = normalize_period(question)
+    sotephwar_customer = _sotephwar_customer_filter(question)
+
+    if is_sotephwar_transection_question(question):
+        if sotephwar_customer or "customer" in text or "voucher" in text:
+            return "sotephwar_transection_customer"
+        if (
+            "quantity" in text
+            or "bottle" in text
+            or "bottles" in text
+            or "sell" in text
+            or "sold" in text
+            or "sale quantity" in text
+            or _sotephwar_item_filter(question)
+        ):
+            return "sotephwar_transection_quantity"
+        if "top" in text or "biggest" in text or "largest" in text or "highest" in text:
+            return "sotephwar_transection_top"
+        if period.startswith("date:") or "list" in text or "show" in text or "invoice" in text:
+            return "sotephwar_transection_list"
+        return "sotephwar_transection_summary"
+
+    if _sotephwar_voucher_question(question):
+        return "sotephwar_transection_customer"
+
+    if (
+        sotephwar_customer
+        and (
+            "transaction" in text
+            or "transection" in text
+            or "voucher" in text
+            or "invoice" in text
+        )
+    ):
+        return "sotephwar_transection_customer"
 
     if "subgroup" in text or "sub group" in text or "transaction group" in text or "transection group" in text:
         return "category_summary"
+    if period.startswith("date:") and (
+        "transaction" in text
+        or "transection" in text
+        or "record" in text
+        or "list" in text
+        or "show" in text
+    ):
+        return "list_transactions"
     if "cash" in text or "cash flow" in text:
         return "cash_flow"
-    if "top expense" in text or "biggest expense" in text or "largest expense" in text:
+    if (
+        "top expense" in text
+        or "top expenses" in text
+        or re.search(r"\btop\s+\d{1,2}\s+expenses?\b", text)
+        or re.search(r"\btop\s+\d{1,2}\b.*\b(?:expense|expenses|cost|costs|spend|spending)\b", text)
+        or "biggest expense" in text
+        or "largest expense" in text
+        or "highest expense" in text
+    ):
         return "top_expenses"
+    if (
+        "top income" in text
+        or "top incomes" in text
+        or "top sale" in text
+        or "top sales" in text
+        or "biggest income" in text
+        or "largest income" in text
+        or "highest income" in text
+        or re.search(r"\btop\s+\d{1,2}\s+(?:income|incomes|sales?)\b", text)
+        or re.search(r"\btop\s+\d{1,2}\b.*\b(?:income|incomes|sales?|revenue)\b", text)
+    ):
+        return "top_income"
     if "expense" in text or "cost" in text or "spend" in text:
         return "expense_total"
     if (
@@ -668,4 +1256,29 @@ def run_formula(formula_name, question):
     period = normalize_period(question)
     filters = extract_dimension_filters(question)
     formula = FORMULAS.get(formula_name, kpi_overview)
+    if formula_name in ("top_expenses", "top_income"):
+        return formula(period, filters, limit=extract_top_limit(question))
+    if formula_name == "list_transactions":
+        return formula(period, filters, limit=extract_top_limit(question, default=20))
+    if formula_name in ("sotephwar_transection_top", "sotephwar_transection_list"):
+        if formula_name == "sotephwar_transection_list":
+            return formula(
+                period,
+                limit=extract_top_limit(question, default=20),
+                unpaid_only=_sotephwar_unpaid_filter(question),
+            )
+        return formula(period, limit=extract_top_limit(question))
+    if formula_name == "sotephwar_transection_summary":
+        return formula(period)
+    if formula_name == "sotephwar_transection_quantity":
+        return formula(period, item=_sotephwar_item_filter(question))
+    if formula_name == "sotephwar_transection_customer":
+        return formula(
+            period,
+            customer=_sotephwar_customer_filter(question),
+            limit=extract_top_limit(question, default=20),
+            unpaid_only=_sotephwar_unpaid_filter(question),
+            invoice_numbers=_sotephwar_invoice_numbers(question),
+            include_note=_sotephwar_note_requested(question),
+        )
     return formula(period, filters)

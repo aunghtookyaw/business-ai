@@ -5,6 +5,7 @@ from datetime import date
 from tools.formula_engine import (
     FORMULAS,
     choose_formula_by_keywords,
+    is_sotephwar_transection_question,
     normalize_period,
     run_formula,
 )
@@ -20,6 +21,13 @@ FAST_FORMULAS = {
     "sector_summary",
     "category_summary",
     "top_expenses",
+    "top_income",
+    "list_transactions",
+    "sotephwar_transection_summary",
+    "sotephwar_transection_top",
+    "sotephwar_transection_list",
+    "sotephwar_transection_quantity",
+    "sotephwar_transection_customer",
 }
 
 ANALYSIS_KEYWORDS = (
@@ -64,6 +72,13 @@ Available formulas:
 - sector_summary: sector performance, farm, SP Extension, SP Production
 - category_summary: category, categorization, machinery, equipment
 - top_expenses: biggest expenses, top costs
+- top_income: biggest income, top sales, largest revenue
+- list_transactions: transaction records for a specific date
+- sotephwar_transection_summary: totals from Sotephwar_Transection only
+- sotephwar_transection_top: top invoices from Sotephwar_Transection only
+- sotephwar_transection_list: invoice rows from Sotephwar_Transection only
+- sotephwar_transection_quantity: quantity sold by item from Sotephwar_Transection only
+- sotephwar_transection_customer: voucher rows for one customer from Sotephwar_Transection only
 
 Reply only valid JSON:
 {"formula": "formula_name"}
@@ -82,6 +97,9 @@ def _extract_json(text):
 
 
 def choose_formula(question):
+    if is_sotephwar_transection_question(question):
+        return choose_formula_by_keywords(question)
+
     if needs_comparison(question):
         return "comparison"
 
@@ -176,6 +194,14 @@ def _compact_result(value):
 
 
 def _period_label(period):
+    date_match = re.fullmatch(r"date:(\d{4})-(\d{2})-(\d{2})", period)
+    if date_match:
+        return date(
+            int(date_match.group(1)),
+            int(date_match.group(2)),
+            int(date_match.group(3)),
+        ).strftime("%B %d, %Y")
+
     month_match = re.fullmatch(r"month:(\d{4})-(\d{2})", period)
     if month_match:
         year = int(month_match.group(1))
@@ -299,23 +325,163 @@ def _fast_answer(result):
         lines = [f"Top expenses for {period}"]
         for row in result["expenses"]:
             lines.append(
-                f"{row['amount']:,} - {row['item']} ({row['sector']} / {row['category']}, {row['payment_method']})"
+                f"{row['amount']:,} - {row['Date']} - {row['item']} ({row['sector']} / {row['category']}, {row['payment_method']})"
             )
         return "\n".join(lines)
+
+    if formula == "top_income":
+        if not result["income"]:
+            return f"Top income for {period}: no matching income data found."
+        lines = [f"Top income for {period}"]
+        for row in result["income"]:
+            lines.append(
+                f"{row['amount']:,} - {row['Date']} - {row['item']} ({row['sector']} / {row['category']}, {row['payment_method']})"
+            )
+        return "\n".join(lines)
+
+    if formula == "list_transactions":
+        if not result["transactions"]:
+            return f"Transactions for {period}: no matching data found."
+        lines = [f"Transactions for {period}"]
+        for row in result["transactions"]:
+            lines.append(
+                f"{row['Date']} - {row['income_expense']} - {row['amount']:,} - {row['item']} ({row['category']}, {row['payment_method']})"
+            )
+        return "\n".join(lines)
+
+    if formula == "sotephwar_transection_summary":
+        return (
+            f"Sotephwar_Transection summary for {period}\n"
+            f"Invoices: {result['invoice_count']:,}\n"
+            f"Total amount: {result['total_amount']:,}\n"
+            f"Amount received: {result['amount_received']:,}\n"
+            f"Outstanding: {result['outstanding_amount']:,}"
+        )
+
+    if formula == "sotephwar_transection_top":
+        if not result["invoices"]:
+            return f"Top invoices from Sotephwar_Transection for {period}: no matching data found."
+        lines = [f"Top invoices from Sotephwar_Transection for {period}"]
+        for row in result["invoices"]:
+            lines.append(
+                f"{row['total_amount']:,} - {row['invoice_date']} - {row['customer_name']} - {row['item']} "
+                f"(received {row['amount_received']:,}, outstanding {row['outstanding_amount']:,})"
+            )
+        return "\n".join(lines)
+
+    if formula == "sotephwar_transection_list":
+        if not result["invoices"]:
+            label = "Unpaid invoices" if result.get("unpaid_only") else "Invoices"
+            return f"{label} from Sotephwar_Transection for {period}: no matching data found."
+        label = "Unpaid invoices" if result.get("unpaid_only") else "Invoices"
+        lines = [f"{label} from Sotephwar_Transection for {period}"]
+        for row in result["invoices"]:
+            line = (
+                f"{row['invoice_date']} - {row['customer_name']} - {row['item']} - total {row['total_amount']:,}, "
+                f"received {row['amount_received']:,}, outstanding {row['outstanding_amount']:,}"
+            )
+            if row.get("note") or result.get("include_note"):
+                line += f"\nNote: {row.get('note') or '-'}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    if formula == "sotephwar_transection_quantity":
+        return (
+            f"Sotephwar_Transection quantity for {period}\n"
+            f"Item: {result['item']}\n"
+            f"Quantity sold: {result['quantity']:,}\n"
+            f"Invoices: {result['invoice_count']:,}\n"
+            f"Total amount: {result['total_amount']:,}\n"
+            f"Amount received: {result['amount_received']:,}\n"
+            f"Outstanding: {result['outstanding_amount']:,}"
+        )
+
+    if formula == "sotephwar_transection_customer":
+        customer = result.get("customer") or "matching customer"
+        if not result["invoices"]:
+            label = "unpaid vouchers" if result.get("unpaid_only") else "vouchers"
+            return f"Sotephwar_Transection {label} for {customer}: no matching data found."
+        label = "unpaid vouchers" if result.get("unpaid_only") else "vouchers"
+        lines = [f"Sotephwar_Transection {label} for {customer}"]
+        for row in result["invoices"]:
+            line = (
+                f"{row['invoice_date']} - Voucher {row['invoice_number']} - {row['customer_name']}\n"
+                f"Item: {row['item']}\n"
+                f"Quantity: {row['quantity']:,}\n"
+                f"Total amount: {row['total_amount']:,}\n"
+                f"Amount received: {row['amount_received']:,}\n"
+                f"Amount remained: {row['outstanding_amount']:,}"
+            )
+            if row.get("note") or result.get("include_note"):
+                line += f"\nNote: {row.get('note') or '-'}"
+            lines.append(line)
+        return "\n\n".join(lines)
 
     return None
 
 
+def _sotephwar_sector_row(sector_summary):
+    for row in (sector_summary or {}).get("sectors") or []:
+        if row.get("sector") == "Sote Phwar":
+            return row
+    return {}
+
+
+def _combined_kpi(period, kpi, sector_summary, sotephwar_summary):
+    sotephwar_sector = _sotephwar_sector_row(sector_summary)
+    main_sotephwar_income = _number(sotephwar_sector.get("income", 0))
+    sotephwar_invoice_income = _number(sotephwar_summary.get("total_amount", 0))
+
+    total_income = (
+        _number(kpi.get("total_income", 0))
+        - main_sotephwar_income
+        + sotephwar_invoice_income
+    )
+    total_expense = _number(kpi.get("total_expense", 0))
+    net_profit = total_income - total_expense
+    margin = round((net_profit / total_income) * 100, 2) if total_income else 0
+
+    return {
+        "formula": "combined_kpi_overview",
+        "period": period,
+        "total_income": total_income,
+        "total_expense": total_expense,
+        "net_profit": net_profit,
+        "profit_margin_percent": margin,
+        "sources": {
+            "transection_income_excluding_sotephwar": _number(kpi.get("total_income", 0)) - main_sotephwar_income,
+            "sotephwar_transection_total_amount": sotephwar_invoice_income,
+            "transection_expense": total_expense,
+        },
+        "note": (
+            "Sote Phwar income comes from Sotephwar_Transection, so it does not need "
+            "to be duplicated in Transection."
+        ),
+    }
+
+
 def _analysis_context(question):
     period = normalize_period(question)
+    kpi = run_formula("kpi_overview", question)
+    sector_summary = run_formula("sector_summary", question)
+    sotephwar_summary = FORMULAS["sotephwar_transection_summary"](period)
     return {
         "period": period,
-        "kpi": run_formula("kpi_overview", question),
+        "kpi": kpi,
+        "combined_kpi": _combined_kpi(period, kpi, sector_summary, sotephwar_summary),
         "cash_flow": run_formula("cash_flow", question),
-        "sector_summary": run_formula("sector_summary", question),
+        "sector_summary": sector_summary,
         "category_summary": run_formula("category_summary", question),
         "top_expenses": run_formula("top_expenses", question),
+        "sotephwar_transection": sotephwar_summary,
     }
+
+
+def _combined_kpi_for_period(period):
+    kpi = FORMULAS["kpi_overview"](period)
+    sector_summary = FORMULAS["sector_summary"](period)
+    sotephwar_summary = FORMULAS["sotephwar_transection_summary"](period)
+    return _combined_kpi(period, kpi, sector_summary, sotephwar_summary)
 
 
 def _comparison_context(question):
@@ -326,8 +492,8 @@ def _comparison_context(question):
         current_period = "this_month"
         previous_period = "last_month"
 
-    current = FORMULAS["kpi_overview"](current_period)
-    previous = FORMULAS["kpi_overview"](previous_period)
+    current = _combined_kpi_for_period(current_period)
+    previous = _combined_kpi_for_period(previous_period)
 
     income_change = current["total_income"] - previous["total_income"]
     expense_change = current["total_expense"] - previous["total_expense"]
@@ -361,6 +527,78 @@ def _percent_change(change, previous_value):
     return round((change / previous_value) * 100, 2)
 
 
+def _number(value):
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        return int(value.replace(",", ""))
+    return int(value or 0)
+
+
+def _fallback_analysis_answer(context):
+    kpi = context.get("combined_kpi") or context.get("kpi") or {}
+    cash_flow = context.get("cash_flow") or {}
+    categories = (context.get("category_summary") or {}).get("categories") or []
+    top_expenses = (context.get("top_expenses") or {}).get("expenses") or []
+
+    income = _number(kpi.get("total_income", 0))
+    expense = _number(kpi.get("total_expense", 0))
+    profit = _number(kpi.get("net_profit", 0))
+    margin = kpi.get("profit_margin_percent", 0)
+
+    comment = (
+        f"Comment: The business is currently running at a loss. "
+        f"Income is {income:,}, but expense is {expense:,}, so net profit is {profit:,} "
+        f"with {margin}% margin."
+        if profit < 0
+        else (
+            f"Comment: The business is profitable. Income is {income:,}, expense is {expense:,}, "
+            f"and net profit is {profit:,} with {margin}% margin."
+        )
+    )
+
+    expense_categories = [
+        row
+        for row in categories
+        if _number(row.get("expense", 0)) > 0
+    ][:3]
+
+    lines = [comment, "", "Risks / causes:"]
+
+    if profit < 0:
+        lines.append("- Expenses are higher than income, so cash pressure is high.")
+
+    for row in expense_categories:
+        lines.append(
+            f"- {row['category']} is a major cost: {_number(row['expense']):,}."
+        )
+
+    if top_expenses:
+        row = top_expenses[0]
+        lines.append(
+            f"- Biggest single expense is {row['item']}: {_number(row['amount']):,}."
+        )
+
+    cash_methods = cash_flow.get("by_payment_method") or []
+    for method in cash_methods:
+        net_cash = _number(method.get("net_cash_flow", 0))
+        if net_cash < 0:
+            lines.append(
+                f"- {method['payment_method']} cash flow is negative: {net_cash:,}."
+            )
+            break
+
+    lines.extend(["", "Recommended actions:"])
+    lines.append("- Review the top 3 expense categories first and set a spending limit for each.")
+    lines.append("- Check the biggest single expense and confirm it is correct and necessary.")
+    lines.append("- Push income collection before adding more farm spending.")
+    lines.append("- Separate cash and Pay balances because one payment method may look healthy while cash is negative.")
+
+    return "\n".join(lines)
+
+
 def _answer_with_ai(question, context):
     display_context = _compact_result(context)
     analysis_prompt = f"""
@@ -373,9 +611,18 @@ Real calculated data from PostgreSQL/NocoDB:
 {json.dumps(display_context, indent=2, default=str)}
 
 Answer style:
-- Give direct suggestions and recommendations first when the user asks for advice.
-- Use the real numbers as evidence.
-- Do not only repeat KPI numbers.
+- If the user asks to analyze, comment, suggest, recommend, explain, or give advice, write business commentary, not only KPI numbers.
+- Start with a short business comment about what the data means.
+- Then give 2-4 risks or likely causes visible from the data.
+- Then give 2-4 practical recommended actions.
+- Use combined_kpi as the main KPI because it combines Transection with Sotephwar_Transection.
+- Use cash flow, sector, category, top expense, and Sotephwar_Transection data as supporting evidence.
+- Treat Sotephwar_Transection as the source of truth for Sote Phwar income; do not require duplicated Sote Phwar income rows in Transection.
+- Mention exact numbers only where they support the comment.
+- Do not return a KPI-only answer unless the user specifically asks only for KPI.
+- Do not use "$" or any currency symbol; show amounts as plain numbers.
+- Do not say changing payment method reduces expense. Payment method only affects cash-flow tracking.
+- Do not recommend automation, staff cuts, supplier discounts, or percentage savings unless the data directly supports it.
 - Do not invent data outside the provided context.
 - Keep the answer short enough for Telegram.
 """
@@ -386,6 +633,9 @@ Answer style:
             return ai_answer
     except Exception:
         pass
+
+    if "kpi" in context:
+        return _fallback_analysis_answer(context)
 
     return json.dumps(display_context, indent=2, default=str)
 

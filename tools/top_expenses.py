@@ -1,5 +1,12 @@
 from tools.nocodb_client import get_transactions
 
+
+def _amount(value):
+    if value in (None, ""):
+        return 0
+    return float(value)
+
+
 def top_expenses(limit_text):
 
     records = get_transactions()
@@ -11,8 +18,12 @@ def top_expenses(limit_text):
         if r.get("Income/Expense") == "Expense":
 
             expenses.append({
+                "date": r.get("Date"),
                 "item": r.get("Item/Description"),
-                "amount": r.get("Amount", 0)
+                "category": r.get("Categorization"),
+                "sector": r.get("Sector"),
+                "payment_method": r.get("Payment Method"),
+                "amount": _amount(r.get("Amount")),
             })
 
     expenses.sort(
@@ -27,8 +38,8 @@ def top_expenses(limit_text):
     for e in expenses[:limit]:
 
         result += (
-            f"{e['item']} "
-            f"- {e['amount']}\n"
+            f"{e['amount']:,.0f} - {e['item']} "
+            f"({e['sector']} / {e['category']}, {e['payment_method']})\n"
         )
 
     return result
