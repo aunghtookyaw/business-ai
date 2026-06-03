@@ -344,9 +344,17 @@ def _fast_answer(result):
             return f"Transactions for {period}: no matching data found."
         lines = [f"Transactions for {period}"]
         for row in result["transactions"]:
-            lines.append(
-                f"{row['Date']} - {row['income_expense']} - {row['amount']:,} - {row['item']} ({row['category']}, {row['payment_method']})"
+            line = (
+                f"{row['Date']} - Transaction {row.get('id', '-')}\n"
+                f"Type: {row['income_expense']}\n"
+                f"Category: {row['category']}\n"
+                f"Item: {row['item'] or '-'}\n"
+                f"Amount: {row['amount']:,}\n"
+                f"Payment: {row['payment_method']}"
             )
+            if row.get("note"):
+                line += f"\nNote: {row['note']}"
+            lines.append(line)
         return "\n".join(lines)
 
     if formula == "sotephwar_transection_summary":

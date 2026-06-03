@@ -53,6 +53,12 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             business_agent.choose_formula("machinery equipment and maintenance cost"),
         )
 
+    def test_category_cost_detail_routes_to_transaction_list(self):
+        self.assertEqual(
+            "list_transactions",
+            business_agent.choose_formula("Factory setup cost May 2026 detail"),
+        )
+
     def test_top_machinery_cost_routes_to_top_expenses(self):
         self.assertEqual(
             "top_expenses",
@@ -338,6 +344,89 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             formula_engine.extract_dimension_filters("machinery equipment and maintenance cost"),
         )
 
+    def test_factory_setup_cost_detail_filters_category_and_expense(self):
+        formula_engine.clear_dimension_value_cache()
+        original_fetch_one = formula_engine._fetch_one
+        formula_engine._fetch_one = lambda sql, params=None: {
+            "income_expenses": [],
+            "sectors": [],
+            "categories": ["Factory 2 Set up cost"],
+            "item_descriptions": [],
+            "payment_methods": [],
+        }
+
+        try:
+            self.assertEqual(
+                {"category": "Factory 2 Set up cost"},
+                formula_engine.extract_dimension_filters("Factory setup cost May 2026 detail"),
+            )
+        finally:
+            formula_engine._fetch_one = original_fetch_one
+            formula_engine.clear_dimension_value_cache()
+
+    def test_factory_setup_cost_detail_query_lists_transaction_rows(self):
+        captured = {}
+        original_fetch_all = formula_engine._fetch_all
+        original_known_dimension_values = formula_engine._known_dimension_values
+        original_transaction_column_exists = formula_engine._transaction_column_exists
+
+        def fake_fetch_all(sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = params
+            return []
+
+        formula_engine._fetch_all = fake_fetch_all
+        formula_engine._known_dimension_values = lambda: {
+            "income_expenses": [],
+            "sectors": [],
+            "categories": ["Factory setup cost"],
+            "item_descriptions": [],
+            "payment_methods": [],
+        }
+        formula_engine._transaction_column_exists = lambda column_name: column_name == "Note"
+        try:
+            result = formula_engine.run_formula(
+                "list_transactions",
+                "Factory setup cost May 2026 detail",
+            )
+        finally:
+            formula_engine._fetch_all = original_fetch_all
+            formula_engine._known_dimension_values = original_known_dimension_values
+            formula_engine._transaction_column_exists = original_transaction_column_exists
+
+        self.assertEqual("list_transactions", result["formula"])
+        self.assertEqual("month:2026-05", result["period"])
+        self.assertIn('COALESCE("Note", \'\') AS note', captured["sql"])
+        self.assertIn('AND "Income_Expense" = %(income_expense)s', captured["sql"])
+        self.assertIn('AND "Categorization" = %(category)s', captured["sql"])
+
+    def test_transaction_detail_answer_shows_each_line_with_note(self):
+        answer = business_agent._fast_answer({
+            "formula": "list_transactions",
+            "period": "month:2026-05",
+            "filters": {
+                "category": "Factory setup cost",
+                "income_expense": "Expense",
+            },
+            "transactions": [
+                {
+                    "id": 12,
+                    "Date": "2026-05-04",
+                    "income_expense": "Expense",
+                    "category": "Factory setup cost",
+                    "item": "Wiring",
+                    "amount": 500000,
+                    "payment_method": "Cash",
+                    "note": "Factory meter setup",
+                },
+            ],
+        })
+
+        self.assertIn("Transactions for May 2026 (Factory setup cost / Expense)", answer)
+        self.assertIn("Transaction 12", answer)
+        self.assertIn("Amount: 500,000", answer)
+        self.assertIn("Note: Factory meter setup", answer)
+
     def test_exact_iso_date_is_detected(self):
         self.assertEqual(
             "date:2026-05-13",
@@ -413,7 +502,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         try:
             self.assertEqual(
-                {"category": "Seed & Fertilizer"},
+                {"category": "Seed & Fertilizer", "income_expense": "Expense"},
                 formula_engine.extract_dimension_filters("seed fertilizer expense this month"),
             )
         finally:
@@ -433,7 +522,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         try:
             self.assertEqual(
-                {"item_description": "Diesel Fuel"},
+                {"item_description": "Diesel Fuel", "income_expense": "Expense"},
                 formula_engine.extract_dimension_filters("diesel fuel expense this month"),
             )
         finally:
@@ -453,7 +542,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         try:
             self.assertEqual(
-                {"payment_method": "M-Pay"},
+                {"payment_method": "M-Pay", "income_expense": "Expense"},
                 formula_engine.extract_dimension_filters("m pay expense this month"),
             )
         finally:

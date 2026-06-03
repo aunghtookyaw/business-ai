@@ -77,6 +77,7 @@ _DIMENSION_VALUES_CACHE = {
     "expires_at": 0,
     "values": None,
 }
+_TABLE_COLUMNS_CACHE = {}
 
 
 def _table_ref():
@@ -93,6 +94,10 @@ def _sotephwar_transection_table_ref():
         "Sotephwar_Transection",
     ).replace('"', '""')
     return f'"{schema}"."{table}"'
+
+
+def _transaction_table_parts():
+    return config.TRANSACTION_SCHEMA, config.TRANSACTION_TABLE
 
 
 def _connect():
@@ -115,6 +120,30 @@ def _fetch_all(sql, params=None):
 def _fetch_one(sql, params=None):
     rows = _fetch_all(sql, params)
     return rows[0] if rows else {}
+
+
+def _table_columns(schema, table):
+    key = (schema, table)
+    if key not in _TABLE_COLUMNS_CACHE:
+        rows = _fetch_all(
+            '''
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %(schema)s
+              AND table_name = %(table)s
+            ''',
+            {"schema": schema, "table": table},
+        )
+        _TABLE_COLUMNS_CACHE[key] = {row["column_name"] for row in rows}
+    return _TABLE_COLUMNS_CACHE[key]
+
+
+def _transaction_column_exists(column_name):
+    schema, table = _transaction_table_parts()
+    try:
+        return column_name in _table_columns(schema, table)
+    except Exception:
+        return False
 
 
 def _period_dates(period):
@@ -214,6 +243,13 @@ def _contains_phrase(text, phrase):
     return re.search(rf"(^|\s){re.escape(phrase)}($|\s)", text) is not None
 
 
+def _loose_dimension_text(text):
+    loose = _normalized_text(text)
+    loose = re.sub(r"\bset\s+up\b", "setup", loose)
+    loose = " ".join(word for word in loose.split() if not word.isdigit())
+    return loose
+
+
 def clear_dimension_value_cache():
     _DIMENSION_VALUES_CACHE["expires_at"] = 0
     _DIMENSION_VALUES_CACHE["values"] = None
@@ -278,6 +314,12 @@ def _find_known_value(text, values):
             continue
         if normalized_value and _contains_phrase(text, normalized_value):
             return value
+        loose_text = _loose_dimension_text(text)
+        loose_value = _loose_dimension_text(value)
+        if loose_value in MONTH_ALIASES or len(loose_value.split()) < 2:
+            continue
+        if loose_value and _contains_phrase(loose_text, loose_value):
+            return value
 
     return None
 
@@ -322,6 +364,9 @@ def extract_dimension_filters(question):
         income_expense = _find_known_value(text, known_values["income_expenses"])
         if income_expense:
             filters["income_expense"] = income_expense
+
+    if "income_expense" not in filters and _contains_phrase(text, "expense"):
+        filters["income_expense"] = "Expense"
 
     return filters
 
@@ -413,6 +458,23 @@ def _sotephwar_invoice_numbers(question):
     for match in re.finditer(r"\b(?:voucher|invoice)\s+((?:\d+\s*)+(?:and\s+\d+\s*)*)", text):
         matches.extend(re.findall(r"\d+", match.group(1)))
     return list(dict.fromkeys(matches))
+
+
+def _detail_requested(question):
+    text = _normalized_text(question)
+    return (
+        "detail" in text
+        or "details" in text
+        or "line" in text
+        or "lines" in text
+        or "each transaction" in text
+        or "each transection" in text
+        or "transaction line" in text
+        or "transection line" in text
+        or "record" in text
+        or "records" in text
+        or "list" in text
+    )
 
 
 SOTEPHWAR_CUSTOMER_STOPWORDS = {
@@ -900,9 +962,11 @@ def list_transactions(period="all_time", filters=None, limit=20):
     filter_sql, filter_params = _dimension_filter(filters)
     params.update(filter_params)
     params["limit"] = limit
+    note_select = ',\n          COALESCE("Note", \'\') AS note' if _transaction_column_exists("Note") else ""
     rows = _fetch_all(
         f'''
         SELECT
+          id,
           "Date",
           COALESCE("Income_Expense", '') AS income_expense,
           COALESCE("Sector", 'Unknown') AS sector,
@@ -910,6 +974,7 @@ def list_transactions(period="all_time", filters=None, limit=20):
           COALESCE("Item_Description", '') AS item,
           "Amount" AS amount,
           COALESCE("Payment_Method", 'Unknown') AS payment_method
+          {note_select}
         FROM {_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           {filter_sql}
@@ -1196,6 +1261,13 @@ def choose_formula_by_keywords(question):
     ):
         return "sotephwar_transection_customer"
 
+    if (
+        ("transaction" in text or "transection" in text)
+        and (" of " in f" {text} " or " for " in f" {text} ")
+        and not normalize_period(question).startswith("date:")
+    ):
+        return "sotephwar_transection_customer"
+
     if "subgroup" in text or "sub group" in text or "transaction group" in text or "transection group" in text:
         return "category_summary"
     if period.startswith("date:") and (
@@ -1205,6 +1277,8 @@ def choose_formula_by_keywords(question):
         or "list" in text
         or "show" in text
     ):
+        return "list_transactions"
+    if _detail_requested(question):
         return "list_transactions"
     if "cash" in text or "cash flow" in text:
         return "cash_flow"
@@ -1259,7 +1333,14 @@ def run_formula(formula_name, question):
     if formula_name in ("top_expenses", "top_income"):
         return formula(period, filters, limit=extract_top_limit(question))
     if formula_name == "list_transactions":
-        return formula(period, filters, limit=extract_top_limit(question, default=20))
+        text = _normalized_text(question)
+        if "income_expense" not in filters:
+            if any(_contains_phrase(text, word) for word in ("expense", "cost", "spend", "spending")):
+                filters["income_expense"] = "Expense"
+            elif any(_contains_phrase(text, word) for word in ("income", "sale", "sales", "revenue")):
+                filters["income_expense"] = "Income"
+        default_limit = 50 if _detail_requested(question) else 20
+        return formula(period, filters, limit=extract_top_limit(question, default=default_limit))
     if formula_name in ("sotephwar_transection_top", "sotephwar_transection_list"):
         if formula_name == "sotephwar_transection_list":
             return formula(
