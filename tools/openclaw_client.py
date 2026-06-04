@@ -3,9 +3,10 @@ from config import OLLAMA_URL, AI_MODEL
 
 
 def ask_ai(prompt, model=None, timeout=60):
+    selected_model = model or AI_MODEL
 
     payload = {
-        "model": model or AI_MODEL,
+        "model": selected_model,
         "prompt": prompt,
         "stream": False
     }
@@ -15,7 +16,10 @@ def ask_ai(prompt, model=None, timeout=60):
         json=payload,
         timeout=timeout,
     )
+    response.raise_for_status()
 
     data = response.json()
+    if "response" not in data:
+        raise RuntimeError(f"Ollama returned no response for model {selected_model}.")
 
     return data["response"]

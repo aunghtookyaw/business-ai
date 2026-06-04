@@ -28,6 +28,13 @@ FAST_FORMULAS = {
     "sotephwar_transection_list",
     "sotephwar_transection_quantity",
     "sotephwar_transection_customer",
+    "sotephwar_inventory_stock",
+    "sotephwar_inventory_movement_summary",
+    "sotephwar_inventory_list",
+    "financial_obligation_summary",
+    "financial_obligation_due",
+    "financial_obligation_list",
+    "financial_obligation_insert",
 }
 
 ANALYSIS_KEYWORDS = (
@@ -79,6 +86,19 @@ Available formulas:
 - sotephwar_transection_list: invoice rows from Sotephwar_Transection only
 - sotephwar_transection_quantity: quantity sold by item from Sotephwar_Transection only
 - sotephwar_transection_customer: voucher rows for one customer from Sotephwar_Transection only
+- sotephwar_inventory_stock: current Sotephwar inventory stock by store and product
+- sotephwar_inventory_movement_summary: Sotephwar inventory production, transfer, and sale movement totals
+- sotephwar_inventory_list: Sotephwar inventory movement rows
+- financial_obligation_summary: Financial_Obligations totals by category/status
+- financial_obligation_due: Financial_Obligations upcoming or overdue rows
+- financial_obligation_list: Financial_Obligations detail rows
+- financial_obligation_insert: insert one Financial_Obligations row from an explicit add/create prompt
+
+Financial_Obligations is for reminders only. Do not route KPI, profit,
+income, expense, cash-flow, statistics, sector, category, top income, or top
+expense questions to Financial_Obligations unless the user clearly asks about
+obligations, due dates, reminders, creditors, loans, settlements, or fixed
+payments.
 
 Reply only valid JSON:
 {"formula": "formula_name"}
@@ -425,6 +445,134 @@ def _fast_answer(result):
             lines.append(line)
         return "\n\n".join(lines)
 
+    if formula == "sotephwar_inventory_stock":
+        if not result["stock"]:
+            return "Sotephwar_Inventory current stock: no matching stock found."
+        lines = ["Sotephwar_Inventory current stock"]
+        if result.get("store"):
+            lines.append(f"Store: {result['store']}")
+        if result.get("product"):
+            lines.append(f"Product: {result['product']}")
+        for row in result["stock"]:
+            lines.append(f"- {row['store']} / {row['product']}: {row['stock_qty']:,}")
+        return "\n".join(lines)
+
+    if formula == "sotephwar_inventory_movement_summary":
+        if not result["movements"]:
+            return f"Sotephwar_Inventory movement summary for {period}: no matching data found."
+        lines = [f"Sotephwar_Inventory movement summary for {period}"]
+        if result.get("store"):
+            lines.append(f"Store: {result['store']}")
+        if result.get("product"):
+            lines.append(f"Product: {result['product']}")
+        if result.get("movement_type"):
+            lines.append(f"Type: {result['movement_type']}")
+        for row in result["movements"]:
+            lines.append(
+                f"- {row['type']} / {row['product']}: {row['quantity']:,} "
+                f"({row['movement_count']:,} rows)"
+            )
+        return "\n".join(lines)
+
+    if formula == "sotephwar_inventory_list":
+        if not result["movements"]:
+            return f"Sotephwar_Inventory movements for {period}: no matching data found."
+        lines = [f"Sotephwar_Inventory movements for {period}"]
+        if result.get("store"):
+            lines.append(f"Store: {result['store']}")
+        if result.get("product"):
+            lines.append(f"Product: {result['product']}")
+        if result.get("movement_type"):
+            lines.append(f"Type: {result['movement_type']}")
+        for row in result["movements"]:
+            line = (
+                f"{row['date']} - {row['type']} - {row['product']}\n"
+                f"From: {row['from_store']} -> To: {row['to_store']}\n"
+                f"Qty: {row['quantity']:,}"
+            )
+            if row.get("note"):
+                line += f"\nNote: {row['note']}"
+            lines.append(line)
+        return "\n\n".join(lines)
+
+    if formula == "financial_obligation_summary":
+        if not result["summary"]:
+            return "Financial_Obligations summary: no matching data found."
+        lines = ["Financial_Obligations summary"]
+        if result.get("category"):
+            lines.append(f"Category filter: {result['category']}")
+        if result.get("status"):
+            lines.append(f"Status filter: {result['status']}")
+        for row in result["summary"]:
+            lines.append(
+                f"- {row['category'] or '-'} / {row['status'] or '-'}: "
+                f"{row['amount']:,} ({row['obligation_count']:,} rows), next due {row['next_due_date'] or '-'}"
+            )
+        return "\n".join(lines)
+
+    if formula == "financial_obligation_due":
+        if not result["obligations"]:
+            return f"Financial_Obligations due in next {result['days']} days: no matching data found."
+        lines = [f"Financial_Obligations due in next {result['days']} days"]
+        for row in result["obligations"]:
+            days = row.get("days_until_due")
+            if days is None:
+                due_label = "-"
+            elif days < 0:
+                due_label = f"{abs(days)} days overdue"
+            elif days == 0:
+                due_label = "due today"
+            else:
+                due_label = f"due in {days} days"
+            line = (
+                f"{row['next_due_date']} ({due_label}) - {row['creditor']} - {row['amount']:,}\n"
+                f"{row['category']} / {row['subcategory'] or '-'} / {row['frequency'] or '-'} / {row['status']}"
+            )
+            if row.get("notes"):
+                line += f"\nNotes: {row['notes']}"
+            lines.append(line)
+        return "\n\n".join(lines)
+
+    if formula == "financial_obligation_list":
+        if not result["obligations"]:
+            return "Financial_Obligations list: no matching data found."
+        lines = ["Financial_Obligations list"]
+        if result.get("category"):
+            lines.append(f"Category filter: {result['category']}")
+        if result.get("creditor"):
+            lines.append(f"Creditor filter: {result['creditor']}")
+        for row in result["obligations"]:
+            line = (
+                f"{row['next_due_date'] or '-'} - {row['creditor']} - {row['amount']:,}\n"
+                f"{row['category']} / {row['subcategory'] or '-'} / {row['frequency'] or '-'} / {row['status']}"
+            )
+            if row.get("notes"):
+                line += f"\nNotes: {row['notes']}"
+            lines.append(line)
+        return "\n\n".join(lines)
+
+    if formula == "financial_obligation_insert":
+        if not result.get("inserted"):
+            missing = ", ".join(result.get("missing") or [])
+            return (
+                "Financial obligation was not inserted.\n"
+                f"Missing: {missing}\n"
+                "Use: add financial obligation creditor NAME amount 1000000 category Loan "
+                "subcategory Investor Loan frequency Monthly start 2026-06-03 next due 2026-07-03 "
+                "status Active notes optional text"
+            )
+        row = result["obligation"]
+        return (
+            "Financial obligation inserted\n"
+            f"ID: {row['id']}\n"
+            f"Creditor: {row['creditor']}\n"
+            f"Amount: {row['amount']:,}\n"
+            f"Category: {row['category']} / {row['subcategory'] or '-'}\n"
+            f"Frequency: {row['frequency'] or '-'}\n"
+            f"Next due: {row['next_due_date']}\n"
+            f"Status: {row['status']}"
+        )
+
     return None
 
 
@@ -626,6 +774,7 @@ Answer style:
 - Use combined_kpi as the main KPI because it combines Transection with Sotephwar_Transection.
 - Use cash flow, sector, category, top expense, and Sotephwar_Transection data as supporting evidence.
 - Treat Sotephwar_Transection as the source of truth for Sote Phwar income; do not require duplicated Sote Phwar income rows in Transection.
+- Treat Financial_Obligations as reminder data only; do not include it in KPI, profit, income, expense, or statistics calculations.
 - Mention exact numbers only where they support the comment.
 - Do not return a KPI-only answer unless the user specifically asks only for KPI.
 - Do not use "$" or any currency symbol; show amounts as plain numbers.

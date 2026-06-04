@@ -1,0 +1,36 @@
+# Excel Business Data Import
+
+This folder contains an append-only Excel import workflow for:
+
+- `Transection`
+- `Sotephwar_Transection`
+- `Financial_Obligations`
+- `Sotephwar_Inventory`
+
+The importer inserts new rows into Postgres/NocoDB tables. It does not delete, update, truncate, replace, or clear existing data.
+
+## Files
+
+- `business_data_import_template.xlsx`: workbook template with the input sheets.
+- `BusinessDataImport.bas`: Excel VBA macro module for the upload button.
+
+## Setup In Excel For Mac
+
+1. Open `business_data_import_template.xlsx`.
+2. Save it as `business_data_import_template.xlsm`.
+3. Open Excel's VBA editor.
+4. Import `BusinessDataImport.bas`.
+5. Optional: add a button on the `Instructions` sheet and assign it to `UploadBusinessData`.
+
+## Upload
+
+Start the local import server:
+
+```bash
+cd /Users/bigshot/ai-automation/business-ai
+python3 scripts/excel_import_server.py
+```
+
+Fill rows in Excel, then run the `UploadBusinessData` macro or click your assigned button.
+
+Rows with blank `Upload_Status` are uploaded. After a successful insert, the macro marks the row `INSERTED` and records the inserted table id, so clicking again skips those rows.

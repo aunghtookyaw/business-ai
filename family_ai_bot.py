@@ -1,5 +1,7 @@
 import os
 import json
+import time
+import traceback
 
 from telegram import Update
 from telegram.ext import CallbackContext, CommandHandler, Filters, MessageHandler, Updater
@@ -158,11 +160,16 @@ Live data:
 {json.dumps(live_context, indent=2, ensure_ascii=False, default=str)}
 """
         try:
+            start_time = time.time()
+            print(f"Calling local AI model={AI_MODEL} live_type={live_context.get('type')}", flush=True)
             answer = ask_ai(prompt, model=AI_MODEL, timeout=120).strip()
+            elapsed = time.time() - start_time
+            print(f"Local AI answered in {elapsed:.1f}s", flush=True)
             if answer:
                 return answer
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Local AI failed: {exc.__class__.__name__}: {exc}", flush=True)
+            traceback.print_exc()
 
         return fallback_answer
 
@@ -181,7 +188,12 @@ Question:
 {question}
 {web_context}
 """
-    return ask_ai(prompt, model=AI_MODEL, timeout=120).strip()
+    start_time = time.time()
+    print(f"Calling local AI model={AI_MODEL} live_type=none", flush=True)
+    answer = ask_ai(prompt, model=AI_MODEL, timeout=120).strip()
+    elapsed = time.time() - start_time
+    print(f"Local AI answered in {elapsed:.1f}s", flush=True)
+    return answer
 
 
 def whereami(update: Update, context: CallbackContext):

@@ -96,6 +96,26 @@ def _sotephwar_transection_table_ref():
     return f'"{schema}"."{table}"'
 
 
+def _sotephwar_inventory_table_ref():
+    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    table = getattr(
+        config,
+        "SOTEPHWAR_INVENTORY_TABLE",
+        "Sotephwar_Inventory",
+    ).replace('"', '""')
+    return f'"{schema}"."{table}"'
+
+
+def _financial_obligations_table_ref():
+    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    table = getattr(
+        config,
+        "FINANCIAL_OBLIGATIONS_TABLE",
+        "Financial_Obligations",
+    ).replace('"', '""')
+    return f'"{schema}"."{table}"'
+
+
 def _transaction_table_parts():
     return config.TRANSACTION_SCHEMA, config.TRANSACTION_TABLE
 
@@ -417,6 +437,35 @@ def is_sotephwar_transection_question(question):
     )
 
 
+def is_sotephwar_inventory_question(question):
+    if is_sotephwar_transection_question(question):
+        return False
+
+    text = _normalized_text(question)
+    return (
+        ("sotephwar" in text or "sote phwar" in text)
+        and (
+            any(
+                word in text
+                for word in (
+                    "inventory",
+                    "stock",
+                    "store",
+                    "movement",
+                    "movements",
+                    "production",
+                    "transfer",
+                    "transfers",
+                )
+            )
+            or (
+                _sotephwar_item_filter(question)
+                and ("quantity" in text or "qty" in text or "bottle" in text or "bottles" in text)
+            )
+        )
+    )
+
+
 def _mentions_sotephwar(question):
     text = _normalized_text(question)
     return "sotephwar" in text or "sote phwar" in text
@@ -533,7 +582,196 @@ def _sotephwar_item_filter(question):
         return "Sote Phwar 1L"
     if "500 ml" in text or "500ml" in text or "500 m l" in text:
         return "Sote Phwar 500 mL"
+    if "100 ml" in text or "100ml" in text or "100 m l" in text:
+        return "Sote Phwar 100 mL"
     return None
+
+
+def _sotephwar_inventory_store_filter(question):
+    text = _normalized_text(question)
+    known_aliases = {
+        "factory": "Factory",
+        "heho": "Heho Store (Home)",
+        "home": "Heho Store (Home)",
+        "myint thar": "Myint Thar Store",
+        "myit thar": "Myint Thar Store",
+        "myint thar store": "Myint Thar Store",
+        "myit thar store": "Myint Thar Store",
+    }
+    for alias, store in known_aliases.items():
+        if _contains_phrase(text, alias):
+            return store
+
+    try:
+        rows = _fetch_all(
+            f'''
+            SELECT DISTINCT store_name
+            FROM (
+              SELECT "From_Store" AS store_name FROM {_sotephwar_inventory_table_ref()}
+              UNION
+              SELECT "To_Store" AS store_name FROM {_sotephwar_inventory_table_ref()}
+            ) stores
+            WHERE store_name IS NOT NULL
+              AND store_name NOT IN ('-', 'Customer')
+            '''
+        )
+    except Exception:
+        return None
+
+    for row in rows:
+        store_name = row.get("store_name") or ""
+        normalized_store = _normalized_text(store_name)
+        if normalized_store and _contains_phrase(text, normalized_store):
+            return store_name
+
+    return None
+
+
+def _sotephwar_inventory_store_values(store):
+    if store == "Myint Thar Store":
+        return ["Myint Thar Store", "Myit Thar Store"]
+    return [store]
+
+
+def _sotephwar_inventory_store_expr(column_name):
+    return f"CASE WHEN {column_name} = 'Myit Thar Store' THEN 'Myint Thar Store' ELSE {column_name} END"
+
+
+def _sotephwar_inventory_type_filter(question):
+    text = _normalized_text(question)
+    if "production" in text or "produce" in text:
+        return "Production"
+    if "transfer" in text or "transfers" in text:
+        return "Transfer"
+    if "sale" in text or "sales" in text or "sell" in text or "sold" in text:
+        return "Sale"
+    return None
+
+
+def is_financial_obligation_question(question):
+    text = _normalized_text(question)
+    return any(
+        phrase in text
+        for phrase in (
+            "financial obligation",
+            "financial obligations",
+            "obligation",
+            "obligations",
+            "loan due",
+            "loan dues",
+            "debt due",
+            "payable",
+            "payables",
+        )
+    )
+
+
+def _financial_obligation_insert_requested(question):
+    text = _normalized_text(question)
+    return is_financial_obligation_question(question) and (
+        text.startswith("add ")
+        or text.startswith("insert ")
+        or text.startswith("create ")
+    )
+
+
+def _financial_obligation_status_filter(question):
+    text = _normalized_text(question)
+    if "inactive" in text or "closed" in text or "paid off" in text:
+        return "Inactive"
+    if "active" in text or "open" in text:
+        return "Active"
+    return None
+
+
+def _financial_obligation_category_filter(question):
+    text = _normalized_text(question)
+    match = re.search(r"\bcategory\s+([a-z0-9][a-z0-9\s-]{1,40})", text)
+    if match:
+        return match.group(1).strip()
+    for category in ("loan", "rent", "salary", "tax", "interest", "payable"):
+        if _contains_phrase(text, category):
+            return category
+    return None
+
+
+def _financial_obligation_creditor_filter(question):
+    text = _normalized_text(question)
+    match = re.search(r"\b(?:creditor|for|to)\s+([a-z0-9][a-z0-9\s.,-]{1,60})", text)
+    if not match:
+        return None
+    value = match.group(1)
+    value = re.split(
+        r"\b(?:amount|category|subcategory|frequency|start|due|next due|status|notes?)\b",
+        value,
+        maxsplit=1,
+    )[0]
+    return " ".join(value.split()).strip(" .,") or None
+
+
+def _financial_obligation_due_days(question):
+    text = _normalized_text(question)
+    if "overdue" in text:
+        return 0
+    match = re.search(r"\b(?:next|due in)\s+(\d{1,3})\s+days?\b", text)
+    if match:
+        return max(0, min(int(match.group(1)), 365))
+    if "this week" in text:
+        return 7
+    if "this month" in text or "due soon" in text or "upcoming" in text:
+        return 30
+    return 30
+
+
+def _extract_field_value(question, labels):
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    all_labels = (
+        "creditor", "amount", "category", "subcategory", "frequency",
+        "start", "start date", "due", "next due", "next due date",
+        "status", "note", "notes",
+    )
+    stop_pattern = "|".join(re.escape(label) for label in all_labels)
+    match = re.search(
+        rf"\b(?:{label_pattern})\s*[:=]?\s*(.+?)(?=\s+\b(?:{stop_pattern})\b\s*[:=]?|$)",
+        question,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return " ".join(match.group(1).strip(" .,").split()) or None
+
+
+def _parse_date_value(value):
+    if not value:
+        return None
+    match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", value)
+    if not match:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def _parse_financial_obligation_insert(question):
+    amount_text = _extract_field_value(question, ("amount",))
+    amount_match = re.search(r"[\d,]+", amount_text or "")
+    amount = int(amount_match.group(0).replace(",", "")) if amount_match else None
+    creditor = _extract_field_value(question, ("creditor",))
+    next_due_date = _parse_date_value(_extract_field_value(question, ("next due date", "next due", "due")))
+    start_date = _parse_date_value(_extract_field_value(question, ("start date", "start")))
+
+    return {
+        "category": _extract_field_value(question, ("category",)) or "Loan",
+        "subcategory": _extract_field_value(question, ("subcategory",)) or "",
+        "creditor": creditor,
+        "amount": amount,
+        "frequency": _extract_field_value(question, ("frequency",)) or "",
+        "start_date": start_date,
+        "next_due_date": next_due_date,
+        "status": _extract_field_value(question, ("status",)) or "Active",
+        "notes": _extract_field_value(question, ("notes", "note")) or "",
+    }
 
 
 def _sotephwar_customer_filter(question):
@@ -1204,6 +1442,356 @@ def sotephwar_transection_customer(
     }
 
 
+def sotephwar_inventory_stock(period="all_time", product=None, store=None):
+    product_sql = ""
+    store_sql = ""
+    params = {}
+    if product:
+        product_sql = "AND product = %(product)s"
+        params["product"] = product
+    if store:
+        store_sql = "AND store = %(store)s"
+        params["store"] = store
+    to_store = _sotephwar_inventory_store_expr('"To_Store"')
+    from_store = _sotephwar_inventory_store_expr('"From_Store"')
+
+    rows = _fetch_all(
+        f'''
+        WITH movements AS (
+          SELECT
+            {to_store} AS store,
+            "Product" AS product,
+            COALESCE("Qty", 0) AS qty
+          FROM {_sotephwar_inventory_table_ref()}
+          WHERE COALESCE("__nc_deleted", false) = false
+            AND "To_Store" IS NOT NULL
+            AND "To_Store" NOT IN ('-', 'Customer')
+          UNION ALL
+          SELECT
+            {from_store} AS store,
+            "Product" AS product,
+            -COALESCE("Qty", 0) AS qty
+          FROM {_sotephwar_inventory_table_ref()}
+          WHERE COALESCE("__nc_deleted", false) = false
+            AND "From_Store" IS NOT NULL
+            AND "From_Store" NOT IN ('-', 'Customer')
+        )
+        SELECT store, product, COALESCE(SUM(qty), 0) AS stock_qty
+        FROM movements
+        WHERE 1 = 1
+          {product_sql}
+          {store_sql}
+        GROUP BY store, product
+        HAVING COALESCE(SUM(qty), 0) <> 0
+        ORDER BY store, product
+        ''',
+        params,
+    )
+    for row in rows:
+        row["stock_qty"] = int(row["stock_qty"] or 0)
+    return {
+        "formula": "sotephwar_inventory_stock",
+        "period": "all_time",
+        "product": product,
+        "store": store,
+        "stock": rows,
+    }
+
+
+def sotephwar_inventory_movement_summary(period="all_time", product=None, store=None, movement_type=None):
+    date_sql, params = _date_filter(period)
+    product_sql = ""
+    store_sql = ""
+    type_sql = ""
+    if product:
+        product_sql = 'AND "Product" = %(product)s'
+        params["product"] = product
+    if store:
+        store_sql = 'AND ("From_Store" = ANY(%(store_values)s) OR "To_Store" = ANY(%(store_values)s))'
+        params["store_values"] = _sotephwar_inventory_store_values(store)
+    if movement_type:
+        type_sql = 'AND "Type" = %(movement_type)s'
+        params["movement_type"] = movement_type
+
+    rows = _fetch_all(
+        f'''
+        SELECT
+          COALESCE("Type", '') AS type,
+          COALESCE("Product", '') AS product,
+          COALESCE(SUM("Qty"), 0) AS quantity,
+          COUNT(*) AS movement_count
+        FROM {_sotephwar_inventory_table_ref()}
+        WHERE COALESCE("__nc_deleted", false) = false
+          {date_sql}
+          {product_sql}
+          {store_sql}
+          {type_sql}
+        GROUP BY "Type", "Product"
+        ORDER BY "Type", "Product"
+        ''',
+        params,
+    )
+    for row in rows:
+        row["quantity"] = int(row["quantity"] or 0)
+        row["movement_count"] = int(row["movement_count"] or 0)
+    return {
+        "formula": "sotephwar_inventory_movement_summary",
+        "period": period,
+        "product": product,
+        "store": store,
+        "movement_type": movement_type,
+        "movements": rows,
+    }
+
+
+def sotephwar_inventory_list(period="all_time", product=None, store=None, movement_type=None, limit=20):
+    date_sql, params = _date_filter(period)
+    product_sql = ""
+    store_sql = ""
+    type_sql = ""
+    if product:
+        product_sql = 'AND "Product" = %(product)s'
+        params["product"] = product
+    if store:
+        store_sql = 'AND ("From_Store" = ANY(%(store_values)s) OR "To_Store" = ANY(%(store_values)s))'
+        params["store_values"] = _sotephwar_inventory_store_values(store)
+    if movement_type:
+        type_sql = 'AND "Type" = %(movement_type)s'
+        params["movement_type"] = movement_type
+    params["limit"] = limit
+
+    rows = _fetch_all(
+        f'''
+        SELECT
+          id,
+          "Date" AS date,
+          COALESCE("Type", '') AS type,
+          COALESCE("From_Store", '') AS from_store,
+          COALESCE("To_Store", '') AS to_store,
+          COALESCE("Product", '') AS product,
+          COALESCE("Qty", 0) AS quantity,
+          COALESCE("Note", '') AS note
+        FROM {_sotephwar_inventory_table_ref()}
+        WHERE COALESCE("__nc_deleted", false) = false
+          {date_sql}
+          {product_sql}
+          {store_sql}
+          {type_sql}
+        ORDER BY "Date" DESC NULLS LAST, id DESC
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+    for row in rows:
+        row["quantity"] = int(row["quantity"] or 0)
+    return {
+        "formula": "sotephwar_inventory_list",
+        "period": period,
+        "product": product,
+        "store": store,
+        "movement_type": movement_type,
+        "movements": rows,
+    }
+
+
+def financial_obligation_summary(status=None, category=None):
+    status_sql = ""
+    category_sql = ""
+    params = {}
+    if status:
+        status_sql = 'AND "Status" ILIKE %(status)s'
+        params["status"] = status
+    if category:
+        category_sql = 'AND "Category" ILIKE %(category)s'
+        params["category"] = f"%{category}%"
+
+    rows = _fetch_all(
+        f'''
+        SELECT
+          COALESCE("Category", '') AS category,
+          COALESCE("Status", '') AS status,
+          COALESCE(SUM("Amount"), 0) AS amount,
+          COUNT(*) AS obligation_count,
+          MIN("Next_Due_Date") AS next_due_date
+        FROM {_financial_obligations_table_ref()}
+        WHERE COALESCE("__nc_deleted", false) = false
+          {status_sql}
+          {category_sql}
+        GROUP BY "Category", "Status"
+        ORDER BY "Category", "Status"
+        ''',
+        params,
+    )
+    for row in rows:
+        row["amount"] = int(row["amount"] or 0)
+        row["obligation_count"] = int(row["obligation_count"] or 0)
+    return {
+        "formula": "financial_obligation_summary",
+        "period": "all_time",
+        "status": status,
+        "category": category,
+        "summary": rows,
+    }
+
+
+def financial_obligation_due(days=30, status="Active", category=None, limit=20):
+    today = date.today()
+    end_date = today + timedelta(days=days)
+    params = {
+        "today": today,
+        "end_date": end_date,
+        "limit": limit,
+    }
+    status_sql = ""
+    category_sql = ""
+    if status:
+        status_sql = 'AND "Status" ILIKE %(status)s'
+        params["status"] = status
+    if category:
+        category_sql = 'AND "Category" ILIKE %(category)s'
+        params["category"] = f"%{category}%"
+
+    rows = _fetch_all(
+        f'''
+        SELECT
+          id,
+          COALESCE("Category", '') AS category,
+          COALESCE("Subcategory", '') AS subcategory,
+          COALESCE("Creditor", '') AS creditor,
+          COALESCE("Amount", 0) AS amount,
+          COALESCE("Frequency", '') AS frequency,
+          "Start_Date" AS start_date,
+          "Next_Due_Date" AS next_due_date,
+          COALESCE("Status", '') AS status,
+          COALESCE("Notes", '') AS notes
+        FROM {_financial_obligations_table_ref()}
+        WHERE COALESCE("__nc_deleted", false) = false
+          AND "Next_Due_Date" IS NOT NULL
+          AND "Next_Due_Date" <= %(end_date)s
+          {status_sql}
+          {category_sql}
+        ORDER BY "Next_Due_Date", id
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+    for row in rows:
+        row["amount"] = int(row["amount"] or 0)
+        due_date = row.get("next_due_date")
+        row["days_until_due"] = (due_date - today).days if due_date else None
+    return {
+        "formula": "financial_obligation_due",
+        "period": "all_time",
+        "days": days,
+        "status": status,
+        "category": category,
+        "obligations": rows,
+    }
+
+
+def financial_obligation_list(status=None, category=None, creditor=None, limit=20):
+    params = {"limit": limit}
+    status_sql = ""
+    category_sql = ""
+    creditor_sql = ""
+    if status:
+        status_sql = 'AND "Status" ILIKE %(status)s'
+        params["status"] = status
+    if category:
+        category_sql = 'AND "Category" ILIKE %(category)s'
+        params["category"] = f"%{category}%"
+    if creditor:
+        creditor_sql = 'AND "Creditor" ILIKE %(creditor)s'
+        params["creditor"] = f"%{creditor}%"
+
+    rows = _fetch_all(
+        f'''
+        SELECT
+          id,
+          "Date" AS date,
+          COALESCE("Category", '') AS category,
+          COALESCE("Subcategory", '') AS subcategory,
+          COALESCE("Creditor", '') AS creditor,
+          COALESCE("Amount", 0) AS amount,
+          COALESCE("Frequency", '') AS frequency,
+          "Start_Date" AS start_date,
+          "Next_Due_Date" AS next_due_date,
+          COALESCE("Status", '') AS status,
+          COALESCE("Notes", '') AS notes
+        FROM {_financial_obligations_table_ref()}
+        WHERE COALESCE("__nc_deleted", false) = false
+          {status_sql}
+          {category_sql}
+          {creditor_sql}
+        ORDER BY "Next_Due_Date" NULLS LAST, id
+        LIMIT %(limit)s
+        ''',
+        params,
+    )
+    for row in rows:
+        row["amount"] = int(row["amount"] or 0)
+    return {
+        "formula": "financial_obligation_list",
+        "period": "all_time",
+        "status": status,
+        "category": category,
+        "creditor": creditor,
+        "obligations": rows,
+    }
+
+
+def financial_obligation_insert(question):
+    values = _parse_financial_obligation_insert(question)
+    missing = []
+    if not values.get("creditor"):
+        missing.append("creditor")
+    if not values.get("amount"):
+        missing.append("amount")
+    if not values.get("next_due_date"):
+        missing.append("next due date YYYY-MM-DD")
+    if missing:
+        return {
+            "formula": "financial_obligation_insert",
+            "period": "all_time",
+            "inserted": False,
+            "missing": missing,
+            "values": values,
+        }
+
+    row = _fetch_one(
+        f'''
+        INSERT INTO {_financial_obligations_table_ref()}
+          ("Date", "Category", "Subcategory", "Creditor", "Amount", "Frequency",
+           "Start_Date", "Next_Due_Date", "Status", "Notes")
+        VALUES
+          (%(date)s, %(category)s, %(subcategory)s, %(creditor)s, %(amount)s, %(frequency)s,
+           %(start_date)s, %(next_due_date)s, %(status)s, %(notes)s)
+        RETURNING
+          id,
+          "Category" AS category,
+          "Subcategory" AS subcategory,
+          "Creditor" AS creditor,
+          "Amount" AS amount,
+          "Frequency" AS frequency,
+          "Start_Date" AS start_date,
+          "Next_Due_Date" AS next_due_date,
+          "Status" AS status,
+          "Notes" AS notes
+        ''',
+        {
+            "date": date.today(),
+            **values,
+        },
+    )
+    row["amount"] = int(row.get("amount") or 0)
+    return {
+        "formula": "financial_obligation_insert",
+        "period": "all_time",
+        "inserted": True,
+        "obligation": row,
+    }
+
+
 FORMULAS = {
     "sales_total": sales_total,
     "expense_total": expense_total,
@@ -1220,6 +1808,13 @@ FORMULAS = {
     "sotephwar_transection_list": sotephwar_transection_list,
     "sotephwar_transection_quantity": sotephwar_transection_quantity,
     "sotephwar_transection_customer": sotephwar_transection_customer,
+    "sotephwar_inventory_stock": sotephwar_inventory_stock,
+    "sotephwar_inventory_movement_summary": sotephwar_inventory_movement_summary,
+    "sotephwar_inventory_list": sotephwar_inventory_list,
+    "financial_obligation_summary": financial_obligation_summary,
+    "financial_obligation_due": financial_obligation_due,
+    "financial_obligation_list": financial_obligation_list,
+    "financial_obligation_insert": financial_obligation_insert,
 }
 
 
@@ -1227,6 +1822,30 @@ def choose_formula_by_keywords(question):
     text = question.lower()
     period = normalize_period(question)
     sotephwar_customer = _sotephwar_customer_filter(question)
+
+    if is_financial_obligation_question(question):
+        normalized = _normalized_text(question)
+        if _financial_obligation_insert_requested(question):
+            return "financial_obligation_insert"
+        if "due" in normalized or "upcoming" in normalized or "overdue" in normalized:
+            return "financial_obligation_due"
+        if "list" in normalized or "show" in normalized or "detail" in normalized or "creditor" in normalized:
+            return "financial_obligation_list"
+        return "financial_obligation_summary"
+
+    if is_sotephwar_inventory_question(question):
+        normalized = _normalized_text(question)
+        if (
+            "list" in normalized
+            or "show" in normalized
+            or "movement" in normalized
+            or "movements" in normalized
+            or period.startswith("date:")
+        ):
+            return "sotephwar_inventory_list"
+        if "summary" in normalized or "production" in normalized or "transfer" in normalized or "sale" in normalized:
+            return "sotephwar_inventory_movement_summary"
+        return "sotephwar_inventory_stock"
 
     if is_sotephwar_transection_question(question):
         if sotephwar_customer or "customer" in text or "voucher" in text:
@@ -1361,5 +1980,47 @@ def run_formula(formula_name, question):
             unpaid_only=_sotephwar_unpaid_filter(question),
             invoice_numbers=_sotephwar_invoice_numbers(question),
             include_note=_sotephwar_note_requested(question),
+        )
+    if formula_name == "sotephwar_inventory_stock":
+        return formula(
+            product=_sotephwar_item_filter(question),
+            store=_sotephwar_inventory_store_filter(question),
+        )
+    if formula_name == "sotephwar_inventory_movement_summary":
+        return formula(
+            period,
+            product=_sotephwar_item_filter(question),
+            store=_sotephwar_inventory_store_filter(question),
+            movement_type=_sotephwar_inventory_type_filter(question),
+        )
+    if formula_name == "sotephwar_inventory_list":
+        return formula(
+            period,
+            product=_sotephwar_item_filter(question),
+            store=_sotephwar_inventory_store_filter(question),
+            movement_type=_sotephwar_inventory_type_filter(question),
+            limit=extract_top_limit(question, default=20),
+        )
+    if formula_name == "financial_obligation_insert":
+        return formula(question)
+    if formula_name == "financial_obligation_summary":
+        return formula(
+            status=_financial_obligation_status_filter(question),
+            category=_financial_obligation_category_filter(question),
+        )
+    if formula_name == "financial_obligation_due":
+        status = _financial_obligation_status_filter(question)
+        return formula(
+            days=_financial_obligation_due_days(question),
+            status=status or "Active",
+            category=_financial_obligation_category_filter(question),
+            limit=extract_top_limit(question, default=20),
+        )
+    if formula_name == "financial_obligation_list":
+        return formula(
+            status=_financial_obligation_status_filter(question),
+            category=_financial_obligation_category_filter(question),
+            creditor=_financial_obligation_creditor_filter(question),
+            limit=extract_top_limit(question, default=20),
         )
     return formula(period, filters)

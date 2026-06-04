@@ -94,6 +94,23 @@ NEGOTIATION_WORDS = (
     "လျှော့",
 )
 
+WEATHER_LOCATION_ALIASES = {
+    "bigshot farm": {
+        "name": "BigShot Farm",
+        "admin1": "Shan State",
+        "country": "Myanmar",
+        "latitude": 20.73416,
+        "longitude": 96.78410,
+    },
+    "heho": {
+        "name": "Heho",
+        "admin1": "Shan State",
+        "country": "Myanmar",
+        "latitude": 20.7167,
+        "longitude": 96.8167,
+    },
+}
+
 
 class _TextParser(HTMLParser):
     def __init__(self):
@@ -222,7 +239,11 @@ def _extract_location(question):
             location = re.sub(r"\b(today|tomorrow|now)\b", "", location, flags=re.IGNORECASE).strip(" .,")
             if location and location.lower() not in stop_locations:
                 return location
-    return _setting("FAMILY_DEFAULT_WEATHER_LOCATION", "Yangon")
+    return _setting("FAMILY_DEFAULT_WEATHER_LOCATION", "BigShot Farm")
+
+
+def _weather_location_alias(location):
+    return WEATHER_LOCATION_ALIASES.get(_normalize(location))
 
 
 def _daily_value(daily, key, index):
@@ -240,22 +261,24 @@ def get_weather_answer(question, timeout=15):
 def get_weather_context(question, timeout=15):
     location = _extract_location(question)
     forecast_days = _forecast_days(question)
-    geo_response = requests.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": location, "count": 1, "language": "en", "format": "json"},
-        timeout=timeout,
-    )
-    geo_response.raise_for_status()
-    geo_data = geo_response.json()
-    results = geo_data.get("results") or []
-    if not results:
-        return {
-            "type": "weather",
-            "question": question,
-            "error": f"Weather: no location found for {location}.",
-        }
+    place = _weather_location_alias(location)
+    if place is None:
+        geo_response = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": location, "count": 1, "language": "en", "format": "json"},
+            timeout=timeout,
+        )
+        geo_response.raise_for_status()
+        geo_data = geo_response.json()
+        results = geo_data.get("results") or []
+        if not results:
+            return {
+                "type": "weather",
+                "question": question,
+                "error": f"Weather: no location found for {location}.",
+            }
 
-    place = results[0]
+        place = results[0]
     forecast_response = requests.get(
         "https://api.open-meteo.com/v1/forecast",
         params={

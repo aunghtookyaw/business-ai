@@ -5,6 +5,8 @@ __pycache__/
 .env
 *.log
 config.py
+google_calendar_credentials.json
+google_calendar_token.json
 
 # Local database and NocoDB data should not be committed.
 ../postgres-data/

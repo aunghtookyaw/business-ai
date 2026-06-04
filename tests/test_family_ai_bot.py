@@ -184,6 +184,75 @@ class FamilyAiBotFilterTest(unittest.TestCase):
         self.assertEqual("Yangon", live_info._extract_location("Yangon weather today"))
         self.assertEqual("Yangon", live_info._extract_location("Yangon 7 day forecast"))
 
+    def test_heho_weather_uses_local_alias_when_geocoder_misses_it(self):
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        response = FakeResponse({
+            "current": {
+                "temperature_2m": 22,
+                "relative_humidity_2m": 82,
+                "precipitation": 0,
+                "weather_code": 3,
+            },
+            "daily": {
+                "temperature_2m_max": [27],
+                "temperature_2m_min": [18],
+                "precipitation_probability_max": [40],
+            },
+        })
+
+        with patch.object(live_info.requests, "get", return_value=response) as request_get:
+            answer = live_info.get_weather_answer("Heho weather")
+
+        request_get.assert_called_once()
+        self.assertIn("api.open-meteo.com/v1/forecast", request_get.call_args.args[0])
+        self.assertEqual(20.7167, request_get.call_args.kwargs["params"]["latitude"])
+        self.assertEqual(96.8167, request_get.call_args.kwargs["params"]["longitude"])
+        self.assertIn("Weather for Heho, Shan State, Myanmar", answer)
+        self.assertIn("Temperature: 22 C", answer)
+
+    def test_weather_without_location_uses_bigshot_farm_default(self):
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        response = FakeResponse({
+            "current": {
+                "temperature_2m": 23,
+                "relative_humidity_2m": 80,
+                "precipitation": 0,
+                "weather_code": 2,
+            },
+            "daily": {
+                "temperature_2m_max": [28],
+                "temperature_2m_min": [19],
+                "precipitation_probability_max": [45],
+            },
+        })
+
+        with patch.object(live_info.requests, "get", return_value=response) as request_get:
+            answer = live_info.get_weather_answer("weather today")
+
+        request_get.assert_called_once()
+        self.assertEqual(20.73416, request_get.call_args.kwargs["params"]["latitude"])
+        self.assertEqual(96.78410, request_get.call_args.kwargs["params"]["longitude"])
+        self.assertIn("Weather for BigShot Farm, Shan State, Myanmar", answer)
+        self.assertIn("Temperature: 23 C", answer)
+
     def test_weather_forecast_days_are_detected(self):
         self.assertEqual(2, live_info._forecast_days("Yangon weather tomorrow"))
         self.assertEqual(7, live_info._forecast_days("Yangon 7 day forecast"))

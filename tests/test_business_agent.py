@@ -107,6 +107,52 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             business_agent.choose_formula("please tell me the transection of Pwint Aung Kyaw"),
         )
 
+    def test_sotephwar_inventory_stock_routes_to_inventory_stock(self):
+        self.assertEqual(
+            "sotephwar_inventory_stock",
+            business_agent.choose_formula("Sotephwar inventory stock"),
+        )
+
+    def test_sotephwar_item_quantity_routes_to_inventory_stock(self):
+        self.assertEqual(
+            "sotephwar_inventory_stock",
+            business_agent.choose_formula("Sote Phwar 4L quantity"),
+        )
+
+    def test_sotephwar_inventory_movement_routes_to_inventory_list(self):
+        self.assertEqual(
+            "sotephwar_inventory_list",
+            business_agent.choose_formula("show Sotephwar inventory movement this month"),
+        )
+
+    def test_sotephwar_inventory_production_routes_to_movement_summary(self):
+        self.assertEqual(
+            "sotephwar_inventory_movement_summary",
+            business_agent.choose_formula("Sotephwar inventory production this month"),
+        )
+
+    def test_financial_obligation_summary_routes_to_summary(self):
+        self.assertEqual(
+            "financial_obligation_summary",
+            business_agent.choose_formula("financial obligations summary"),
+        )
+
+    def test_financial_obligation_due_routes_to_due(self):
+        self.assertEqual(
+            "financial_obligation_due",
+            business_agent.choose_formula("financial obligations due soon"),
+        )
+
+    def test_financial_obligation_insert_requires_explicit_start_word(self):
+        self.assertEqual(
+            "financial_obligation_insert",
+            business_agent.choose_formula("add financial obligation creditor A amount 100 next due 2026-07-01"),
+        )
+        self.assertNotEqual(
+            "financial_obligation_insert",
+            business_agent.choose_formula("Use this format: add financial obligation creditor A amount 100 next due 2026-07-01"),
+        )
+
     def test_partial_sotephwar_customer_name_is_detected(self):
         original_fetch_all = formula_engine._fetch_all
         formula_engine._fetch_all = lambda sql, params=None: [
@@ -191,6 +237,56 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         self.assertIn("Note: Call before delivery", answer)
 
+    def test_sotephwar_inventory_stock_answer_lists_store_product_stock(self):
+        answer = business_agent._fast_answer({
+            "formula": "sotephwar_inventory_stock",
+            "period": "all_time",
+            "store": None,
+            "product": None,
+            "stock": [
+                {
+                    "store": "Factory",
+                    "product": "Sote Phwar 1L",
+                    "stock_qty": 50000,
+                },
+            ],
+        })
+
+        self.assertIn("Sotephwar_Inventory current stock", answer)
+        self.assertIn("Factory / Sote Phwar 1L: 50,000", answer)
+
+    def test_financial_obligation_summary_answer_lists_category_status(self):
+        answer = business_agent._fast_answer({
+            "formula": "financial_obligation_summary",
+            "period": "all_time",
+            "category": None,
+            "status": None,
+            "summary": [
+                {
+                    "category": "Loan",
+                    "status": "Active",
+                    "amount": 24000000,
+                    "obligation_count": 3,
+                    "next_due_date": "2026-06-09",
+                },
+            ],
+        })
+
+        self.assertIn("Financial_Obligations summary", answer)
+        self.assertIn("Loan / Active: 24,000,000", answer)
+
+    def test_financial_obligation_insert_missing_fields_returns_template(self):
+        answer = business_agent._fast_answer({
+            "formula": "financial_obligation_insert",
+            "period": "all_time",
+            "inserted": False,
+            "missing": ["creditor", "amount"],
+            "values": {},
+        })
+
+        self.assertIn("Financial obligation was not inserted", answer)
+        self.assertIn("Missing: creditor, amount", answer)
+
     def test_sotephwar_voucher_answer_shows_empty_note_when_requested(self):
         answer = business_agent._fast_answer({
             "formula": "sotephwar_transection_customer",
@@ -241,6 +337,12 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual(
             "Sote Phwar 4L",
             formula_engine._sotephwar_item_filter("how much 4L bottles sell"),
+        )
+
+    def test_sotephwar_100ml_item_filter(self):
+        self.assertEqual(
+            "Sote Phwar 100 mL",
+            formula_engine._sotephwar_item_filter("Sote Phwar 100 mL quantity"),
         )
 
     def test_suggestion_question_routes_to_analysis(self):
