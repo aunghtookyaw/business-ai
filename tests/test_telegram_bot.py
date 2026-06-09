@@ -3,6 +3,7 @@ import unittest
 import business_agent
 import telegram_bot
 import telegram_kpi_bot
+from tools.bi_catalog import BUSINESS_MENU, reports_for
 
 
 class FakeMessage:
@@ -10,18 +11,57 @@ class FakeMessage:
         self.chat_id = chat_id
         self.message_thread_id = thread_id
         self.text = text
+        self.message_id = 123
         self.replies = []
 
     def reply_text(self, text, **kwargs):
         self.replies.append({
+            "type": "text",
             "text": text,
+            "kwargs": kwargs,
+        })
+
+    def reply_document(self, document, **kwargs):
+        content = document.read()
+        self.replies.append({
+            "type": "document",
+            "content": content,
             "kwargs": kwargs,
         })
 
 
 class FakeUpdate:
-    def __init__(self, message):
+    def __init__(self, message=None, callback_query=None):
         self.message = message
+        self.callback_query = callback_query
+
+
+class FakeCallbackQuery:
+    def __init__(self, message, data):
+        self.message = message
+        self.data = data
+        self.answers = []
+
+    def answer(self, text=None):
+        self.answers.append(text)
+
+
+class FakeJobQueue:
+    def __init__(self):
+        self.jobs = []
+
+    def run_once(self, callback, delay, context=None):
+        self.jobs.append({
+            "callback": callback,
+            "delay": delay,
+            "context": context,
+        })
+
+
+class FakeContext:
+    def __init__(self):
+        self.job_queue = FakeJobQueue()
+        self.user_data = {}
 
 
 class FinanceBotFilterTest(unittest.TestCase):
@@ -52,6 +92,19 @@ class FinanceBotFilterTest(unittest.TestCase):
 
         self.assertFalse(telegram_bot._is_allowed_message(message))
 
+    def test_finance_bot_schedules_auto_delete_for_ai_topic_message(self):
+        message = FakeMessage(-1003850232296, 5)
+        context = FakeContext()
+
+        telegram_bot._schedule_auto_delete(context, message)
+
+        self.assertEqual(1, len(context.job_queue.jobs))
+        self.assertEqual(telegram_bot.AUTO_DELETE_SECONDS, context.job_queue.jobs[0]["delay"])
+        self.assertEqual(
+            {"chat_id": -1003850232296, "message_id": 123},
+            context.job_queue.jobs[0]["context"],
+        )
+
     def test_whereami_does_not_reply_outside_finance_thread(self):
         message = FakeMessage(-1003850232296, 4)
 
@@ -59,15 +112,363 @@ class FinanceBotFilterTest(unittest.TestCase):
 
         self.assertEqual([], message.replies)
 
-    def test_menu_shows_finance_prompt_keyboard(self):
+    def test_menu_shows_business_intelligence_wizard(self):
         message = FakeMessage(-1003850232296, 5)
+        context = FakeContext()
 
-        telegram_bot.menu(FakeUpdate(message), None)
+        telegram_bot.menu(FakeUpdate(message), context)
 
-        self.assertEqual("Tap a finance question:", message.replies[0]["text"])
+        self.assertEqual(2, len(message.replies))
+        self.assertEqual("Prompt keyboard removed.", message.replies[0]["text"])
         self.assertIn("reply_markup", message.replies[0]["kwargs"])
-        self.assertEqual("Prompt keyboard opened.", message.replies[1]["text"])
+        self.assertEqual("Business Intelligence", message.replies[1]["text"])
         self.assertIn("reply_markup", message.replies[1]["kwargs"])
+
+    def test_financial_obligation_is_available_in_bi_wizard(self):
+        self.assertIn(("financial_obligation", "Financial Obligation"), BUSINESS_MENU)
+        self.assertEqual(
+            [
+                ("financial_obligation_summary", "Obligation Summary"),
+                ("financial_obligation_due", "Due Soon"),
+                ("financial_obligation_list", "Obligation List"),
+            ],
+            reports_for("financial_obligation", "financial_obligation"),
+        )
+
+    def test_bi_wizard_builds_structured_intent_for_text_report(self):
+        original_execute_intent = telegram_bot.execute_intent
+        message = FakeMessage(-1003850232296, 5)
+        context = FakeContext()
+        seen = []
+
+        def fake_execute_intent(intent):
+            seen.append(intent.to_dict())
+            return {
+                "intent": intent.to_dict(),
+                "title": "Sote Phwar - Expense - Total Expense",
+                "period_label": "Last Month",
+                "result": {
+                    "formula": "expense_total",
+                    "period": "last_month",
+                    "total_expense": 123,
+                },
+            }
+
+        telegram_bot.execute_intent = fake_execute_intent
+        try:
+            for data in (
+                "bi:business:sote_phwar",
+                "bi:module:expense",
+                "bi:report:total_expense",
+                "bi:period:last_month",
+                "bi:output:text",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual(
+                {
+                    "business": "sote_phwar",
+                    "module": "expense",
+                    "report": "total_expense",
+                    "period": {"type": "relative", "value": "last_month"},
+                    "output": "text",
+                },
+                seen[0],
+            )
+            self.assertIn("Total expense: 123", message.replies[-1]["text"])
+        finally:
+            telegram_bot.execute_intent = original_execute_intent
+
+    def test_bi_wizard_builds_financial_obligation_intent(self):
+        original_execute_intent = telegram_bot.execute_intent
+        message = FakeMessage(-1003850232296, 5)
+        context = FakeContext()
+        seen = []
+
+        def fake_execute_intent(intent):
+            seen.append(intent.to_dict())
+            return {
+                "intent": intent.to_dict(),
+                "title": "Financial Obligation - Financial Obligation - Obligation Summary",
+                "period_label": "This Month",
+                "result": {
+                    "formula": "financial_obligation_summary",
+                    "summary": [
+                        {
+                            "category": "Loan",
+                            "status": "Active",
+                            "amount": 100,
+                            "obligation_count": 1,
+                            "next_due_date": "2026-06-30",
+                        },
+                    ],
+                },
+            }
+
+        telegram_bot.execute_intent = fake_execute_intent
+        try:
+            for data in (
+                "bi:business:financial_obligation",
+                "bi:module:financial_obligation",
+                "bi:report:financial_obligation_summary",
+                "bi:period:this_month",
+                "bi:output:text",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual(
+                {
+                    "business": "financial_obligation",
+                    "module": "financial_obligation",
+                    "report": "financial_obligation_summary",
+                    "period": {"type": "relative", "value": "this_month"},
+                    "output": "text",
+                },
+                seen[0],
+            )
+            self.assertIn("Financial Obligation", message.replies[-1]["text"])
+        finally:
+            telegram_bot.execute_intent = original_execute_intent
+
+    def test_customer_history_uses_free_text_search_before_period(self):
+        original_search_customers = telegram_bot.search_customers
+        telegram_bot.search_customers = lambda text: [
+            {"value": "Pwint Aung Kyaw POL", "score": 0.95},
+            {"value": "Pwint Trading", "score": 0.9},
+        ]
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:customers",
+                "bi:module:customers",
+                "bi:report:customer_history",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            search_message = FakeMessage(-1003850232296, 5, "Pwint")
+            telegram_bot.handle_message(FakeUpdate(search_message), context)
+
+            self.assertEqual(["Pwint Aung Kyaw POL", "Pwint Trading"], context.user_data[telegram_bot.BI_STATE_KEY]["candidates"])
+            self.assertEqual("Select customer:", search_message.replies[-1]["text"])
+        finally:
+            telegram_bot.search_customers = original_search_customers
+
+    def test_sales_by_customer_uses_free_text_search_before_period(self):
+        original_search_customers = telegram_bot.search_customers
+        telegram_bot.search_customers = lambda text: [
+            {"value": "Pwint Aung Kyaw POL", "score": 0.95},
+        ]
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:sote_phwar",
+                "bi:module:income",
+                "bi:report:sales_by_customer",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual("customer", context.user_data[telegram_bot.BI_STATE_KEY]["awaiting"])
+
+            search_message = FakeMessage(-1003850232296, 5, "Pwint")
+            telegram_bot.handle_message(FakeUpdate(search_message), context)
+
+            self.assertEqual(["Pwint Aung Kyaw POL"], context.user_data[telegram_bot.BI_STATE_KEY]["candidates"])
+            self.assertEqual("Select customer:", search_message.replies[-1]["text"])
+        finally:
+            telegram_bot.search_customers = original_search_customers
+
+    def test_expense_detail_uses_category_search_before_period(self):
+        original_search_categories = telegram_bot.search_categories
+        telegram_bot.search_categories = lambda text, **kwargs: [
+            {"value": "Motor", "score": 1.0},
+        ]
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:farm",
+                "bi:module:expense",
+                "bi:report:expense_detail",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            search_message = FakeMessage(-1003850232296, 5, "Motor")
+            telegram_bot.handle_message(FakeUpdate(search_message), context)
+
+            self.assertEqual(["Motor"], context.user_data[telegram_bot.BI_STATE_KEY]["candidates"])
+            self.assertEqual("Select category:", search_message.replies[-1]["text"])
+        finally:
+            telegram_bot.search_categories = original_search_categories
+
+    def test_expense_by_category_uses_typed_category_search(self):
+        original_search_categories = telegram_bot.search_categories
+        original_execute_intent = telegram_bot.execute_intent
+        seen = []
+
+        telegram_bot.search_categories = lambda text, **kwargs: [
+            {"value": "Farm/Wages and salary", "score": 1.0},
+        ]
+
+        def fake_execute_intent(intent):
+            seen.append(intent.to_dict())
+            return {
+                "intent": intent.to_dict(),
+                "title": "Farm - Expense - Expense By Category - Farm/Wages and salary",
+                "period_label": "This Month",
+                "result": {
+                    "formula": "category_summary",
+                    "categories": [],
+                },
+            }
+
+        telegram_bot.execute_intent = fake_execute_intent
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:farm",
+                "bi:module:expense",
+                "bi:report:expense_by_category",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual("category", context.user_data[telegram_bot.BI_STATE_KEY]["awaiting"])
+
+            telegram_bot.handle_message(FakeUpdate(FakeMessage(-1003850232296, 5, "salary")), context)
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:select_category:0")),
+                context,
+            )
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:category_done")),
+                context,
+            )
+            for data in ("bi:period:this_month", "bi:output:text"):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual("expense_by_category", seen[0]["report"])
+            self.assertEqual(["Farm/Wages and salary"], seen[0]["categories"])
+        finally:
+            telegram_bot.search_categories = original_search_categories
+            telegram_bot.execute_intent = original_execute_intent
+
+    def test_sotephwar_expense_category_search_is_sector_scoped(self):
+        original_search_categories = telegram_bot.search_categories
+        seen = []
+
+        def fake_search_categories(text, **kwargs):
+            seen.append(kwargs)
+            return [{"value": "Sote Phwar Transport", "score": 1.0}]
+
+        telegram_bot.search_categories = fake_search_categories
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:sote_phwar",
+                "bi:module:expense",
+                "bi:report:expense_detail",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            telegram_bot.handle_message(FakeUpdate(FakeMessage(-1003850232296, 5, "transport")), context)
+
+            self.assertEqual("Sote Phwar", seen[0]["sector"])
+            self.assertEqual("Expense", seen[0]["income_expense"])
+        finally:
+            telegram_bot.search_categories = original_search_categories
+
+    def test_expense_detail_allows_multiple_category_selection(self):
+        original_search_categories = telegram_bot.search_categories
+        original_execute_intent = telegram_bot.execute_intent
+        searches = {
+            "Makro": [{"value": "Makro Expense", "score": 1.0}],
+            "Wages": [{"value": "Farm/Wages and salary", "score": 1.0}],
+        }
+        seen = []
+
+        telegram_bot.search_categories = lambda text, **kwargs: searches.get(text, [])
+
+        def fake_execute_intent(intent):
+            seen.append(intent.to_dict())
+            return {
+                "intent": intent.to_dict(),
+                "title": "Sote Phwar - Expense - Expense Detail - Makro Expense, Farm/Wages and salary",
+                "period_label": "Last Month",
+                "result": {
+                    "formula": "list_transactions",
+                    "transactions": [],
+                },
+            }
+
+        telegram_bot.execute_intent = fake_execute_intent
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:sote_phwar",
+                "bi:module:expense",
+                "bi:report:expense_detail",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            telegram_bot.handle_message(FakeUpdate(FakeMessage(-1003850232296, 5, "Makro")), context)
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:select_category:0")),
+                context,
+            )
+            telegram_bot.handle_message(FakeUpdate(FakeMessage(-1003850232296, 5, "Wages")), context)
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:select_category:0")),
+                context,
+            )
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:category_done")),
+                context,
+            )
+            for data in ("bi:period:last_month", "bi:output:text"):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual(
+                ["Makro Expense", "Farm/Wages and salary"],
+                seen[0]["categories"],
+            )
+            self.assertEqual("expense_detail", seen[0]["report"])
+        finally:
+            telegram_bot.search_categories = original_search_categories
+            telegram_bot.execute_intent = original_execute_intent
 
     def test_tapped_prompt_label_maps_to_finance_question(self):
         self.assertEqual(
@@ -147,8 +548,8 @@ class FinanceBotFilterTest(unittest.TestCase):
             telegram_bot._normalize_command("Obligation due soon"),
         )
         self.assertEqual(
-            telegram_bot.FINANCIAL_OBLIGATION_TEMPLATE,
-            telegram_bot._normalize_command("Add obligation template"),
+            telegram_bot.SOTEPHWAR_PAYMENT_TEMPLATE,
+            telegram_bot._normalize_command("Sote payment template"),
         )
         self.assertEqual(
             "__sync_obligation_calendar__",
@@ -164,6 +565,109 @@ class FinanceBotFilterTest(unittest.TestCase):
             "__sync_obligation_calendar__",
             telegram_bot._callback_question("finance:obl_calendar"),
         )
+        self.assertEqual(
+            telegram_bot.SOTEPHWAR_PAYMENT_TEMPLATE,
+            telegram_bot._callback_question("finance:sote_payment_template"),
+        )
+
+    def test_send_pdf_text_maps_to_pdf_export(self):
+        self.assertEqual(
+            telegram_bot.PDF_EXPORT_COMMAND,
+            telegram_bot._normalize_command("send pdf"),
+        )
+        self.assertEqual(
+            f"{telegram_bot.PDF_EXPORT_COMMAND}:top expenses",
+            telegram_bot._normalize_command("/send_pdf top expenses"),
+        )
+        self.assertEqual(
+            f"{telegram_bot.PDF_EXPORT_COMMAND}:Pwint Aung Kyaw (MDY) transection",
+            telegram_bot._normalize_command("Pwint Aung Kyaw (MDY) transection send pdf"),
+        )
+        self.assertEqual(
+            "top expenses",
+            telegram_bot._pdf_export_question(f"{telegram_bot.PDF_EXPORT_COMMAND}:Top expenses"),
+        )
+        self.assertEqual(
+            telegram_bot.JPEG_EXPORT_COMMAND,
+            telegram_bot._normalize_command("send jpeg"),
+        )
+        self.assertEqual(
+            f"{telegram_bot.JPEG_EXPORT_COMMAND}:top expenses",
+            telegram_bot._normalize_command("top expenses send jpg"),
+        )
+        self.assertEqual(
+            telegram_bot.PDF_JPEG_EXPORT_COMMAND,
+            telegram_bot._normalize_command("send pdf and jpeg"),
+        )
+        self.assertEqual(
+            f"{telegram_bot.PDF_JPEG_EXPORT_COMMAND}:cash flow",
+            telegram_bot._normalize_command("cash flow send pdf and jpeg"),
+        )
+
+    def test_send_pdf_replies_with_document(self):
+        original_answer_question = telegram_bot.answer_question
+        original_create_chart_pdf_report = telegram_bot.create_chart_pdf_report
+        original_write_pdf_export = telegram_bot._write_pdf_export
+
+        def fake_answer_question(question):
+            self.assertEqual("this month kpi", question)
+            return "KPI overview for this month\nIncome: 100"
+
+        def fake_create_chart_pdf_report(question, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            return False
+
+        def fake_write_pdf_export(text, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            with open(output_path, "wb") as pdf_file:
+                pdf_file.write(b"%PDF-1.4\nfake\n%%EOF\n")
+
+        telegram_bot.answer_question = fake_answer_question
+        telegram_bot.create_chart_pdf_report = fake_create_chart_pdf_report
+        telegram_bot._write_pdf_export = fake_write_pdf_export
+        try:
+            message = FakeMessage(-1003850232296, 5)
+
+            telegram_bot._answer_finance_question(message, telegram_bot.PDF_EXPORT_COMMAND)
+
+            self.assertEqual("document", message.replies[0]["type"])
+            self.assertTrue(message.replies[0]["content"].startswith(b"%PDF"))
+            self.assertEqual(
+                "PDF export: this month kpi",
+                message.replies[0]["kwargs"]["caption"],
+            )
+            self.assertIn("reply_markup", message.replies[0]["kwargs"])
+        finally:
+            telegram_bot.answer_question = original_answer_question
+            telegram_bot.create_chart_pdf_report = original_create_chart_pdf_report
+            telegram_bot._write_pdf_export = original_write_pdf_export
+
+    def test_send_pdf_and_jpeg_replies_with_two_documents(self):
+        original_create_chart_pdf_report = telegram_bot.create_chart_pdf_report
+        original_write_jpeg_export = telegram_bot._write_jpeg_export
+
+        def fake_create_chart_pdf_report(question, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            with open(output_path, "wb") as pdf_file:
+                pdf_file.write(b"%PDF-1.4\nfake\n%%EOF\n")
+            return True
+
+        def fake_write_jpeg_export(pdf_path, jpeg_path):
+            with open(jpeg_path, "wb") as jpeg_file:
+                jpeg_file.write(b"\xff\xd8\xfffake")
+
+        telegram_bot.create_chart_pdf_report = fake_create_chart_pdf_report
+        telegram_bot._write_jpeg_export = fake_write_jpeg_export
+        try:
+            message = FakeMessage(-1003850232296, 5)
+
+            telegram_bot._answer_finance_question(message, telegram_bot.PDF_JPEG_EXPORT_COMMAND)
+
+            self.assertEqual(2, len(message.replies))
+            self.assertTrue(message.replies[0]["content"].startswith(b"%PDF"))
+            self.assertTrue(message.replies[1]["content"].startswith(b"\xff\xd8\xff"))
+            self.assertTrue(message.replies[0]["kwargs"]["filename"].endswith(".pdf"))
+            self.assertTrue(message.replies[1]["kwargs"]["filename"].endswith(".jpg"))
+        finally:
+            telegram_bot.create_chart_pdf_report = original_create_chart_pdf_report
+            telegram_bot._write_jpeg_export = original_write_jpeg_export
 
     def test_legacy_kpi_bot_rejects_family_thread(self):
         message = FakeMessage(-1003850232296, 4)
