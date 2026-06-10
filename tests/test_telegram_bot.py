@@ -669,6 +669,19 @@ class FinanceBotFilterTest(unittest.TestCase):
             telegram_bot.create_chart_pdf_report = original_create_chart_pdf_report
             telegram_bot._write_jpeg_export = original_write_jpeg_export
 
+    def test_direct_finance_text_question_is_answered(self):
+        original_answer_question = telegram_bot.answer_question
+        telegram_bot.answer_question = lambda question: f"answer for {question}"
+        try:
+            message = FakeMessage(-1003850232296, 5, "this month income")
+            context = FakeContext()
+
+            telegram_bot.handle_message(FakeUpdate(message), context)
+
+            self.assertEqual("answer for this month income", message.replies[-1]["text"])
+        finally:
+            telegram_bot.answer_question = original_answer_question
+
     def test_legacy_kpi_bot_rejects_family_thread(self):
         message = FakeMessage(-1003850232296, 4)
 

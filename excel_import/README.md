@@ -34,3 +34,21 @@ python3 scripts/excel_import_server.py
 Fill rows in Excel, then run the `UploadBusinessData` macro or click your assigned button.
 
 Rows with blank `Upload_Status` are uploaded. After a successful insert, the macro marks the row `INSERTED` and records the inserted table id, so clicking again skips those rows.
+
+## Airtable CSV Daily Import
+
+Put the daily Airtable exports on the Desktop with these names:
+
+- `June farm.csv`
+- `June sotephwar.csv`
+
+Convert them into the `Transection` sheet:
+
+```bash
+cd /Users/bigshot/ai-automation/business-ai
+python3 scripts/import_airtable_transactions.py
+```
+
+The converter maps both CSV files into the workbook's exact import format. It
+sets `Sector` to `Farm` or `Sote Phwar`, leaves `Upload_Status` blank for new
+rows, and skips rows already present in the workbook.

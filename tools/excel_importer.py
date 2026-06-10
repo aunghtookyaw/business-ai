@@ -12,6 +12,7 @@ from tools.formula_engine import (
     _sotephwar_transection_table_ref,
     _table_ref,
 )
+from tools.master_relink_db import relink_inserted_rows
 
 
 TABLES = {
@@ -213,4 +214,17 @@ def import_excel_payload(payload):
                 }
                 continue
             results[table_key] = _insert_rows(connection, table_key, rows)
+    inserted_ids_by_table = {
+        table_key: [
+            row["id"]
+            for row in result.get("inserted", [])
+            if row.get("id") is not None
+        ]
+        for table_key, result in results.items()
+    }
+    try:
+        results["_master_relink"] = relink_inserted_rows(inserted_ids_by_table)
+    except Exception as exc:
+        results["_master_relink"] = {}
+        results["_master_relink_error"] = str(exc)
     return results

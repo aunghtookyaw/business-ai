@@ -119,6 +119,8 @@ def _ensure_status_columns(sheet):
 def _write_results(workbook, results):
     uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for table_key, result in results.items():
+        if table_key not in SHEETS:
+            continue
         sheet_name = SHEETS[table_key]
         if sheet_name not in workbook.sheetnames:
             continue
@@ -157,6 +159,15 @@ def _print_summary(payload, results=None):
         )
         for error in result["errors"]:
             print(f"  row {error.get('row_number')}: {error.get('error')}")
+    if results and results.get("_master_relink"):
+        print("Master relinking:")
+        for target_key, report in results["_master_relink"].items():
+            print(
+                f"  {target_key}: {report['inserted']} link(s) added, "
+                f"{report['unmatched']} unmatched, {report['blank']} blank"
+            )
+    if results and results.get("_master_relink_error"):
+        print(f"Master relinking warning: {results['_master_relink_error']}")
 
 
 def main():
@@ -182,7 +193,7 @@ def main():
     workbook.save(workbook_path)
     _print_summary(payload, results)
 
-    if any(result["errors"] for result in results.values()):
+    if any(result["errors"] for key, result in results.items() if key in SHEETS):
         return 1
     return 0
 

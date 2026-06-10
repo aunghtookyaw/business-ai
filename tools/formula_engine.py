@@ -7,6 +7,7 @@ import psycopg2.extras
 
 import config
 from tools import search_intelligence
+from tools.master_data import normalize_name
 
 
 MONTH_ALIASES = {
@@ -115,6 +116,70 @@ def _financial_obligations_table_ref():
         "Financial_Obligations",
     ).replace('"', '""')
     return f'"{schema}"."{table}"'
+
+
+def _schema_ref(table):
+    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    table = table.replace('"', '""')
+    return f'"{schema}"."{table}"'
+
+
+def _category_master_ref():
+    return _schema_ref("category_master")
+
+
+def _customer_master_ref():
+    return _schema_ref("customer_master")
+
+
+def _transaction_category_link_ref():
+    return _schema_ref("_nc_m2m_Transection_category_master")
+
+
+def _sotephwar_customer_link_ref():
+    return _schema_ref("_nc_m2m_Sotephwar_Trans_customer_master")
+
+
+def _linked_category_expr(table_alias="t"):
+    alias = f'{table_alias}.' if table_alias else ""
+    return f'COALESCE(cm."category_name", {alias}"Categorization")'
+
+
+def _linked_customer_expr(table_alias="s"):
+    alias = f'{table_alias}.' if table_alias else ""
+    return f'COALESCE(cust."customer_name", {alias}"Customer_Name")'
+
+
+def _transaction_category_link_join(table_alias="t"):
+    alias = table_alias
+    return f'''
+        LEFT JOIN LATERAL (
+          SELECT cm_row."category_name"
+          FROM {_transaction_category_link_ref()} tcm
+          JOIN {_category_master_ref()} cm_row
+            ON cm_row.id = tcm."category_master_id"
+           AND COALESCE(cm_row.__nc_deleted, false) = false
+          WHERE tcm."Transection_id" = {alias}.id
+          ORDER BY cm_row.id
+          LIMIT 1
+        ) cm ON true
+    '''
+
+
+def _sotephwar_customer_link_join(table_alias="s"):
+    alias = table_alias
+    return f'''
+        LEFT JOIN LATERAL (
+          SELECT cust_row."customer_name"
+          FROM {_sotephwar_customer_link_ref()} scm
+          JOIN {_customer_master_ref()} cust_row
+            ON cust_row.id = scm."customer_master_id"
+           AND COALESCE(cust_row.__nc_deleted, false) = false
+          WHERE scm."Sotephwar_Transection_id" = {alias}.id
+          ORDER BY cust_row.id
+          LIMIT 1
+        ) cust ON true
+    '''
 
 
 def _transaction_table_parts():
@@ -390,16 +455,18 @@ def clear_dimension_value_cache():
 
 
 def _load_dimension_values():
+    category_expr = _linked_category_expr("t")
     row = _fetch_one(
         f'''
         SELECT
-          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM("Income_Expense"), '')), NULL) AS income_expenses,
-          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM("Sector"), '')), NULL) AS sectors,
-          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM("Categorization"), '')), NULL) AS categories,
-          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM("Item_Description"), '')), NULL) AS item_descriptions,
-          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM("Payment_Method"), '')), NULL) AS payment_methods
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM(t."Income_Expense"), '')), NULL) AS income_expenses,
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM(t."Sector"), '')), NULL) AS sectors,
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM({category_expr}), '')), NULL) AS categories,
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM(t."Item_Description"), '')), NULL) AS item_descriptions,
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(TRIM(t."Payment_Method"), '')), NULL) AS payment_methods
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
         '''
     )
     return {
@@ -562,12 +629,12 @@ def _dimension_filter(filters):
             for index, category in enumerate(category_values):
                 param_name = f"category_{index}"
                 placeholders.append(f"%({param_name})s")
-                params[param_name] = category
-            clauses.append(f'AND "Categorization" IN ({", ".join(placeholders)})')
+                params[param_name] = normalize_name(category)
+            clauses.append(f"AND {_category_normalized_sql()} IN ({', '.join(placeholders)})")
 
     if filters.get("category") and not text_search:
-        clauses.append('AND "Categorization" = %(category)s')
-        params["category"] = filters["category"]
+        clauses.append(f"AND {_category_normalized_sql()} = %(category)s")
+        params["category"] = normalize_name(filters["category"])
 
     if filters.get("item_description") and not text_search:
         clauses.append('AND "Item_Description" = %(item_description)s')
@@ -583,7 +650,7 @@ def _dimension_filter(filters):
 
     if text_search:
         search_clauses = [
-            'REPLACE(LOWER(COALESCE("Categorization", \'\')), \'set up\', \'setup\') LIKE %(transaction_category_search)s',
+            f"{_category_search_sql()} LIKE %(transaction_category_search)s",
             'REPLACE(LOWER(COALESCE("Item_Description", \'\')), \'set up\', \'setup\') LIKE %(transaction_note_search)s',
         ]
         if _transaction_column_exists("Note"):
@@ -600,7 +667,7 @@ def _dimension_filter(filters):
             params["transaction_note_search"] = f"%{text_search['note']}%"
 
         keyword_columns = [
-            'LOWER(COALESCE("Categorization", \'\'))',
+            _category_keyword_sql(),
             'LOWER(COALESCE("Item_Description", \'\'))',
         ]
         if _transaction_column_exists("Note"):
@@ -617,6 +684,51 @@ def _dimension_filter(filters):
             params[param_name] = f"%{term}%"
 
     return "\n          ".join(clauses), params
+
+
+def _category_normalized_sql():
+    category = _linked_category_expr("t")
+    return (
+        "TRIM(REGEXP_REPLACE("
+        "REPLACE("
+        "REGEXP_REPLACE("
+        f"REGEXP_REPLACE(LOWER(COALESCE({category}, '')), '[_\\-–—]+', ' ', 'g'), "
+        "'[^a-z0-9\\s]', ' ', 'g'"
+        "), "
+        "'set up', 'setup'"
+        "), "
+        "'\\s+', ' ', 'g'"
+        "))"
+    )
+
+
+def _category_search_sql():
+    return (
+        "REPLACE("
+        "LOWER(COALESCE("
+        f"{_linked_category_expr('t')}, ''"
+        ")), 'set up', 'setup')"
+    )
+
+
+def _category_keyword_sql():
+    return f"LOWER(COALESCE({_linked_category_expr('t')}, ''))"
+
+
+def _customer_normalized_sql():
+    customer = _linked_customer_expr("s")
+    return (
+        "TRIM(REGEXP_REPLACE("
+        "REPLACE("
+        "REGEXP_REPLACE("
+        f"REGEXP_REPLACE(LOWER(COALESCE({customer}, '')), '[_\\-–—]+', ' ', 'g'), "
+        "'[^a-z0-9\\s]', ' ', 'g'"
+        "), "
+        "'set up', 'setup'"
+        "), "
+        "'\\s+', ' ', 'g'"
+        "))"
+    )
 
 
 def _with_filters(result, filters):
@@ -1054,11 +1166,12 @@ def _sotephwar_customer_match(question):
     try:
         rows = _fetch_all(
             f'''
-            SELECT DISTINCT "Customer_Name" AS customer_name
-            FROM {_sotephwar_transection_table_ref()}
-            WHERE COALESCE(__nc_deleted, false) = false
-              AND NULLIF(TRIM("Customer_Name"), '') IS NOT NULL
-            ORDER BY "Customer_Name"
+            SELECT DISTINCT {_linked_customer_expr("s")} AS customer_name
+            FROM {_sotephwar_transection_table_ref()} s
+            {_sotephwar_customer_link_join("s")}
+            WHERE COALESCE(s.__nc_deleted, false) = false
+              AND NULLIF(TRIM({_linked_customer_expr("s")}), '') IS NOT NULL
+            ORDER BY customer_name
             '''
         )
     except Exception:
@@ -1183,10 +1296,11 @@ def sales_total(period="all_time", filters=None):
     params.update(filter_params)
     row = _fetch_one(
         f'''
-        SELECT COALESCE(SUM("Amount"), 0) AS total_sales
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
-          AND "Income_Expense" = 'Income'
+        SELECT COALESCE(SUM(t."Amount"), 0) AS total_sales
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
+          AND t."Income_Expense" = 'Income'
           {filter_sql}
           {date_sql}
         ''',
@@ -1206,12 +1320,13 @@ def expense_total(period="all_time", filters=None):
     row = _fetch_one(
         f'''
         SELECT
-          COALESCE(SUM("Amount"), 0) AS total_expense,
+          COALESCE(SUM(t."Amount"), 0) AS total_expense,
           COUNT(*) AS expense_count,
-          COUNT(*) FILTER (WHERE "Amount" IS NULL) AS missing_amount_count
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
-          AND "Income_Expense" = 'Expense'
+          COUNT(*) FILTER (WHERE t."Amount" IS NULL) AS missing_amount_count
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
+          AND t."Income_Expense" = 'Expense'
           {filter_sql}
           {date_sql}
         ''',
@@ -1233,10 +1348,11 @@ def gross_profit(period="all_time", filters=None):
     row = _fetch_one(
         f'''
         SELECT
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Income' THEN "Amount" ELSE 0 END), 0) AS income,
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Expense' THEN "Amount" ELSE 0 END), 0) AS expense
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS income,
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS expense
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
           {filter_sql}
           {date_sql}
         ''',
@@ -1277,14 +1393,15 @@ def cash_flow(period="all_time", filters=None):
     rows = _fetch_all(
         f'''
         SELECT
-          COALESCE("Payment_Method", 'Unknown') AS payment_method,
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Income' THEN "Amount" ELSE 0 END), 0) AS inflow,
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Expense' THEN "Amount" ELSE 0 END), 0) AS outflow
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+          COALESCE(t."Payment_Method", 'Unknown') AS payment_method,
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS inflow,
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS outflow
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
           {filter_sql}
           {date_sql}
-        GROUP BY COALESCE("Payment_Method", 'Unknown')
+        GROUP BY COALESCE(t."Payment_Method", 'Unknown')
         ORDER BY payment_method
         ''',
         params,
@@ -1323,14 +1440,15 @@ def sector_summary(period="all_time", filters=None):
     rows = _fetch_all(
         f'''
         SELECT
-          COALESCE("Sector", 'Unknown') AS sector,
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Income' THEN "Amount" ELSE 0 END), 0) AS income,
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Expense' THEN "Amount" ELSE 0 END), 0) AS expense
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+          COALESCE(t."Sector", 'Unknown') AS sector,
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS income,
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS expense
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
           {filter_sql}
           {date_sql}
-        GROUP BY COALESCE("Sector", 'Unknown')
+        GROUP BY COALESCE(t."Sector", 'Unknown')
         ORDER BY sector
         ''',
         params,
@@ -1358,19 +1476,21 @@ def category_summary(period="all_time", filters=None):
     date_sql, params = _date_filter(period)
     filter_sql, filter_params = _dimension_filter(filters)
     params.update(filter_params)
+    category_expr = _linked_category_expr("t")
     rows = _fetch_all(
         f'''
         SELECT
-          COALESCE("Sector", 'Unknown') AS sector,
-          COALESCE("Categorization", 'Unknown') AS category,
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Income' THEN "Amount" ELSE 0 END), 0) AS income,
-          COALESCE(SUM(CASE WHEN "Income_Expense" = 'Expense' THEN "Amount" ELSE 0 END), 0) AS expense,
+          COALESCE(t."Sector", 'Unknown') AS sector,
+          COALESCE({category_expr}, 'Unknown') AS category,
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS income,
+          COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS expense,
           COUNT(*) AS transaction_count
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
           {filter_sql}
           {date_sql}
-        GROUP BY COALESCE("Sector", 'Unknown'), COALESCE("Categorization", 'Unknown')
+        GROUP BY COALESCE(t."Sector", 'Unknown'), COALESCE({category_expr}, 'Unknown')
         ORDER BY sector, expense DESC, income DESC, category
         ''',
         params,
@@ -1415,16 +1535,17 @@ def top_expenses(period="all_time", filters=None, limit=5):
     rows = _fetch_all(
         f'''
         SELECT
-          "Date",
-          COALESCE("Sector", 'Unknown') AS sector,
-          COALESCE("Categorization", 'Unknown') AS category,
-          COALESCE("Item_Description", '') AS item,
-          "Amount" AS amount,
-          COALESCE("Payment_Method", 'Unknown') AS payment_method
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
-          AND "Income_Expense" = 'Expense'
-          AND "Amount" IS NOT NULL
+          t."Date",
+          COALESCE(t."Sector", 'Unknown') AS sector,
+          COALESCE({_linked_category_expr("t")}, 'Unknown') AS category,
+          COALESCE(t."Item_Description", '') AS item,
+          t."Amount" AS amount,
+          COALESCE(t."Payment_Method", 'Unknown') AS payment_method
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
+          AND t."Income_Expense" = 'Expense'
+          AND t."Amount" IS NOT NULL
           {filter_sql}
           {date_sql}
         ORDER BY "Amount" DESC NULLS LAST
@@ -1451,16 +1572,17 @@ def top_income(period="all_time", filters=None, limit=5):
     rows = _fetch_all(
         f'''
         SELECT
-          "Date",
-          COALESCE("Sector", 'Unknown') AS sector,
-          COALESCE("Categorization", 'Unknown') AS category,
-          COALESCE("Item_Description", '') AS item,
-          "Amount" AS amount,
-          COALESCE("Payment_Method", 'Unknown') AS payment_method
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
-          AND "Income_Expense" = 'Income'
-          AND "Amount" IS NOT NULL
+          t."Date",
+          COALESCE(t."Sector", 'Unknown') AS sector,
+          COALESCE({_linked_category_expr("t")}, 'Unknown') AS category,
+          COALESCE(t."Item_Description", '') AS item,
+          t."Amount" AS amount,
+          COALESCE(t."Payment_Method", 'Unknown') AS payment_method
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
+          AND t."Income_Expense" = 'Income'
+          AND t."Amount" IS NOT NULL
           {filter_sql}
           {date_sql}
         ORDER BY "Amount" DESC NULLS LAST
@@ -1488,20 +1610,21 @@ def list_transactions(period="all_time", filters=None, limit=20):
     rows = _fetch_all(
         f'''
         SELECT
-          id,
-          "Date",
-          COALESCE("Income_Expense", '') AS income_expense,
-          COALESCE("Sector", 'Unknown') AS sector,
-          COALESCE("Categorization", 'Unknown') AS category,
-          COALESCE("Item_Description", '') AS item,
-          "Amount" AS amount,
-          COALESCE("Payment_Method", 'Unknown') AS payment_method
+          t.id,
+          t."Date",
+          COALESCE(t."Income_Expense", '') AS income_expense,
+          COALESCE(t."Sector", 'Unknown') AS sector,
+          COALESCE({_linked_category_expr("t")}, 'Unknown') AS category,
+          COALESCE(t."Item_Description", '') AS item,
+          t."Amount" AS amount,
+          COALESCE(t."Payment_Method", 'Unknown') AS payment_method
           {note_select}
-        FROM {_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+        FROM {_table_ref()} t
+        {_transaction_category_link_join("t")}
+        WHERE COALESCE(t.__nc_deleted, false) = false
           {filter_sql}
           {date_sql}
-        ORDER BY "Date" DESC NULLS LAST, id DESC
+        ORDER BY t."Date" DESC NULLS LAST, t.id DESC
         LIMIT %(limit)s
         ''',
         params,
@@ -1582,20 +1705,21 @@ def sotephwar_transection_top(period="all_time", limit=5):
     rows = _fetch_all(
         f'''
         SELECT
-          "Invoice_Date" AS invoice_date,
-          COALESCE("Invoice_Number", '') AS invoice_number,
-          COALESCE("Customer_Name", '') AS customer_name,
-          COALESCE("Item", '') AS item,
-          COALESCE("Note", '') AS note,
-          "Quantity" AS quantity,
-          "Total_Amount" AS total_amount,
-          "Amount_Received" AS amount_received,
-          COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) AS outstanding_amount
-        FROM {_sotephwar_transection_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
-          AND "Total_Amount" IS NOT NULL
+          s."Invoice_Date" AS invoice_date,
+          COALESCE(s."Invoice_Number", '') AS invoice_number,
+          COALESCE({_linked_customer_expr("s")}, '') AS customer_name,
+          COALESCE(s."Item", '') AS item,
+          COALESCE(s."Note", '') AS note,
+          s."Quantity" AS quantity,
+          s."Total_Amount" AS total_amount,
+          s."Amount_Received" AS amount_received,
+          COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()} s
+        {_sotephwar_customer_link_join("s")}
+        WHERE COALESCE(s.__nc_deleted, false) = false
+          AND s."Total_Amount" IS NOT NULL
           {date_sql}
-        ORDER BY "Total_Amount" DESC NULLS LAST
+        ORDER BY s."Total_Amount" DESC NULLS LAST
         LIMIT %(limit)s
         ''',
         params,
@@ -1624,20 +1748,21 @@ def sotephwar_transection_list(period="all_time", limit=20, unpaid_only=False):
     rows = _fetch_all(
         f'''
         SELECT
-          "Invoice_Date" AS invoice_date,
-          COALESCE("Invoice_Number", '') AS invoice_number,
-          COALESCE("Customer_Name", '') AS customer_name,
-          COALESCE("Item", '') AS item,
-          COALESCE("Note", '') AS note,
-          "Quantity" AS quantity,
-          "Total_Amount" AS total_amount,
-          "Amount_Received" AS amount_received,
-          COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) AS outstanding_amount
-        FROM {_sotephwar_transection_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+          s."Invoice_Date" AS invoice_date,
+          COALESCE(s."Invoice_Number", '') AS invoice_number,
+          COALESCE({_linked_customer_expr("s")}, '') AS customer_name,
+          COALESCE(s."Item", '') AS item,
+          COALESCE(s."Note", '') AS note,
+          s."Quantity" AS quantity,
+          s."Total_Amount" AS total_amount,
+          s."Amount_Received" AS amount_received,
+          COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()} s
+        {_sotephwar_customer_link_join("s")}
+        WHERE COALESCE(s.__nc_deleted, false) = false
           {unpaid_sql}
           {date_sql}
-        ORDER BY "Invoice_Date" DESC NULLS LAST, id DESC
+        ORDER BY s."Invoice_Date" DESC NULLS LAST, s.id DESC
         LIMIT %(limit)s
         ''',
         params,
@@ -1708,8 +1833,8 @@ def sotephwar_transection_customer(
     params["limit"] = limit
     customer_sql = ""
     if customer:
-        customer_sql = 'AND "Customer_Name" ILIKE %(customer_pattern)s'
-        params["customer_pattern"] = f"%{customer}%"
+        customer_sql = f"AND {_customer_normalized_sql()} = %(customer_normalized)s"
+        params["customer_normalized"] = normalize_name(customer)
     unpaid_sql = ""
     if unpaid_only:
         unpaid_sql = 'AND COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) > 0'
@@ -1721,22 +1846,23 @@ def sotephwar_transection_customer(
     rows = _fetch_all(
         f'''
         SELECT
-          "Invoice_Date" AS invoice_date,
-          COALESCE("Invoice_Number", '') AS invoice_number,
-          COALESCE("Customer_Name", '') AS customer_name,
-          COALESCE("Item", '') AS item,
-          COALESCE("Note", '') AS note,
-          "Quantity" AS quantity,
-          "Total_Amount" AS total_amount,
-          "Amount_Received" AS amount_received,
-          COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) AS outstanding_amount
-        FROM {_sotephwar_transection_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
+          s."Invoice_Date" AS invoice_date,
+          COALESCE(s."Invoice_Number", '') AS invoice_number,
+          COALESCE({_linked_customer_expr("s")}, '') AS customer_name,
+          COALESCE(s."Item", '') AS item,
+          COALESCE(s."Note", '') AS note,
+          s."Quantity" AS quantity,
+          s."Total_Amount" AS total_amount,
+          s."Amount_Received" AS amount_received,
+          COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0) AS outstanding_amount
+        FROM {_sotephwar_transection_table_ref()} s
+        {_sotephwar_customer_link_join("s")}
+        WHERE COALESCE(s.__nc_deleted, false) = false
           {customer_sql}
           {unpaid_sql}
           {invoice_sql}
           {date_sql}
-        ORDER BY "Customer_Name", "Invoice_Date", id
+        ORDER BY customer_name, s."Invoice_Date", s.id
         LIMIT %(limit)s
         ''',
         params,

@@ -336,7 +336,9 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             'COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) > 0',
             captured["sql"],
         )
-        self.assertIn('COALESCE("Note", \'\') AS note', captured["sql"])
+        self.assertIn('cust."customer_name"', captured["sql"])
+        self.assertIn('s."Customer_Name"', captured["sql"])
+        self.assertIn('COALESCE(s."Note", \'\') AS note', captured["sql"])
         self.assertEqual(50, captured["params"]["limit"])
 
     def test_sotephwar_voucher_answer_includes_note_when_available(self):
@@ -693,9 +695,11 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             "categories": ["Makro Expense", "Farm/Wages and salary"],
         })
 
-        self.assertIn('"Categorization" IN (%(category_0)s, %(category_1)s)', sql)
-        self.assertEqual("Makro Expense", params["category_0"])
-        self.assertEqual("Farm/Wages and salary", params["category_1"])
+        self.assertIn('cm."category_name"', sql)
+        self.assertIn('t."Categorization"', sql)
+        self.assertIn('IN (%(category_0)s, %(category_1)s)', sql)
+        self.assertEqual("makro expense", params["category_0"])
+        self.assertEqual("farm wages and salary", params["category_1"])
         self.assertEqual("Expense", params["income_expense"])
 
     def test_sotephwar_sector_filter_uses_sotephwar_only(self):
@@ -889,7 +893,9 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual("month:2026-05", result["period"])
         self.assertIn('COALESCE("Note", \'\') AS note', captured["sql"])
         self.assertIn('AND "Income_Expense" = %(income_expense)s', captured["sql"])
-        self.assertIn('REPLACE(LOWER(COALESCE("Categorization", \'\')), \'set up\', \'setup\') LIKE %(transaction_category_search)s', captured["sql"])
+        self.assertIn('cm."category_name"', captured["sql"])
+        self.assertIn('t."Categorization"', captured["sql"])
+        self.assertIn('LIKE %(transaction_category_search)s', captured["sql"])
         self.assertIn('REPLACE(LOWER(COALESCE("Note", \'\')), \'set up\', \'setup\') LIKE %(transaction_note_search)s', captured["sql"])
         self.assertEqual("%factory setup cost%", captured["params"]["transaction_category_search"])
         self.assertEqual("%factory setup%", captured["params"]["transaction_note_search"])
@@ -930,7 +936,9 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         self.assertEqual("all_time", result["period"])
         self.assertEqual(1200000, result["total_expense"])
-        self.assertIn('REPLACE(LOWER(COALESCE("Categorization", \'\')), \'set up\', \'setup\') LIKE %(transaction_category_search)s', captured["sql"])
+        self.assertIn('cm."category_name"', captured["sql"])
+        self.assertIn('t."Categorization"', captured["sql"])
+        self.assertIn('LIKE %(transaction_category_search)s', captured["sql"])
         self.assertIn('REPLACE(LOWER(COALESCE("Item_Description", \'\')), \'set up\', \'setup\') LIKE %(transaction_note_search)s', captured["sql"])
         self.assertIn('REPLACE(LOWER(COALESCE("Note", \'\')), \'set up\', \'setup\') LIKE %(transaction_note_search)s', captured["sql"])
         self.assertNotIn('AND "Date" >= %(start)s', captured["sql"])

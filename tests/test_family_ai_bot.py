@@ -10,6 +10,7 @@ class FakeMessage:
     def __init__(self, chat_id, thread_id):
         self.chat_id = chat_id
         self.message_thread_id = thread_id
+        self.message_id = 456
         self.replies = []
 
     def reply_text(self, text):
@@ -19,6 +20,23 @@ class FakeMessage:
 class FakeUpdate:
     def __init__(self, message):
         self.message = message
+
+
+class FakeJobQueue:
+    def __init__(self):
+        self.jobs = []
+
+    def run_once(self, callback, delay, context=None):
+        self.jobs.append({
+            "callback": callback,
+            "delay": delay,
+            "context": context,
+        })
+
+
+class FakeContext:
+    def __init__(self):
+        self.job_queue = FakeJobQueue()
 
 
 class FamilyAiBotFilterTest(unittest.TestCase):
@@ -49,6 +67,19 @@ class FamilyAiBotFilterTest(unittest.TestCase):
         message = FakeMessage(-1003850232296, 5)
 
         self.assertFalse(family_ai_bot._is_allowed_message(message))
+
+    def test_family_bot_schedules_auto_delete_for_ai_topic_message(self):
+        message = FakeMessage(-1003850232296, 4)
+        context = FakeContext()
+
+        family_ai_bot._schedule_auto_delete(context, message)
+
+        self.assertEqual(1, len(context.job_queue.jobs))
+        self.assertEqual(family_ai_bot.AUTO_DELETE_SECONDS, context.job_queue.jobs[0]["delay"])
+        self.assertEqual(
+            {"chat_id": -1003850232296, "message_id": 456},
+            context.job_queue.jobs[0]["context"],
+        )
 
     def test_whereami_does_not_reply_in_ignored_finance_thread(self):
         message = FakeMessage(-1003850232296, 5)

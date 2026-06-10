@@ -38,6 +38,7 @@ TELEGRAM_ALLOWED_CHAT_ID = _setting("FAMILY_ALLOWED_CHAT_ID")
 TELEGRAM_ALLOWED_THREAD_ID = _setting("FAMILY_ALLOWED_THREAD_ID")
 TELEGRAM_IGNORED_THREAD_IDS = _setting("FAMILY_IGNORED_THREAD_IDS", "")
 AI_MODEL = _setting("FAMILY_AI_MODEL", "gemma4:e4b")
+AUTO_DELETE_SECONDS = int(_setting("FAMILY_AUTO_DELETE_SECONDS", "86400"))
 
 
 def _optional_int(value):
@@ -90,6 +91,39 @@ def _split_message(text, size=3900):
         text[i:i + size]
         for i in range(0, len(text), size)
     ]
+
+
+def _delete_message_job(context: CallbackContext):
+    data = context.job.context
+    try:
+        context.bot.delete_message(
+            chat_id=data["chat_id"],
+            message_id=data["message_id"],
+        )
+    except Exception as exc:
+        print(f"Auto-delete skipped: {exc.__class__.__name__}: {exc}", flush=True)
+
+
+def _schedule_auto_delete(context, message):
+    if not context or AUTO_DELETE_SECONDS <= 0:
+        return
+    if not getattr(context, "job_queue", None):
+        return
+    message_id = getattr(message, "message_id", None)
+    chat_id = getattr(message, "chat_id", None)
+    if message_id is None or chat_id is None:
+        return
+    context.job_queue.run_once(
+        _delete_message_job,
+        AUTO_DELETE_SECONDS,
+        context={"chat_id": chat_id, "message_id": message_id},
+    )
+
+
+def _reply_text(message, context, text):
+    reply = message.reply_text(text)
+    _schedule_auto_delete(context, reply)
+    return reply
 
 
 def _scraped_context(question):
@@ -203,7 +237,10 @@ def whereami(update: Update, context: CallbackContext):
         print(f"Ignoring /whereami: {reject_reason}", flush=True)
         return
 
-    message.reply_text(
+    _schedule_auto_delete(context, message)
+    _reply_text(
+        message,
+        context,
         "chat_id: {chat_id}\nthread_id: {thread_id}".format(
             chat_id=message.chat_id,
             thread_id=_message_thread_id(message),
@@ -226,12 +263,13 @@ def handle_message(update: Update, context: CallbackContext):
         print(f"Ignoring text: {reject_reason}", flush=True)
         return
 
+    _schedule_auto_delete(context, message)
     try:
         answer = ask_family_ai(message.text)
         for part in _split_message(answer):
-            message.reply_text(part)
+            _reply_text(message, context, part)
     except Exception as e:
-        message.reply_text(f"Error: {str(e)}")
+        _reply_text(message, context, f"Error: {str(e)}")
 
 
 def main():

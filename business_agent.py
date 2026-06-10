@@ -24,10 +24,12 @@ FAST_FORMULAS = {
     "top_income",
     "list_transactions",
     "sotephwar_transection_summary",
+    "sotephwar_transection_monthly_summary",
     "sotephwar_transection_top",
     "sotephwar_transection_list",
     "sotephwar_transection_quantity",
     "sotephwar_transection_customer",
+    "sotephwar_payment_update",
     "sotephwar_inventory_stock",
     "sotephwar_inventory_movement_summary",
     "sotephwar_inventory_list",
@@ -82,10 +84,12 @@ Available formulas:
 - top_income: biggest income, top sales, largest revenue
 - list_transactions: transaction records for a specific date
 - sotephwar_transection_summary: totals from Sotephwar_Transection only
+- sotephwar_transection_monthly_summary: month-by-month income totals from Sotephwar_Transection only
 - sotephwar_transection_top: top invoices from Sotephwar_Transection only
 - sotephwar_transection_list: invoice rows from Sotephwar_Transection only
 - sotephwar_transection_quantity: quantity sold by item from Sotephwar_Transection only
 - sotephwar_transection_customer: voucher rows for one customer from Sotephwar_Transection only
+- sotephwar_payment_update: update Amount_Received and Note for a Sotephwar voucher payment
 - sotephwar_inventory_stock: current Sotephwar inventory stock by store and product
 - sotephwar_inventory_movement_summary: Sotephwar inventory production, transfer, and sale movement totals
 - sotephwar_inventory_list: Sotephwar inventory movement rows
@@ -386,6 +390,18 @@ def _fast_answer(result):
             f"Outstanding: {result['outstanding_amount']:,}"
         )
 
+    if formula == "sotephwar_transection_monthly_summary":
+        if not result["months"]:
+            return f"Sotephwar_Transection month-by-month income for {period}: no matching data found."
+        lines = [f"Sotephwar_Transection month-by-month income for {period}"]
+        for row in result["months"]:
+            lines.append(
+                f"{row['month']}: total {row['total_amount']:,}, "
+                f"received {row['amount_received']:,}, outstanding {row['outstanding_amount']:,}, "
+                f"invoices {row['invoice_count']:,}"
+            )
+        return "\n".join(lines)
+
     if formula == "sotephwar_transection_top":
         if not result["invoices"]:
             return f"Top invoices from Sotephwar_Transection for {period}: no matching data found."
@@ -426,6 +442,18 @@ def _fast_answer(result):
 
     if formula == "sotephwar_transection_customer":
         customer = result.get("customer") or "matching customer"
+        customer_match = result.get("customer_match") or {}
+        if customer_match.get("confidence") == "ambiguous":
+            candidates = customer_match.get("candidates") or []
+            lines = [
+                "Sotephwar_Transection customer search is too broad.",
+                f"Search text: {customer_match.get('query') or '-'}",
+                "Please use the full customer name.",
+            ]
+            if candidates:
+                lines.append("Possible matches:")
+                lines.extend(f"- {candidate}" for candidate in candidates[:8])
+            return "\n".join(lines)
         if not result["invoices"]:
             label = "unpaid vouchers" if result.get("unpaid_only") else "vouchers"
             return f"Sotephwar_Transection {label} for {customer}: no matching data found."
@@ -443,6 +471,31 @@ def _fast_answer(result):
             if row.get("note") or result.get("include_note"):
                 line += f"\nNote: {row.get('note') or '-'}"
             lines.append(line)
+        return "\n\n".join(lines)
+
+    if formula == "sotephwar_payment_update":
+        if not result.get("updated"):
+            missing = ", ".join(result.get("missing") or [])
+            return (
+                "Sote Phwar payment was not updated.\n"
+                f"Missing: {missing}\n"
+                "Use: Sote Phwar voucher NUMBER got 400000 kyats received date YYYY-MM-DD"
+            )
+        lines = [
+            "Sote Phwar payment updated",
+            f"Voucher: {result['invoice_number']}",
+            f"Payment received: {result['payment_amount']:,}",
+            f"Received date note: {result['received_date']}",
+        ]
+        for row in result["invoices"]:
+            lines.append(
+                f"{row['invoice_date']} - {row['customer_name']} - {row['item']}\n"
+                f"Total: {row['total_amount']:,}\n"
+                f"Received before: {row['previous_amount_received']:,}\n"
+                f"Received now: {row['amount_received']:,}\n"
+                f"Outstanding: {row['outstanding_amount']:,}\n"
+                f"Note: {row.get('note') or '-'}"
+            )
         return "\n\n".join(lines)
 
     if formula == "sotephwar_inventory_stock":

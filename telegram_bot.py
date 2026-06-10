@@ -1058,12 +1058,16 @@ def handle_message(update: Update, context: CallbackContext):
     if _handle_search_text(update.message, context, user_text):
         return
 
-    _reply_text(
-        update.message,
-        context,
-        "Use /menu to open Business Intelligence.",
-        reply_markup=_remove_reply_keyboard(),
-    )
+    question = _normalize_command(user_text)
+    try:
+        _answer_finance_question(update.message, question, context=context)
+    except Exception as e:
+        _reply_text(
+            update.message,
+            context,
+            f"Error: {str(e)}",
+            reply_markup=_remove_reply_keyboard(),
+        )
 
 
 def main():

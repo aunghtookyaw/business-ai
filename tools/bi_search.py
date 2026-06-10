@@ -1,12 +1,31 @@
 from difflib import SequenceMatcher
 
 from tools import search_intelligence
+from tools import master_data
 from tools.formula_engine import (
     _fetch_all,
     _sotephwar_transection_table_ref,
     _dimension_values,
     _table_ref,
 )
+import config
+
+
+def _unique_values(values):
+    seen = set()
+    unique = []
+    for value in values:
+        value = str(value or "").strip()
+        normalized = master_data.normalize_name(value)
+        if not value or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(value)
+    return unique
+
+
+def _master_table_ref(table_name):
+    return f'"{config.TRANSACTION_SCHEMA}"."{table_name}"'
 
 
 def _rank_matches(query, values, limit=8):
@@ -16,7 +35,7 @@ def _rank_matches(query, values, limit=8):
 
     rows = []
     for value in values:
-        normalized = search_intelligence.normalize_text(value)
+        normalized = master_data.normalize_name(value)
         if not normalized:
             continue
         if normalized_query == normalized:
@@ -25,6 +44,11 @@ def _rank_matches(query, values, limit=8):
             score = 0.95
         elif all(token in normalized.split() for token in normalized_query.split()):
             score = 0.9
+        elif all(
+            any(candidate.startswith(token) for candidate in normalized.split())
+            for token in normalized_query.split()
+        ):
+            score = 0.85
         else:
             score = SequenceMatcher(None, normalized_query, normalized).ratio()
         if score >= 0.58:
@@ -44,7 +68,16 @@ def _rank_matches(query, values, limit=8):
 
 
 def customer_values():
-    rows = _fetch_all(
+    master_rows = _fetch_all(
+        f'''
+        SELECT "customer_name" AS value
+        FROM {_master_table_ref("customer_master")}
+        WHERE COALESCE(__nc_deleted, false) = false
+          AND NULLIF(TRIM("customer_name"), '') IS NOT NULL
+        ORDER BY "customer_name"
+        '''
+    )
+    transaction_rows = _fetch_all(
         f'''
         SELECT DISTINCT "Customer_Name" AS value
         FROM {_sotephwar_transection_table_ref()}
@@ -53,10 +86,21 @@ def customer_values():
         ORDER BY "Customer_Name"
         '''
     )
-    return [row["value"] for row in rows if row.get("value")]
+    return _unique_values([row["value"] for row in master_rows + transaction_rows if row.get("value")])
 
 
 def category_values(sector=None, income_expense=None):
+    master_rows = _fetch_all(
+        f'''
+        SELECT "category_name" AS value
+        FROM {_master_table_ref("category_master")}
+        WHERE COALESCE(__nc_deleted, false) = false
+          AND NULLIF(TRIM("category_name"), '') IS NOT NULL
+        ORDER BY "category_name"
+        '''
+    )
+    master_values = [row["value"] for row in master_rows if row.get("value")]
+
     if sector or income_expense:
         clauses = []
         params = {}
@@ -77,10 +121,11 @@ def category_values(sector=None, income_expense=None):
             ''',
             params,
         )
-        return [row["value"] for row in rows if row.get("value")]
+        transaction_values = [row["value"] for row in rows if row.get("value")]
+        return _unique_values(master_values + transaction_values)
 
     values = _dimension_values()
-    return values.get("categories") or []
+    return _unique_values(master_values + (values.get("categories") or []))
 
 
 def search_customers(query, limit=8):

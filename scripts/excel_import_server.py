@@ -29,7 +29,7 @@ def import_rows():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
 
-    has_errors = any(result["errors"] for result in results.values())
+    has_errors = _has_import_errors(results)
     return jsonify({
         "ok": not has_errors,
         "results": results,
@@ -49,6 +49,8 @@ def import_rows_for_vba():
 
     lines = ["OK"]
     for table_key, result in results.items():
+        if table_key.startswith("_"):
+            continue
         for row in result["inserted"]:
             lines.append(
                 "|".join([
@@ -70,8 +72,16 @@ def import_rows_for_vba():
                 ])
             )
 
-    has_errors = any(result["errors"] for result in results.values())
+    has_errors = _has_import_errors(results)
     return "\n".join(lines) + "\n", 207 if has_errors else 200, {"Content-Type": "text/plain"}
+
+
+def _has_import_errors(results):
+    return any(
+        result.get("errors")
+        for table_key, result in results.items()
+        if not table_key.startswith("_")
+    )
 
 
 def _line_value(value):
