@@ -65,6 +65,7 @@ INCOME_REPORTS = [
     ("total_income", "Total Income"),
     ("income_summary", "Income Summary"),
     ("sales_by_customer", "Sales by Customer"),
+    ("outstanding_balance", "Outstanding / Unpaid"),
     ("sales_by_product", "Sales by Product"),
     ("top_customers", "Top Customers"),
     ("income_transactions", "Income Transactions"),
@@ -148,7 +149,13 @@ def reports_for(business, module):
 
 
 def report_needs_customer(report):
-    return report in {"sales_by_customer", "customer_sales", "customer_history", "customer_profitability"}
+    return report in {
+        "sales_by_customer",
+        "customer_sales",
+        "customer_history",
+        "customer_profitability",
+        "outstanding_balance",
+    }
 
 
 def report_needs_category(report):

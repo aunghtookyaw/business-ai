@@ -341,6 +341,26 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertIn('COALESCE(s."Note", \'\') AS note', captured["sql"])
         self.assertEqual(50, captured["params"]["limit"])
 
+    def test_sotephwar_voucher_pdf_uses_two_hundred_limit(self):
+        captured = {}
+        original_fetch_all = formula_engine._fetch_all
+
+        def fake_fetch_all(sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = params
+            return []
+
+        formula_engine._fetch_all = fake_fetch_all
+        try:
+            formula_engine.run_formula(
+                "sotephwar_transection_customer",
+                "Show unpaid Sote Phwar vouchers by customer send pdf",
+            )
+        finally:
+            formula_engine._fetch_all = original_fetch_all
+
+        self.assertEqual(200, captured["params"]["limit"])
+
     def test_sotephwar_voucher_answer_includes_note_when_available(self):
         answer = business_agent._fast_answer({
             "formula": "sotephwar_transection_customer",
@@ -786,9 +806,83 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             self.assertEqual(700, result["net_profit"])
             self.assertEqual({"sector": "Sote Phwar", "income_expense": "Expense"}, seen[0])
             self.assertEqual(1000, result["sources"]["sotephwar_transection_total_amount"])
+            self.assertEqual(800, result["amount_received"])
+            self.assertEqual(200, result["outstanding_amount"])
         finally:
             bi_executor.sotephwar_transection_summary = original_sotephwar_summary
             bi_executor.expense_total = original_expense_total
+
+    def test_sotephwar_kpi_answer_shows_unpaid_amount(self):
+        answer = business_agent._fast_answer({
+            "formula": "kpi_overview",
+            "period": "this_month",
+            "total_income": 1000,
+            "total_expense": 300,
+            "net_profit": 700,
+            "profit_margin_percent": 70,
+            "amount_received": 800,
+            "outstanding_amount": 200,
+        })
+
+        self.assertIn("Received: 800", answer)
+        self.assertIn("Outstanding / unpaid: 200", answer)
+
+    def test_sotephwar_income_menu_includes_unpaid_report(self):
+        from tools.bi_catalog import reports_for
+
+        reports = dict(reports_for("sote_phwar", "income"))
+
+        self.assertEqual("Outstanding / Unpaid", reports["outstanding_balance"])
+
+    def test_outstanding_balance_requires_customer(self):
+        from tools.bi_intents import BIIntent, validate_intent
+
+        missing = validate_intent(BIIntent(
+            business="sote_phwar",
+            module="income",
+            report="outstanding_balance",
+            period={"type": "relative", "value": "this_month"},
+            output="text",
+        ))
+
+        self.assertIn("customer", missing)
+
+    def test_bi_pdf_outstanding_balance_uses_two_hundred_voucher_limit(self):
+        from tools import bi_executor
+        from tools.bi_intents import BIIntent
+
+        original_sotephwar_customer = bi_executor.sotephwar_transection_customer
+        seen = {}
+
+        def fake_sotephwar_customer(period, customer=None, limit=50, unpaid_only=False):
+            seen["period"] = period
+            seen["customer"] = customer
+            seen["limit"] = limit
+            seen["unpaid_only"] = unpaid_only
+            return {
+                "formula": "sotephwar_transection_customer",
+                "period": period,
+                "customer": customer,
+                "unpaid_only": unpaid_only,
+                "invoices": [],
+            }
+
+        bi_executor.sotephwar_transection_customer = fake_sotephwar_customer
+        try:
+            bi_executor.execute_intent(BIIntent(
+                business="sote_phwar",
+                module="income",
+                report="outstanding_balance",
+                period={"type": "relative", "value": "this_month"},
+                output="pdf",
+                customer="Ma Shwe War",
+            ))
+        finally:
+            bi_executor.sotephwar_transection_customer = original_sotephwar_customer
+
+        self.assertEqual("Ma Shwe War", seen["customer"])
+        self.assertEqual(200, seen["limit"])
+        self.assertTrue(seen["unpaid_only"])
 
     def test_bi_sotephwar_cash_flow_uses_received_amount(self):
         from tools import bi_executor

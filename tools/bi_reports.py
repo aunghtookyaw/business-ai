@@ -41,6 +41,10 @@ def format_text_report(payload):
         ])
         if "profit_margin_percent" in result:
             lines.append(f"Margin: {result['profit_margin_percent']}%")
+        if "amount_received" in result:
+            lines.append(f"Received: {_money(result.get('amount_received', 0))}")
+        if "outstanding_amount" in result:
+            lines.append(f"Outstanding / unpaid: {_money(result.get('outstanding_amount', 0))}")
     elif formula == "cash_flow":
         lines.extend([
             f"Inflow: {_money(result.get('total_inflow', 0))}",

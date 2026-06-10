@@ -3,6 +3,7 @@ set -euo pipefail
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 PYTHON_BIN="/usr/bin/python3"
+export SSL_CERT_FILE="$("$PYTHON_BIN" -c 'import certifi; print(certifi.where())')"
 
 export TELEGRAM_ALLOWED_CHAT_ID="-1003850232296"
 export TELEGRAM_ALLOWED_THREAD_ID="5"

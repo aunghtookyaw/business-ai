@@ -1272,9 +1272,9 @@ def normalize_period(question):
 def extract_top_limit(question, default=5, maximum=50):
     text = question.lower()
     patterns = (
-        r"\btop\s+(\d{1,2})\b",
-        r"\b(\d{1,2})\s+(?:top|biggest|largest|highest)\b",
-        r"\b(?:top|biggest|largest|highest)\s+expenses?\s+(\d{1,2})\b",
+        r"\btop\s+(\d{1,3})\b",
+        r"\b(\d{1,3})\s+(?:top|biggest|largest|highest)\b",
+        r"\b(?:top|biggest|largest|highest)\s+expenses?\s+(\d{1,3})\b",
     )
 
     for pattern in patterns:
@@ -1288,6 +1288,11 @@ def extract_top_limit(question, default=5, maximum=50):
         return min(limit, maximum)
 
     return default
+
+
+def _pdf_requested(question):
+    text = _normalized_text(question)
+    return "pdf" in text or "print" in text
 
 
 def sales_total(period="all_time", filters=None):
@@ -2521,6 +2526,7 @@ def run_formula(formula_name, question):
         return formula(period, item=_sotephwar_item_filter(question))
     if formula_name == "sotephwar_transection_customer":
         customer_match = _sotephwar_customer_match(question)
+        voucher_limit = 200 if _pdf_requested(question) else 50
         if customer_match.confidence == "ambiguous":
             return {
                 "formula": "sotephwar_transection_customer",
@@ -2540,7 +2546,7 @@ def run_formula(formula_name, question):
         return formula(
             period,
             customer=customer_match.value if customer_match.safe else None,
-            limit=extract_top_limit(question, default=50),
+            limit=extract_top_limit(question, default=voucher_limit, maximum=200),
             unpaid_only=_sotephwar_unpaid_filter(question),
             invoice_numbers=_sotephwar_invoice_numbers(question),
             include_note=_sotephwar_note_requested(question),

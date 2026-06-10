@@ -46,6 +46,10 @@ def _product(intent):
     return intent.product or PRODUCT_BY_MODULE.get(intent.module)
 
 
+def _voucher_limit(intent):
+    return 200 if intent.output == "pdf" else 50
+
+
 def _sotephwar_income_expense_balance(period):
     income = sotephwar_transection_summary(period)
     expense = expense_total(period, {"sector": "Sote Phwar", "income_expense": "Expense"})
@@ -133,7 +137,7 @@ def execute_intent(intent):
     elif report == "income_summary":
         result = category_summary(period, _filters(intent, "Income"))
     elif report == "sales_by_customer":
-        result = sotephwar_transection_customer(period, customer=intent.customer, limit=50)
+        result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
     elif report == "top_customers":
         result = sotephwar_transection_top(period, limit=10)
     elif report == "sales_by_product":
@@ -149,14 +153,14 @@ def execute_intent(intent):
     elif report == "top_expenses":
         result = top_expenses(period, _filters(intent, "Expense"), limit=10)
     elif report == "customer_history":
-        result = sotephwar_transection_customer(period, customer=intent.customer, limit=50)
+        result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
     elif report == "customer_sales":
-        result = sotephwar_transection_customer(period, customer=intent.customer, limit=50)
+        result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
     elif report == "customer_profitability":
-        result = sotephwar_transection_customer(period, customer=intent.customer, limit=50)
+        result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
         result["note"] = "Profitability uses voucher totals and outstanding balance; direct cost by customer is not available yet."
     elif report == "outstanding_balance":
-        result = sotephwar_transection_customer(period, customer=intent.customer or None, limit=50, unpaid_only=True)
+        result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent), unpaid_only=True)
     elif report in {"current_stock", "low_stock", "stock_valuation"}:
         result = sotephwar_inventory_stock(product=_product(intent), store=_store(intent))
         if report == "low_stock":

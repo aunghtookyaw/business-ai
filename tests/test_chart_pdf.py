@@ -81,8 +81,11 @@ class ChartPdfTest(unittest.TestCase):
                 pdf_text = output_path.read_bytes().decode("latin-1")
                 self.assertIn("Voucher 12", pdf_text)
                 self.assertIn("Customer:", pdf_text)
+                self.assertIn("Paid", pdf_text)
                 self.assertIn("Received:", pdf_text)
                 self.assertIn("Outstanding:", pdf_text)
+                self.assertIn("1,800,000", pdf_text)
+                self.assertIn("900,000", pdf_text)
                 self.assertIn("Received 2026-06-06", pdf_text)
         finally:
             chart_pdf.choose_formula = original_choose_formula
@@ -159,7 +162,43 @@ class ChartPdfTest(unittest.TestCase):
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Voucher 22", pdf_text)
             self.assertIn("Customer:", pdf_text)
+            self.assertIn("Paid", pdf_text)
+            self.assertIn("Received:", pdf_text)
             self.assertIn("Outstanding:", pdf_text)
+
+    def test_sotephwar_voucher_pdf_can_include_two_hundred_cards(self):
+        result = {
+            "formula": "sotephwar_transection_customer",
+            "period": "this_month",
+            "customer": "Ma Shwe War",
+            "unpaid_only": True,
+            "invoices": [
+                {
+                    "invoice_date": "2026-06-01",
+                    "invoice_number": str(index),
+                    "customer_name": "Ma Shwe War",
+                    "item": "Sote Phwar 4L",
+                    "quantity": 1,
+                    "total_amount": 100000,
+                    "amount_received": 25000,
+                    "outstanding_amount": 75000,
+                    "note": "",
+                }
+                for index in range(1, 201)
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "two-hundred-vouchers.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Sote Phwar - Income - Outstanding / Unpaid - Ma Shwe War",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Voucher 200", pdf_text)
 
     def test_inventory_stock_pdf_uses_stock_display_layout(self):
         result = {
@@ -415,6 +454,31 @@ class ChartPdfTest(unittest.TestCase):
         self.assertIn("Total expense: 1,200,000", report)
         self.assertIn("Net total: -1,200,000", report)
         self.assertIn("Rows: 4", report)
+
+    def test_kpi_text_report_includes_unpaid_amount_when_available(self):
+        payload = {
+            "title": "Sote Phwar - KPI - KPI",
+            "period_label": "This Month",
+            "intent": {
+                "business": "sote_phwar",
+                "module": "kpi",
+                "report": "kpi",
+            },
+            "result": {
+                "formula": "kpi_overview",
+                "total_income": 1000,
+                "total_expense": 300,
+                "net_profit": 700,
+                "profit_margin_percent": 70,
+                "amount_received": 800,
+                "outstanding_amount": 200,
+            },
+        }
+
+        report = format_text_report(payload)
+
+        self.assertIn("Received: 800", report)
+        self.assertIn("Outstanding / unpaid: 200", report)
 
 
 if __name__ == "__main__":

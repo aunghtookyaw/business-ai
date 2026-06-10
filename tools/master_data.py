@@ -44,13 +44,20 @@ class DuplicateGroup:
 
 def normalize_name(value, phrase_aliases=None):
     phrase_aliases = phrase_aliases or PHRASE_ALIASES
-    text = str(value or "").replace("\xa0", " ").strip().lower()
+    text = _normalize_comma_honorific(str(value or "").replace("\xa0", " ").strip()).lower()
     text = re.sub(r"[_\-–—]+", " ", text)
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     for source, replacement in phrase_aliases.items():
         text = re.sub(rf"\b{re.escape(source)}\b", replacement, text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_comma_honorific(text):
+    match = re.fullmatch(r"\s*([^,]+?)\s*,\s*(ma|ko|u|daw)\s*", text, flags=re.IGNORECASE)
+    if match:
+        return f"{match.group(2)} {match.group(1)}"
+    return text
 
 
 def clean_display_name(value):

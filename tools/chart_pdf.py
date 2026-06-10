@@ -279,9 +279,9 @@ def _chart_spec(result, question):
         return {
             "kind": forced or "voucher_cards",
             "title": "Sote Phwar Vouchers",
-            "reason": "Best method: two-column voucher cards keep customer, voucher number, received amount, outstanding amount, and notes readable.",
+            "reason": "Best method: two-column voucher cards keep customer, voucher number, paid amount, outstanding amount, and notes readable.",
             "vouchers": rows,
-            "table": [("Voucher", "Customer", "Total", "Received", "Outstanding")] + [
+            "table": [("Voucher", "Customer", "Total", "Paid", "Outstanding")] + [
                 (
                     row.get("invoice_number"),
                     row.get("customer_name"),
@@ -676,6 +676,21 @@ def _draw_voucher_cards(pdf, vouchers, start_y=620):
                 break
 
 
+def _draw_voucher_summary(pdf, vouchers, x=50, y=698):
+    totals = [
+        ("Total", sum(int(row.get("total_amount") or 0) for row in vouchers)),
+        ("Paid", sum(int(row.get("amount_received") or 0) for row in vouchers)),
+        ("Outstanding", sum(int(row.get("outstanding_amount") or 0) for row in vouchers)),
+    ]
+    cell_width = 165
+    cell_height = 42
+    for index, (label, value) in enumerate(totals):
+        cell_x = x + (cell_width * index)
+        pdf.rect(cell_x, y - cell_height, cell_width, cell_height, fill=(246, 248, 251), stroke=(130, 145, 166))
+        pdf.text(cell_x + 10, y - 15, label, size=8.8, bold=True, color=(75, 85, 99))
+        pdf.text(cell_x + 10, y - 33, _money(value), size=13, bold=True)
+
+
 def _stock_quantity(row):
     for key in ("stock_qty", "quantity", "qty", "stock"):
         if key in row:
@@ -850,7 +865,9 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
     kind = spec.get("kind")
     if kind == "voucher_cards":
         pdf.text(50, 720, spec["title"], size=12, bold=True)
-        _draw_voucher_cards(pdf, spec.get("vouchers") or [], start_y=698)
+        vouchers = spec.get("vouchers") or []
+        _draw_voucher_summary(pdf, vouchers, y=698)
+        _draw_voucher_cards(pdf, vouchers, start_y=638)
         pdf.finish(output_path)
         return True
 

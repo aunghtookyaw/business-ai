@@ -64,7 +64,13 @@ def validate_intent(intent):
     if intent.output not in OUTPUTS:
         missing.append("output")
 
-    if intent.report in {"sales_by_customer", "customer_history", "customer_sales", "customer_profitability"} and not intent.customer:
+    if intent.report in {
+        "sales_by_customer",
+        "customer_history",
+        "customer_sales",
+        "customer_profitability",
+        "outstanding_balance",
+    } and not intent.customer:
         missing.append("customer")
     if intent.report in {"expense_by_category", "expense_detail"} and not intent.category and not intent.categories:
         missing.append("category")

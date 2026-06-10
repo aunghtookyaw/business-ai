@@ -28,6 +28,17 @@ class MasterDataNormalizationTest(unittest.TestCase):
 
         self.assertEqual({"pwint aung kyaw pol"}, normalized)
 
+    def test_customer_normalization_moves_comma_honorific_to_front(self):
+        values = [
+            "Ma Shwe War",
+            "Shwe War,Ma",
+            "Shwe War, Ma",
+        ]
+
+        normalized = {master_data.normalize_name(value) for value in values}
+
+        self.assertEqual({"ma shwe war"}, normalized)
+
     def test_duplicate_groups_choose_highest_count_canonical(self):
         groups = master_data.duplicate_groups(
             [

@@ -1,4 +1,5 @@
 python-telegram-bot==13.15
+certifi
 requests==2.31.0
 urllib3<2
 pandas==1.5.3

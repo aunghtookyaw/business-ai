@@ -291,6 +291,34 @@ class FinanceBotFilterTest(unittest.TestCase):
         finally:
             telegram_bot.search_customers = original_search_customers
 
+    def test_outstanding_balance_uses_customer_search_before_period(self):
+        original_search_customers = telegram_bot.search_customers
+        telegram_bot.search_customers = lambda text: [
+            {"value": "Ma Shwe War", "score": 1.0},
+        ]
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:sote_phwar",
+                "bi:module:income",
+                "bi:report:outstanding_balance",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual("customer", context.user_data[telegram_bot.BI_STATE_KEY]["awaiting"])
+
+            search_message = FakeMessage(-1003850232296, 5, "Ma Shwe War")
+            telegram_bot.handle_message(FakeUpdate(search_message), context)
+
+            self.assertEqual(["Ma Shwe War"], context.user_data[telegram_bot.BI_STATE_KEY]["candidates"])
+            self.assertEqual("Select customer:", search_message.replies[-1]["text"])
+        finally:
+            telegram_bot.search_customers = original_search_customers
+
     def test_expense_detail_uses_category_search_before_period(self):
         original_search_categories = telegram_bot.search_categories
         telegram_bot.search_categories = lambda text, **kwargs: [

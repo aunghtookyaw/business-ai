@@ -302,13 +302,18 @@ def _fast_answer(result):
         )
 
     if formula == "kpi_overview":
-        return (
-            f"KPI overview for {period}\n"
-            f"Income: {result['total_income']:,}\n"
-            f"Expense: {result['total_expense']:,}\n"
-            f"Net profit: {result['net_profit']:,}\n"
-            f"Profit margin: {result['profit_margin_percent']}%"
-        )
+        lines = [
+            f"KPI overview for {period}",
+            f"Income: {result['total_income']:,}",
+            f"Expense: {result['total_expense']:,}",
+            f"Net profit: {result['net_profit']:,}",
+            f"Profit margin: {result['profit_margin_percent']}%",
+        ]
+        if "amount_received" in result:
+            lines.append(f"Received: {result['amount_received']:,}")
+        if "outstanding_amount" in result:
+            lines.append(f"Outstanding / unpaid: {result['outstanding_amount']:,}")
+        return "\n".join(lines)
 
     if formula == "cash_flow":
         lines = [
