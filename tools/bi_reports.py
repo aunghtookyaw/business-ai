@@ -1,9 +1,12 @@
 import csv
 import tempfile
+from datetime import date
 from pathlib import Path
 
 
 def _money(value):
+    if isinstance(value, date):
+        return value.isoformat()
     if isinstance(value, int):
         return f"{value:,}"
     return value
@@ -31,6 +34,10 @@ def format_text_report(payload):
     formula = result.get("formula")
     if formula == "sales_total":
         lines.append(f"Total income: {_money(result.get('total_sales', 0))}")
+        if "amount_received" in result:
+            lines.append(f"Paid / received: {_money(result.get('amount_received', 0))}")
+        if "outstanding_amount" in result:
+            lines.append(f"Remained: {_money(result.get('outstanding_amount', 0))}")
     elif formula == "expense_total":
         lines.append(f"Total expense: {_money(result.get('total_expense', 0))}")
     elif formula in {"gross_profit", "kpi_overview"}:
@@ -87,9 +94,11 @@ def format_text_report(payload):
 
 def _format_row(index, row):
     preferred = [
-        "Date", "date", "invoice_date", "customer_name", "item", "category",
-        "sector", "product", "store", "type", "amount", "total_amount",
+        "Date", "date", "invoice_date", "next_due_date", "customer_name",
+        "creditor", "item", "category", "subcategory", "sector", "product",
+        "store", "type", "frequency", "status", "amount", "total_amount",
         "amount_received", "outstanding_amount", "stock_qty", "quantity",
+        "days_until_due", "notes",
     ]
     parts = []
     for key in preferred:
@@ -97,7 +106,8 @@ def _format_row(index, row):
             parts.append(f"{key}: {_money(row[key])}")
     if not parts:
         parts = [f"{key}: {_money(value)}" for key, value in row.items() if value not in (None, "")]
-    return f"{index}. " + " | ".join(parts[:8])
+    max_parts = 10 if row.get("creditor") or row.get("next_due_date") else 8
+    return f"{index}. " + " | ".join(parts[:max_parts])
 
 
 def write_excel_report(payload, output_path):

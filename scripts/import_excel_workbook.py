@@ -15,6 +15,7 @@ from tools.excel_importer import TABLES, import_excel_payload
 
 SHEETS = {
     "transection": "Transection",
+    "farm_transection": "Farm_Transection",
     "sotephwar_transection": "Sotephwar_Transection",
     "financial_obligations": "Financial_Obligations",
     "sotephwar_inventory": "Sotephwar_Inventory",

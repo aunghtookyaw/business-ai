@@ -19,6 +19,7 @@ WORKBOOK_PATH = OUTPUT_DIR / "business_data_import_template.xlsx"
 
 SHEETS = [
     ("transection", "Transection"),
+    ("farm_transection", "Farm_Transection"),
     ("sotephwar_transection", "Sotephwar_Transection"),
     ("financial_obligations", "Financial_Obligations"),
     ("sotephwar_inventory", "Sotephwar_Inventory"),
@@ -71,7 +72,7 @@ def main():
     instructions = workbook.create_sheet("Instructions")
     instructions["A1"] = "Business Data Import"
     instructions["A1"].font = Font(bold=True, size=16)
-    instructions["A3"] = "Fill rows in the three table sheets. Leave Upload_Status blank for rows you want to insert."
+    instructions["A3"] = "Fill rows in the table sheets. Leave Upload_Status blank for rows you want to insert."
     instructions["A4"] = "Run scripts/excel_import_server.py, then click the Excel macro button or run UploadBusinessData."
     instructions["A5"] = "Rows marked INSERTED are skipped by the macro, so clicking again does not resend those rows."
     instructions["A6"] = "The importer only inserts new rows. It does not delete, update, truncate, or replace NocoDB/Postgres data."

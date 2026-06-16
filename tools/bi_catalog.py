@@ -1,7 +1,6 @@
 BUSINESS_MENU = [
     ("sote_phwar", "Sote Phwar"),
     ("farm", "Farm"),
-    ("factory", "Factory"),
     ("extension", "Extension"),
     ("inventory", "Inventory"),
     ("customers", "Customers"),

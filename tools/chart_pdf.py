@@ -1,5 +1,7 @@
 import math
 import re
+import subprocess
+import tempfile
 import textwrap
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +26,16 @@ def _ascii(text):
     return "".join(char if 32 <= ord(char) < 127 else "?" for char in str(text))
 
 
+def _contains_non_ascii(value):
+    if isinstance(value, str):
+        return any(ord(char) > 127 for char in value)
+    if isinstance(value, dict):
+        return any(_contains_non_ascii(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_non_ascii(item) for item in value)
+    return False
+
+
 def _escape_pdf_text(text):
     return _ascii(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
@@ -33,6 +45,14 @@ def _money(value):
         return f"{int(value):,}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _unicode_value(value):
+    if value in (None, ""):
+        return "-"
+    if isinstance(value, (int, float)):
+        return _money(value)
+    return str(value)
 
 
 def _short_label(value, length=28):
@@ -416,6 +436,7 @@ def _farm_financial_spec(result, question, intent):
     module = intent.get("module")
     report = intent.get("report") or ""
     is_income = module == "income"
+    customer = intent.get("customer") or ""
     rows = []
     total = 0
     transaction_count = 0
@@ -430,6 +451,8 @@ def _farm_financial_spec(result, question, intent):
                     "item": f"{row.get('transaction_count', 0)} transactions",
                     "payment": "",
                     "amount": amount,
+                    "amount_received": row.get("amount_received", amount),
+                    "outstanding_amount": row.get("outstanding_amount", 0),
                 })
                 total += amount
                 transaction_count += int(row.get("transaction_count") or 0)
@@ -444,6 +467,8 @@ def _farm_financial_spec(result, question, intent):
                 "item": row.get("item") or "",
                 "payment": row.get("payment_method") or "",
                 "amount": amount,
+                "amount_received": row.get("amount_received", amount if is_income else ""),
+                "outstanding_amount": row.get("outstanding_amount", 0 if is_income else ""),
             })
             total += amount
         transaction_count = len(rows)
@@ -457,11 +482,43 @@ def _farm_financial_spec(result, question, intent):
                 "item": row.get("item") or "",
                 "payment": row.get("payment_method") or "",
                 "amount": amount,
+                "amount_received": row.get("amount_received", amount if is_income else ""),
+                "outstanding_amount": row.get("outstanding_amount", 0 if is_income else ""),
             })
             total += amount
         transaction_count = len(rows)
+    elif result.get("formula") == "farm_transection_customer":
+        for row in result.get("invoices") or []:
+            rows.append({
+                "date": row.get("invoice_date") or "",
+                "invoice_number": row.get("invoice_number") or "",
+                "category": "Farm Sales",
+                "customer_name": row.get("customer_name") or customer or "",
+                "item": row.get("item") or "Farm Sales",
+                "payment": "Farm_Transection",
+                "amount": int(row.get("total_amount") or 0),
+                "amount_received": row.get("amount_received", 0),
+                "outstanding_amount": row.get("outstanding_amount", 0),
+                "note": row.get("note") or "",
+            })
+        total = int(result.get("total_sales") or sum(row.get("amount", 0) for row in rows) or 0)
+        transaction_count = int(result.get("invoice_count") or len(rows))
     elif is_income:
         total = int(result.get("total_sales") or result.get("total_income") or 0)
+        amount_received = int(result.get("amount_received") or total or 0)
+        outstanding_amount = int(result.get("outstanding_amount") or 0)
+        if total or amount_received or outstanding_amount:
+            rows.append({
+                "date": "",
+                "category": "Farm Sales",
+                "customer_name": customer or "Farm customer",
+                "item": customer or report.replace("_", " ").title(),
+                "payment": "Farm_Transection",
+                "amount": total,
+                "amount_received": amount_received,
+                "outstanding_amount": outstanding_amount,
+            })
+            transaction_count = int(result.get("sources", {}).get("farm_transection_invoice_count") or 1)
     else:
         total = int(result.get("total_expense") or 0)
         transaction_count = int(result.get("expense_count") or 0)
@@ -476,6 +533,7 @@ def _farm_financial_spec(result, question, intent):
         "transaction_count": transaction_count,
         "rows": rows,
         "is_income": is_income,
+        "customer": customer,
     }
 
 
@@ -483,6 +541,146 @@ def _draw_header(pdf, title, question):
     pdf.text(50, 795, title, size=18, bold=True)
     pdf.text(50, 772, f"Question: {question}", size=10, max_width=495)
     pdf.text(50, 748, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", size=8)
+
+
+def _unicode_voucher_lines(title, question, spec):
+    lines = [
+        title,
+        f"Question: {question}",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        spec.get("title") or "Vouchers",
+        "",
+    ]
+    vouchers = spec.get("vouchers") or []
+    if not vouchers:
+        lines.append("No vouchers found.")
+        return lines
+
+    lines.extend([
+        f"Total: {_money(sum(int(row.get('total_amount') or 0) for row in vouchers))}",
+        f"Paid: {_money(sum(int(row.get('amount_received') or 0) for row in vouchers))}",
+        f"Outstanding: {_money(sum(int(row.get('outstanding_amount') or 0) for row in vouchers))}",
+        "",
+    ])
+    for row in vouchers:
+        lines.extend([
+            f"Voucher {row.get('invoice_number') or '-'}",
+            f"Date: {_unicode_value(row.get('invoice_date'))}",
+            f"Customer: {_unicode_value(row.get('customer_name'))}",
+            f"Item: {_unicode_value(row.get('item'))}",
+            f"Qty: {_unicode_value(row.get('quantity'))}",
+            f"Total: {_money(row.get('total_amount') or 0)}",
+            f"Received: {_money(row.get('amount_received') or 0)}",
+            f"Outstanding: {_money(row.get('outstanding_amount') or 0)}",
+            f"Note: {_unicode_value(row.get('note'))}",
+            "-" * 48,
+        ])
+    return lines
+
+
+def _unicode_farm_lines(title, question, spec):
+    lines = [
+        title,
+        f"Question: {question}",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        spec.get("title") or "Farm Report",
+        f"Report: {spec.get('report_name') or '-'}",
+        f"Period: {spec.get('period_label') or '-'}",
+        f"{spec.get('total_label') or 'Total'}: {_money(spec.get('total') or 0)}",
+        f"Records: {_money(spec.get('transaction_count') or 0)}",
+        "",
+        "Income Lines" if spec.get("is_income") else "Expense Lines",
+        "",
+    ]
+    rows = spec.get("rows") or []
+    if not rows:
+        lines.append("No farm records found for this period.")
+        return lines
+
+    for row in rows:
+        if spec.get("is_income"):
+            lines.extend([
+                f"Voucher {row.get('invoice_number') or '-'}",
+                f"Date: {_unicode_value(row.get('date'))}",
+                f"Customer: {_unicode_value(row.get('customer_name') or row.get('item'))}",
+                f"Category: {_unicode_value(row.get('category'))}",
+                f"Total: {_money(row.get('amount') or 0)}",
+                f"Received: {_money(row.get('amount_received') or row.get('amount') or 0)}",
+                f"Outstanding: {_money(row.get('outstanding_amount') or 0)}",
+                f"Note: {_unicode_value(row.get('note'))}",
+                "-" * 48,
+            ])
+        else:
+            lines.extend([
+                f"Date: {_unicode_value(row.get('date'))}",
+                f"Category: {_unicode_value(row.get('category'))}",
+                f"Description: {_unicode_value(row.get('item'))}",
+                f"Payment: {_unicode_value(row.get('payment'))}",
+                f"Amount: {_money(row.get('amount') or 0)}",
+                "-" * 48,
+            ])
+    return lines
+
+
+def _unicode_table_lines(title, question, spec):
+    lines = [
+        title,
+        f"Question: {question}",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        spec.get("title") or "Report",
+        "",
+    ]
+    for row in spec.get("table") or []:
+        lines.append(" | ".join(_unicode_value(cell) for cell in row))
+    return lines
+
+
+def _unicode_pdf_lines(title, question, spec):
+    kind = spec.get("kind")
+    if kind == "voucher_cards":
+        return _unicode_voucher_lines(title, question, spec)
+    if kind == "farm_financial":
+        return _unicode_farm_lines(title, question, spec)
+    if spec.get("table"):
+        return _unicode_table_lines(title, question, spec)
+    return None
+
+
+def _write_unicode_text_pdf(lines, output_path, title="BigShot Finance Report"):
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as source:
+        source.write("\n".join(str(line) for line in lines))
+        source_path = source.name
+
+    try:
+        result = subprocess.run(
+            [
+                "cupsfilter",
+                "-i",
+                "text/plain",
+                "-m",
+                "application/pdf",
+                "-t",
+                title,
+                source_path,
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode == 0 and result.stdout.startswith(b"%PDF"):
+            Path(output_path).write_bytes(result.stdout)
+            return True
+    except OSError:
+        return False
+    finally:
+        try:
+            Path(source_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+    return False
 
 
 def _draw_bar(pdf, spec, x=70, y=455, width=420, height=235):
@@ -641,17 +839,20 @@ def _draw_voucher_cards(pdf, vouchers, start_y=620):
     gap = 19
     left_x = 50
     right_x = left_x + card_width + gap
-    y = start_y
+    page_start_y = start_y
+    page_capacity = 6
+    index_on_page = 0
 
     for index, row in enumerate(vouchers):
-        if index and index % 8 == 0:
+        if index_on_page >= page_capacity:
             pdf.new_page()
             pdf.text(50, 795, "Sote Phwar Vouchers", size=16, bold=True)
-            y = 750
+            page_start_y = 750
+            page_capacity = 8
+            index_on_page = 0
 
-        x = left_x if index % 2 == 0 else right_x
-        if index % 2 == 0 and index:
-            y -= card_height + 12
+        x = left_x if index_on_page % 2 == 0 else right_x
+        y = page_start_y - ((index_on_page // 2) * (card_height + 12))
 
         pdf.rect(x, y - card_height, card_width, card_height, fill=(246, 248, 251), stroke=(130, 145, 166))
         pdf.rect(x, y - 22, card_width, 22, fill=(218, 226, 236))
@@ -674,6 +875,7 @@ def _draw_voucher_cards(pdf, vouchers, start_y=620):
             line_y -= max(12, used)
             if line_y < y - card_height + 8:
                 break
+        index_on_page += 1
 
 
 def _draw_voucher_summary(pdf, vouchers, x=50, y=698):
@@ -824,6 +1026,56 @@ def _draw_farm_report_rows(pdf, rows, start_y):
         y -= row_height
 
 
+def _draw_farm_income_cards(pdf, rows, start_y=550):
+    if not rows:
+        pdf.text(58, start_y, "No farm income records found for this period.", size=9)
+        return
+
+    card_width = 238
+    card_height = 126
+    gap = 19
+    left_x = 50
+    right_x = left_x + card_width + gap
+    page_start_y = start_y
+    page_capacity = 6
+    index_on_page = 0
+
+    for index, row in enumerate(rows):
+        if index_on_page >= page_capacity:
+            pdf.new_page()
+            pdf.text(50, 795, "Farm Income Lines", size=16, bold=True)
+            page_start_y = 750
+            page_capacity = 8
+            index_on_page = 0
+
+        x = left_x if index_on_page % 2 == 0 else right_x
+        y = page_start_y - ((index_on_page // 2) * (card_height + 12))
+
+        customer = row.get("customer_name") or row.get("item") or "-"
+        voucher = row.get("invoice_number") or "-"
+        pdf.rect(x, y - card_height, card_width, card_height, fill=(246, 249, 246), stroke=(130, 145, 166))
+        pdf.rect(x, y - 22, card_width, 22, fill=(216, 226, 220))
+        pdf.text(x + 8, y - 16, f"Voucher {voucher}", size=10.5, bold=True, max_width=card_width - 16)
+
+        details = [
+            ("Date", row.get("date") or "-"),
+            ("Customer", customer),
+            ("Category", row.get("category") or "Farm Sales"),
+            ("Total", _money(row.get("amount", 0))),
+            ("Received", _money(row.get("amount_received", row.get("amount", 0)))),
+            ("Outstanding", _money(row.get("outstanding_amount", 0))),
+            ("Note", row.get("note") or "-"),
+        ]
+        line_y = y - 40
+        for label, value in details:
+            pdf.text(x + 8, line_y, f"{label}:", size=8.4, bold=True, max_width=62)
+            used = pdf.text(x + 72, line_y, value, size=8.4, bold=True, max_width=card_width - 82)
+            line_y -= max(12, used)
+            if line_y < y - card_height + 8:
+                break
+        index_on_page += 1
+
+
 def _draw_farm_financial_report(pdf, spec, start_y=720):
     pdf.text(50, start_y, spec["title"], size=13, bold=True)
     pdf.text(50, start_y - 20, f"Report: {spec.get('report_name') or '-'}", size=9.2, bold=True)
@@ -837,7 +1089,10 @@ def _draw_farm_financial_report(pdf, spec, start_y=720):
 
     section = "Income Lines" if spec.get("is_income") else "Expense Lines"
     pdf.text(50, start_y - 145, section, size=11.2, bold=True)
-    _draw_farm_report_rows(pdf, spec.get("rows") or [], start_y - 170)
+    if spec.get("is_income"):
+        _draw_farm_income_cards(pdf, spec.get("rows") or [], start_y - 170)
+    else:
+        _draw_farm_report_rows(pdf, spec.get("rows") or [], start_y - 170)
 
 
 def create_chart_pdf_report(question, output_path, title="BigShot Finance Report"):
@@ -858,6 +1113,16 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
 
     if not spec:
         return False
+
+    if (
+        _contains_non_ascii(result)
+        or _contains_non_ascii(spec)
+        or _contains_non_ascii(question)
+        or _contains_non_ascii(title)
+    ):
+        unicode_lines = _unicode_pdf_lines(title, question, spec)
+        if unicode_lines and _write_unicode_text_pdf(unicode_lines, output_path, title=title):
+            return True
 
     pdf = PdfCanvas(title)
     _draw_header(pdf, title, question)

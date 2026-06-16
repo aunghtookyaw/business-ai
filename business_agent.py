@@ -268,6 +268,9 @@ def _scope_label(result):
     if filters.get("income_expense"):
         parts.append(filters["income_expense"])
 
+    if filters.get("farm_customer"):
+        parts.append(filters["farm_customer"])
+
     return f" ({' / '.join(parts)})" if parts else ""
 
 
@@ -279,7 +282,12 @@ def _fast_answer(result):
         total = result["total_sales"]
         if total == 0:
             return f"Total sales for {period}: 0\nNo matching income data found."
-        return f"Total sales for {period}: {total:,}"
+        lines = [f"Total sales for {period}: {total:,}"]
+        if "amount_received" in result:
+            lines.append(f"Paid / received: {result['amount_received']:,}")
+        if "outstanding_amount" in result:
+            lines.append(f"Remained: {result['outstanding_amount']:,}")
+        return "\n".join(lines)
 
     if formula == "expense_total":
         total = result["total_expense"]
@@ -343,9 +351,19 @@ def _fast_answer(result):
         if not result["categories"]:
             return f"Category summary for {period}: no matching data found."
         for row in result["categories"]:
-            lines.append(
-                f"{row['sector']} / {row['category']}: income {row['income']:,}, expense {row['expense']:,}, net {row['net']:,}, rows {row['transaction_count']:,}"
+            if row.get("customer_name"):
+                label = f"{row['sector']} customer name {row['customer_name']}"
+            else:
+                label = f"{row['sector']} / {row['category']}"
+            line = (
+                f"{label}: income {row['income']:,}, "
+                f"expense {row['expense']:,}, net {row['net']:,}, rows {row['transaction_count']:,}"
             )
+            if "amount_received" in row:
+                line += f", paid {row['amount_received']:,}"
+            if "outstanding_amount" in row:
+                line += f", remained {row['outstanding_amount']:,}"
+            lines.append(line)
         return "\n".join(lines)
 
     if formula == "top_expenses":
@@ -362,7 +380,17 @@ def _fast_answer(result):
         if not result["income"]:
             return f"Top income for {period}: no matching income data found."
         lines = [f"Top income for {period}"]
-        for row in result["income"]:
+        for index, row in enumerate(result["income"], start=1):
+            if "total_amount" in row:
+                name = row.get("customer_name") or row["item"]
+                lines.append(
+                    f"{index}. {name} ({row['sector']} / {row['category']})\n"
+                    f"Total sales: {row['total_amount']:,}\n"
+                    f"Paid / received: {row.get('amount_received', 0):,}\n"
+                    f"Remained: {row.get('outstanding_amount', 0):,}\n"
+                    f"Invoices: {row.get('invoice_count', 0):,}"
+                )
+                continue
             lines.append(
                 f"{row['amount']:,} - {row['Date']} - {row['item']} ({row['sector']} / {row['category']}, {row['payment_method']})"
             )

@@ -200,6 +200,43 @@ class ChartPdfTest(unittest.TestCase):
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Voucher 200", pdf_text)
 
+    def test_sotephwar_voucher_pdf_uses_six_then_eight_cards_per_page(self):
+        result = {
+            "formula": "sotephwar_transection_customer",
+            "period": "this_month",
+            "customer": "Ma Shwe War",
+            "unpaid_only": False,
+            "invoices": [
+                {
+                    "invoice_date": "2026-06-01",
+                    "invoice_number": str(index),
+                    "customer_name": "Ma Shwe War",
+                    "item": "Sote Phwar 4L",
+                    "quantity": 1,
+                    "total_amount": 100000,
+                    "amount_received": 50000,
+                    "outstanding_amount": 50000,
+                    "note": "",
+                }
+                for index in range(1, 15)
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "sotephwar-14-vouchers.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Sote Phwar - Income - Sales By Customer - Ma Shwe War",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_bytes = output_path.read_bytes()
+            pdf_text = pdf_bytes.decode("latin-1")
+            self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
+            self.assertIn("Voucher 1", pdf_text)
+            self.assertIn("Voucher 14", pdf_text)
+
     def test_inventory_stock_pdf_uses_stock_display_layout(self):
         result = {
             "formula": "sotephwar_inventory_stock",
@@ -266,6 +303,100 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("Crop Sales", pdf_text)
             self.assertIn("This Month", pdf_text)
 
+    def test_farm_sales_by_customer_pdf_uses_income_cards(self):
+        result = {
+            "formula": "farm_transection_customer",
+            "period": "this_month",
+            "_period_label": "This Month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "income",
+                "report": "sales_by_customer",
+                "customer": "Makro",
+            },
+            "total_sales": 20624200,
+            "amount_received": 20624200,
+            "outstanding_amount": 0,
+            "invoice_count": 1,
+            "invoices": [
+                {
+                    "invoice_date": "2026-06-15",
+                    "invoice_number": "12",
+                    "customer_name": "Makro",
+                    "item": "Farm Sales",
+                    "total_amount": 20624200,
+                    "amount_received": 20624200,
+                    "outstanding_amount": 0,
+                    "note": "Paid by K Pay",
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "farm-makro-sales.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Farm - Income - Sales By Customer - Makro",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Farm Income Report", pdf_text)
+            self.assertIn("Income Lines", pdf_text)
+            self.assertIn("Voucher 12", pdf_text)
+            self.assertIn("2026-06-15", pdf_text)
+            self.assertIn("Makro", pdf_text)
+            self.assertIn("Received:", pdf_text)
+            self.assertIn("Outstanding:", pdf_text)
+            self.assertIn("Paid by K Pay", pdf_text)
+            self.assertIn("20,624,200", pdf_text)
+
+    def test_farm_income_pdf_uses_six_then_eight_cards_per_page(self):
+        result = {
+            "formula": "farm_transection_customer",
+            "period": "this_month",
+            "_period_label": "This Month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "income",
+                "report": "sales_by_customer",
+                "customer": "Makro",
+            },
+            "total_sales": 1400000,
+            "amount_received": 1400000,
+            "outstanding_amount": 0,
+            "invoice_count": 14,
+            "invoices": [
+                {
+                    "invoice_date": "2026-06-01",
+                    "invoice_number": str(index),
+                    "customer_name": "Makro",
+                    "item": "Farm Sales",
+                    "total_amount": 100000,
+                    "amount_received": 100000,
+                    "outstanding_amount": 0,
+                    "note": "",
+                }
+                for index in range(1, 15)
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "farm-14-vouchers.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Farm - Income - Sales By Customer - Makro",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_bytes = output_path.read_bytes()
+            pdf_text = pdf_bytes.decode("latin-1")
+            self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
+            self.assertIn("Voucher 1", pdf_text)
+            self.assertIn("Voucher 14", pdf_text)
+
     def test_farm_expense_pdf_uses_farm_report_layout(self):
         result = {
             "formula": "list_transactions",
@@ -303,6 +434,84 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("Expense Lines", pdf_text)
             self.assertIn("Fertilizer", pdf_text)
             self.assertIn("NPK fertilizer", pdf_text)
+
+    def test_unicode_voucher_pdf_does_not_use_ascii_question_marks(self):
+        customer = "မောင်မောင်"
+        result = {
+            "formula": "sotephwar_transection_customer",
+            "period": "this_month",
+            "customer": customer,
+            "invoices": [
+                {
+                    "invoice_date": "2026-06-01",
+                    "invoice_number": "12",
+                    "customer_name": customer,
+                    "item": "ဆီ",
+                    "quantity": 1,
+                    "total_amount": 100000,
+                    "amount_received": 50000,
+                    "outstanding_amount": 50000,
+                    "note": "မှတ်ချက်",
+                },
+            ],
+        }
+        spec = chart_pdf._chart_spec(result, "Sote Phwar - Income")
+        lines = chart_pdf._unicode_pdf_lines("Unicode Test", "မြန်မာ voucher", spec)
+
+        self.assertIn(customer, "\n".join(lines))
+        self.assertNotIn("????", "\n".join(lines))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "unicode-voucher.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "မြန်မာ voucher",
+                output_path,
+                title="Unicode Test",
+            )
+
+            self.assertTrue(created)
+            self.assertTrue(output_path.read_bytes().startswith(b"%PDF"))
+
+    def test_unicode_farm_expense_detail_pdf_uses_unicode_fallback(self):
+        category = "မြေသြဇာ"
+        result = {
+            "formula": "list_transactions",
+            "period": "this_month",
+            "_period_label": "This Month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "expense",
+                "report": "expense_detail",
+            },
+            "transactions": [
+                {
+                    "Date": "2026-06-01",
+                    "sector": "Farm",
+                    "category": category,
+                    "item": "စိုက်ပျိုးရေး သုံးစွဲမှု",
+                    "amount": 100000,
+                    "payment_method": "Cash",
+                },
+            ],
+        }
+        spec = chart_pdf._chart_spec(result, "Farm - Expense")
+        lines = chart_pdf._unicode_pdf_lines("Unicode Test", "Farm - Expense", spec)
+
+        self.assertIn(category, "\n".join(lines))
+        self.assertNotIn("????", "\n".join(lines))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "unicode-farm-expense.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Farm - Expense",
+                output_path,
+                title="Unicode Test",
+            )
+
+            self.assertTrue(created)
+            self.assertTrue(output_path.read_bytes().startswith(b"%PDF"))
 
     def test_farm_pdf_wraps_full_category_sentence(self):
         category = "Fertilizer and soil improvement supplies for monsoon paddy field preparation"
@@ -479,6 +688,42 @@ class ChartPdfTest(unittest.TestCase):
 
         self.assertIn("Received: 800", report)
         self.assertIn("Outstanding / unpaid: 200", report)
+
+    def test_financial_obligation_due_text_report_includes_action_fields(self):
+        payload = {
+            "title": "Financial Obligation - Financial Obligation - Due Soon",
+            "period_label": "This Month",
+            "intent": {
+                "business": "financial_obligation",
+                "module": "financial_obligation",
+                "report": "financial_obligation_due",
+            },
+            "result": {
+                "formula": "financial_obligation_due",
+                "days": 30,
+                "obligations": [
+                    {
+                        "next_due_date": "2026-06-30",
+                        "creditor": "U Aung",
+                        "category": "Loan",
+                        "subcategory": "Investor Loan",
+                        "frequency": "Monthly",
+                        "status": "Active",
+                        "amount": 500000,
+                        "days_until_due": 15,
+                        "notes": "Call before payment",
+                    },
+                ],
+            },
+        }
+
+        report = format_text_report(payload)
+
+        self.assertIn("next_due_date: 2026-06-30", report)
+        self.assertIn("creditor: U Aung", report)
+        self.assertIn("amount: 500,000", report)
+        self.assertIn("status: Active", report)
+        self.assertIn("notes: Call before payment", report)
 
 
 if __name__ == "__main__":

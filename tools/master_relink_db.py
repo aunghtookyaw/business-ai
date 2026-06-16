@@ -27,6 +27,16 @@ RELINK_TARGETS = {
         "junction_transaction_column": "Sotephwar_Transection_id",
         "junction_master_column": "customer_master_id",
     },
+    "farm_customers": {
+        "label": "Farm customers",
+        "transaction_table": getattr(config, "FARM_TRANSECTION_TABLE", "farm_transection"),
+        "transaction_column": "Customer",
+        "master_table": "customer_master",
+        "master_column": "customer_name",
+        "junction_table": "_nc_m2m_farm_transectio_customer_master",
+        "junction_transaction_column": "farm_transection_id",
+        "junction_master_column": "customer_master_id",
+    },
 }
 
 
@@ -36,6 +46,8 @@ def relink_inserted_rows(inserted_ids_by_table):
         transaction_ids_by_target["categories"] = inserted_ids_by_table["transection"]
     if inserted_ids_by_table.get("sotephwar_transection"):
         transaction_ids_by_target["customers"] = inserted_ids_by_table["sotephwar_transection"]
+    if inserted_ids_by_table.get("farm_transection"):
+        transaction_ids_by_target["farm_customers"] = inserted_ids_by_table["farm_transection"]
     if not transaction_ids_by_target:
         return {}
 

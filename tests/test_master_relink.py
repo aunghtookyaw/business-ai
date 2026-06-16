@@ -25,6 +25,21 @@ class MasterRelinkPlanTest(unittest.TestCase):
         self.assertEqual(((1, 10), (2, 10)), plan.to_insert)
         self.assertEqual((("Unknown Category", 1),), plan.unmatched_values)
 
+    def test_plan_relinks_matches_common_makro_typos(self):
+        plan = plan_relinks(
+            transaction_rows=[
+                {"id": 1, "value": "Makro Expence"},
+                {"id": 2, "value": "Maro Expense"},
+            ],
+            master_rows=[
+                {"id": 35, "value": "Makro Expense"},
+            ],
+            existing_links=[],
+        )
+
+        self.assertEqual(2, plan.matched)
+        self.assertEqual(((1, 35), (2, 35)), plan.to_insert)
+
     def test_plan_relinks_skips_already_linked_rows(self):
         plan = plan_relinks(
             transaction_rows=[{"id": 1, "value": "Pwint Aung Kyaw POL"}],

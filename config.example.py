@@ -63,6 +63,8 @@ TRANSACTION_SCHEMA = os.getenv("TRANSACTION_SCHEMA", "pipkgfu2wr9qxyy")
 
 TRANSACTION_TABLE = os.getenv("TRANSACTION_TABLE", "Transection")
 
+FARM_TRANSECTION_TABLE = os.getenv("FARM_TRANSECTION_TABLE", "farm_transection")
+
 SOTEPHWAR_TRANSECTION_TABLE = os.getenv("SOTEPHWAR_TRANSECTION_TABLE", "Sotephwar_Transection")
 
 SOTEPHWAR_INVENTORY_TABLE = os.getenv("SOTEPHWAR_INVENTORY_TABLE", "Sotephwar_Inventory")

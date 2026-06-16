@@ -7,6 +7,7 @@ import psycopg2.extras
 import config
 from tools.formula_engine import (
     _connect,
+    _farm_transection_table_ref,
     _financial_obligations_table_ref,
     _sotephwar_inventory_table_ref,
     _sotephwar_transection_table_ref,
@@ -32,6 +33,22 @@ TABLES = {
         ],
         "required": ["Date", "Income_Expense", "Amount"],
         "numeric": ["Amount"],
+        "date": ["Date"],
+    },
+    "farm_transection": {
+        "label": "Farm_Transection",
+        "table_ref": _farm_transection_table_ref,
+        "columns": [
+            "Date",
+            "Customer",
+            "Invoice_Number",
+            "Total_Due",
+            "Paid",
+            "Note",
+            "AI_Analysis",
+        ],
+        "required": ["Date", "Customer", "Total_Due"],
+        "numeric": ["Invoice_Number", "Total_Due", "Paid"],
         "date": ["Date"],
     },
     "sotephwar_transection": {

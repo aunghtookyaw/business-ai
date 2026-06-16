@@ -22,6 +22,7 @@ End Sub
 
 Private Function BuildPayload() As String
     BuildPayload = "{""transection"":" & SheetRowsJson("Transection") & _
+                   ",""farm_transection"":" & SheetRowsJson("Farm_Transection") & _
                    ",""sotephwar_transection"":" & SheetRowsJson("Sotephwar_Transection") & _
                    ",""financial_obligations"":" & SheetRowsJson("Financial_Obligations") & _
                    ",""sotephwar_inventory"":" & SheetRowsJson("Sotephwar_Inventory") & "}"

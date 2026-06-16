@@ -5,6 +5,7 @@ from tools.formula_engine import (
     cash_flow,
     category_summary,
     expense_total,
+    farm_transection_customer,
     financial_obligation_due,
     financial_obligation_list,
     financial_obligation_summary,
@@ -35,6 +36,13 @@ def _filters(intent, income_expense=None):
         filters["categories"] = intent.categories
     if intent.category:
         filters["category"] = intent.category
+    return filters
+
+
+def _farm_customer_filters(intent, income_expense="Income"):
+    filters = _filters(intent, income_expense)
+    if intent.customer:
+        filters["farm_customer"] = intent.customer
     return filters
 
 
@@ -136,10 +144,12 @@ def execute_intent(intent):
         result = sales_total(period, _filters(intent, "Income"))
     elif report == "income_summary":
         result = category_summary(period, _filters(intent, "Income"))
+    elif intent.business == "farm" and report == "sales_by_customer":
+        result = farm_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
     elif report == "sales_by_customer":
         result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
     elif report == "top_customers":
-        result = sotephwar_transection_top(period, limit=10)
+        result = top_income(period, _filters(intent, "Income"), limit=10)
     elif report == "sales_by_product":
         result = sotephwar_transection_quantity(period, item=_product(intent))
     elif report == "income_transactions":

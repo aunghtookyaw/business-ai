@@ -5,6 +5,8 @@ from typing import Iterable
 
 PHRASE_ALIASES = {
     "set up": "setup",
+    "expence": "expense",
+    "maro": "makro",
 }
 
 

@@ -129,6 +129,30 @@ def _insert_links(connection, target, pairs):
     return len(pairs)
 
 
+def _replace_conflicting_links(connection, target, conflicts):
+    if not conflicts:
+        return 0
+
+    transaction_ids = [int(conflict["transaction_id"]) for conflict in conflicts]
+    delete_query = sql.SQL(
+        """
+        DELETE FROM {schema}.{table}
+        WHERE {transaction_column} = ANY(%s)
+        """
+    ).format(
+        schema=sql.Identifier(config.TRANSACTION_SCHEMA),
+        table=sql.Identifier(target["junction_table"]),
+        transaction_column=sql.Identifier(target["junction_transaction_column"]),
+    )
+    insert_pairs = [
+        (int(conflict["transaction_id"]), int(conflict["target_master_id"]))
+        for conflict in conflicts
+    ]
+    with connection.cursor() as cursor:
+        cursor.execute(delete_query, (transaction_ids,))
+    return _insert_links(connection, target, insert_pairs)
+
+
 def _write_unmatched_csv(report):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -146,7 +170,7 @@ def _write_unmatched_csv(report):
     return path
 
 
-def relink_master_data(selected=None, apply=False, transaction_ids_by_target=None):
+def relink_master_data(selected=None, apply=False, transaction_ids_by_target=None, replace_conflicts=False):
     selected = selected or tuple(RELINK_TARGETS)
     transaction_ids_by_target = transaction_ids_by_target or {}
     report = {}
@@ -167,14 +191,23 @@ def relink_master_data(selected=None, apply=False, transaction_ids_by_target=Non
                     transaction_ids_by_target[target_key],
                 )
             inserted = 0
+            replaced = 0
             if apply:
                 if plan.duplicate_master_names:
                     raise RuntimeError(f"{target_key} has duplicate normalized master names")
+                if plan.conflicts and not replace_conflicts:
+                    raise RuntimeError(
+                        f"{target_key} has {len(plan.conflicts)} conflicting existing links; "
+                        "rerun with --replace-conflicts to replace them"
+                    )
                 inserted = _insert_links(connection, target, plan.to_insert)
+                if replace_conflicts:
+                    replaced = _replace_conflicting_links(connection, target, plan.conflicts)
             report[target_key] = {
                 "label": target["label"],
                 "mode": "apply" if apply else "dry-run",
                 "inserted": inserted,
+                "replaced_conflicts": replaced,
                 **plan.to_dict(),
             }
         if apply:
@@ -194,6 +227,7 @@ def _print_report(report, backup_path=None, unmatched_path=None):
         print(f"Already linked: {target_report['already_linked']}")
         print(f"Ready to insert: {target_report['to_insert']}")
         print(f"Inserted: {target_report['inserted']}")
+        print(f"Replaced conflicts: {target_report.get('replaced_conflicts', 0)}")
         print(f"Conflicts skipped: {len(target_report['conflicts'])}")
         if target_report["unmatched_values"]:
             print("Top unmatched values:")
@@ -216,6 +250,11 @@ def main():
     )
     parser.add_argument("target", nargs="*", help="Optional target(s): categories, customers")
     parser.add_argument("--apply", action="store_true", help="Write missing links. Default is dry-run.")
+    parser.add_argument(
+        "--replace-conflicts",
+        action="store_true",
+        help="When applying, replace wrong existing links with the normalized master match.",
+    )
     parser.add_argument("--format", choices=("text", "json"), default="text")
     args = parser.parse_args()
 
@@ -226,6 +265,7 @@ def main():
     report, backup_path, unmatched_path = relink_master_data(
         tuple(args.target) if args.target else None,
         apply=args.apply,
+        replace_conflicts=args.replace_conflicts,
     )
     if args.format == "json":
         print(json.dumps({

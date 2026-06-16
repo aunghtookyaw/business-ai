@@ -47,6 +47,12 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             business_agent.choose_formula("top 5 sote phwar income"),
         )
 
+    def test_top_customers_routes_to_top_income(self):
+        self.assertEqual(
+            "top_income",
+            business_agent.choose_formula("top customers this year"),
+        )
+
     def test_machinery_cost_routes_to_expense_total(self):
         self.assertEqual(
             "expense_total",
@@ -703,6 +709,277 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual("Farm", filters["sector"])
         self.assertEqual("Expense", filters["income_expense"])
 
+    def test_farm_sales_customer_filter_is_detected(self):
+        filters = formula_engine.extract_dimension_filters("sale income from Makro this year")
+
+        self.assertEqual("makro", filters["farm_customer"])
+
+    def test_farm_income_summary_does_not_treat_summary_as_customer(self):
+        filters = formula_engine.extract_dimension_filters("farm income summary")
+
+        self.assertEqual("Farm", filters["sector"])
+        self.assertEqual("Income", filters["income_expense"])
+        self.assertNotIn("farm_customer", filters)
+        self.assertEqual("category_summary", business_agent.choose_formula("farm income summary"))
+
+    def test_bare_farm_customer_routes_to_sales_total(self):
+        original_fetch_all = formula_engine._fetch_all
+
+        def fake_fetch_all(sql, params=None):
+            if "farm_transection" in sql:
+                return [{"customer": "Makro"}]
+            return []
+
+        formula_engine._fetch_all = fake_fetch_all
+        try:
+            self.assertEqual("sales_total", business_agent.choose_formula("Makro"))
+            self.assertEqual("makro", formula_engine.extract_dimension_filters("show Makro")["farm_customer"])
+        finally:
+            formula_engine._fetch_all = original_fetch_all
+
+    def test_sales_total_includes_farm_transection_sales(self):
+        original_fetch_one = formula_engine._fetch_one
+        seen = []
+
+        def fake_fetch_one(sql, params=None):
+            seen.append((sql, params or {}))
+            if "farm_transection" in sql:
+                self.assertEqual("makro", params["farm_customer"])
+                return {
+                    "invoice_count": 1,
+                    "total_amount": 1500000,
+                    "amount_received": 500000,
+                    "outstanding_amount": 1000000,
+                }
+            return {"total_sales": 0}
+
+        formula_engine._fetch_one = fake_fetch_one
+        try:
+            result = formula_engine.sales_total("this_year", {"farm_customer": "makro"})
+        finally:
+            formula_engine._fetch_one = original_fetch_one
+
+        self.assertEqual(1500000, result["total_sales"])
+        self.assertEqual(500000, result["amount_received"])
+        self.assertEqual(1000000, result["outstanding_amount"])
+        self.assertEqual(0, result["sources"]["transection_income"])
+        self.assertEqual(1500000, result["sources"]["farm_transection_total_due"])
+        self.assertEqual(1, len(seen))
+
+    def test_sales_total_combines_sotephwar_and_farm_income_tables(self):
+        original_fetch_one = formula_engine._fetch_one
+
+        def fake_fetch_one(sql, params=None):
+            if "Sotephwar_Transection" in sql:
+                return {
+                    "invoice_count": 2,
+                    "total_amount": 1000,
+                    "amount_received": 700,
+                    "outstanding_amount": 300,
+                }
+            if "farm_transection" in sql:
+                return {
+                    "invoice_count": 3,
+                    "total_amount": 2000,
+                    "amount_received": 1500,
+                    "outstanding_amount": 500,
+                }
+            return {"total_sales": 100}
+
+        formula_engine._fetch_one = fake_fetch_one
+        try:
+            result = formula_engine.sales_total("this_year", {"income_expense": "Income"})
+        finally:
+            formula_engine._fetch_one = original_fetch_one
+
+        self.assertEqual(3100, result["total_sales"])
+        self.assertEqual(2200, result["amount_received"])
+        self.assertEqual(800, result["outstanding_amount"])
+        self.assertEqual(1000, result["sources"]["sotephwar_transection_total_amount"])
+        self.assertEqual(2000, result["sources"]["farm_transection_total_due"])
+
+    def test_top_income_ranks_by_customer_invoice_totals(self):
+        original_fetch_all = formula_engine._fetch_all
+
+        def fake_fetch_all(sql, params=None):
+            if "Sotephwar_Transection" in sql:
+                return [
+                    {
+                        "sector": "Sote Phwar",
+                        "category": "Sote Phwar Sales",
+                        "item": "Pwint",
+                        "amount": 2000,
+                        "total_amount": 2000,
+                        "amount_received": 1500,
+                        "outstanding_amount": 500,
+                        "invoice_count": 2,
+                        "payment_method": "Sotephwar_Transection",
+                    },
+                ]
+            if "farm_transection" in sql:
+                return [
+                    {
+                        "sector": "Farm",
+                        "category": "Farm Sales",
+                        "item": "Makro",
+                        "amount": 3000,
+                        "total_amount": 3000,
+                        "amount_received": 2500,
+                        "outstanding_amount": 500,
+                        "invoice_count": 3,
+                        "payment_method": "Farm_Transection",
+                    },
+                ]
+            return []
+
+        formula_engine._fetch_all = fake_fetch_all
+        try:
+            result = formula_engine.top_income("this_year", {"income_expense": "Income"}, limit=5)
+        finally:
+            formula_engine._fetch_all = original_fetch_all
+
+        self.assertEqual("Makro", result["income"][0]["item"])
+        self.assertEqual(3000, result["income"][0]["total_amount"])
+        self.assertEqual(3, result["income"][0]["invoice_count"])
+        self.assertEqual("Pwint", result["income"][1]["item"])
+
+    def test_farm_income_summary_lists_farm_customers(self):
+        original_fetch_all = formula_engine._fetch_all
+
+        def fake_fetch_all(sql, params=None):
+            if "farm_transection" in sql:
+                return [
+                    {
+                        "sector": "Farm",
+                        "category": "Farm Sales",
+                        "item": "Makro",
+                        "amount": 3000,
+                        "total_amount": 3000,
+                        "amount_received": 2500,
+                        "outstanding_amount": 500,
+                        "invoice_count": 3,
+                        "payment_method": "Farm_Transection",
+                    },
+                ]
+            return []
+
+        formula_engine._fetch_all = fake_fetch_all
+        try:
+            result = formula_engine.category_summary("this_year", {"sector": "Farm", "income_expense": "Income"})
+        finally:
+            formula_engine._fetch_all = original_fetch_all
+
+        self.assertEqual("Makro", result["categories"][0]["category"])
+        self.assertEqual("Makro", result["categories"][0]["customer_name"])
+        self.assertEqual(3000, result["categories"][0]["income"])
+        self.assertEqual(2500, result["categories"][0]["amount_received"])
+
+    def test_farm_income_summary_answer_labels_customer_name(self):
+        answer = business_agent._fast_answer({
+            "formula": "category_summary",
+            "period": "this_year",
+            "filters": {"sector": "Farm", "income_expense": "Income"},
+            "categories": [
+                {
+                    "sector": "Farm",
+                    "category": "Makro",
+                    "customer_name": "Makro",
+                    "income": 3000,
+                    "expense": 0,
+                    "net": 3000,
+                    "transaction_count": 3,
+                    "amount_received": 2500,
+                    "outstanding_amount": 500,
+                },
+            ],
+        })
+
+        self.assertIn("Farm customer name Makro", answer)
+
+    def test_bi_top_customers_uses_combined_income_ranking(self):
+        from tools import bi_executor
+        from tools.bi_intents import BIIntent
+
+        original_top_income = bi_executor.top_income
+        seen = {}
+
+        def fake_top_income(period, filters=None, limit=5):
+            seen["period"] = period
+            seen["filters"] = filters
+            seen["limit"] = limit
+            return {"formula": "top_income", "period": period, "income": []}
+
+        bi_executor.top_income = fake_top_income
+        try:
+            bi_executor.execute_intent(BIIntent(
+                business="farm",
+                module="income",
+                report="top_customers",
+                period={"type": "relative", "value": "this_year"},
+                output="text",
+            ))
+        finally:
+            bi_executor.top_income = original_top_income
+
+        self.assertEqual("this_year", seen["period"])
+        self.assertEqual({"sector": "Farm", "income_expense": "Income"}, seen["filters"])
+        self.assertEqual(10, seen["limit"])
+
+    def test_bi_farm_sales_by_customer_uses_farm_customer_filter(self):
+        from tools import bi_executor
+        from tools.bi_intents import BIIntent
+
+        original_farm_customer = bi_executor.farm_transection_customer
+        original_sotephwar_customer = bi_executor.sotephwar_transection_customer
+        seen = {}
+
+        def fake_farm_customer(period, customer=None, limit=50):
+            seen["period"] = period
+            seen["customer"] = customer
+            seen["limit"] = limit
+            return {
+                "formula": "farm_transection_customer",
+                "period": period,
+                "customer": customer,
+                "total_sales": 1500000,
+                "amount_received": 500000,
+                "outstanding_amount": 1000000,
+                "invoices": [
+                    {
+                        "invoice_date": "2026-06-15",
+                        "invoice_number": "12",
+                        "customer_name": customer,
+                        "total_amount": 1500000,
+                        "amount_received": 500000,
+                        "outstanding_amount": 1000000,
+                    },
+                ],
+            }
+
+        def fail_sotephwar_customer(*args, **kwargs):
+            raise AssertionError("Farm sales by customer should not use Sotephwar_Transection")
+
+        bi_executor.farm_transection_customer = fake_farm_customer
+        bi_executor.sotephwar_transection_customer = fail_sotephwar_customer
+        try:
+            payload = bi_executor.execute_intent(BIIntent(
+                business="farm",
+                module="income",
+                report="sales_by_customer",
+                period={"type": "relative", "value": "this_year"},
+                output="text",
+                customer="Makro",
+            ))
+        finally:
+            bi_executor.farm_transection_customer = original_farm_customer
+            bi_executor.sotephwar_transection_customer = original_sotephwar_customer
+
+        self.assertEqual("this_year", seen["period"])
+        self.assertEqual("Makro", seen["customer"])
+        self.assertEqual(50, seen["limit"])
+        self.assertEqual(1500000, payload["result"]["total_sales"])
+        self.assertEqual("12", payload["result"]["invoices"][0]["invoice_number"])
+
     def test_machinery_category_filter_is_detected(self):
         self.assertEqual(
             {"category": "Machinery equipment and maintenance"},
@@ -1168,7 +1445,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         try:
             self.assertEqual(
-                {"sector": "Retail Shop"},
+                {"sector": "Retail Shop", "income_expense": "Income"},
                 formula_engine.extract_dimension_filters("retail shop sales this month"),
             )
         finally:

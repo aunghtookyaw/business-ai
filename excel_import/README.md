@@ -3,6 +3,7 @@
 This folder contains an append-only Excel import workflow for:
 
 - `Transection`
+- `Farm_Transection`
 - `Sotephwar_Transection`
 - `Financial_Obligations`
 - `Sotephwar_Inventory`
@@ -52,3 +53,10 @@ python3 scripts/import_airtable_transactions.py
 The converter maps both CSV files into the workbook's exact import format. It
 sets `Sector` to `Farm` or `Sote Phwar`, leaves `Upload_Status` blank for new
 rows, and skips rows already present in the workbook.
+
+## Farm Transaction Upload
+
+Use the `Farm_Transection` sheet for the separate NocoDB table named
+`farm_transection`. Required fields are `Date`, `Customer`, and `Total_Due`.
+The upload command also accepts `Invoice_Number`, `Paid`, `Note`, and
+`AI_Analysis`.

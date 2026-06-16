@@ -4,6 +4,7 @@ from tools import search_intelligence
 from tools import master_data
 from tools.formula_engine import (
     _fetch_all,
+    _farm_transection_table_ref,
     _sotephwar_transection_table_ref,
     _dimension_values,
     _table_ref,
@@ -86,7 +87,20 @@ def customer_values():
         ORDER BY "Customer_Name"
         '''
     )
-    return _unique_values([row["value"] for row in master_rows + transaction_rows if row.get("value")])
+    farm_rows = _fetch_all(
+        f'''
+        SELECT DISTINCT "Customer" AS value
+        FROM {_farm_transection_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          AND NULLIF(TRIM("Customer"), '') IS NOT NULL
+        ORDER BY "Customer"
+        '''
+    )
+    return _unique_values([
+        row["value"]
+        for row in master_rows + transaction_rows + farm_rows
+        if row.get("value")
+    ])
 
 
 def category_values(sector=None, income_expense=None):
