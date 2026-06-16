@@ -655,6 +655,13 @@ def _extract_transaction_text_search(question, filters):
     }
 
 
+FARM_CUSTOMER_STOP_WORDS = (
+    "show|find|tell|me|please|customer|from|for|by|farm|section|sections|"
+    "sale|sales|income|revenue|total|summary|summaries|report|reports|"
+    "top|biggest|largest|highest|this|last|year|month|week|today|yesterday"
+)
+
+
 def _farm_customer_filter(question):
     text = _normalized_text(question)
     if any(_contains_phrase(text, word) for word in ("expense", "cost", "spend", "spending")):
@@ -662,7 +669,7 @@ def _farm_customer_filter(question):
 
     has_income_word = any(_contains_phrase(text, word) for word in ("sale", "sales", "income", "revenue"))
     if has_income_word:
-        cleaned = re.sub(r"\b(?:from|by|for|customer|farm|sale|sales|income|revenue|total|summary|summaries|report|reports|show|find|top|biggest|largest|highest|this|last|year|month|week|today|yesterday)\b", " ", text)
+        cleaned = re.sub(rf"\b(?:{FARM_CUSTOMER_STOP_WORDS})\b", " ", text)
         cleaned = re.sub(rf"\b(?:{MONTH_PATTERN})\b", " ", cleaned)
         cleaned = re.sub(r"\b\d{4}\b", " ", cleaned)
         cleaned = " ".join(word for word in cleaned.split() if len(word) > 1 and not word.isdigit())
@@ -677,7 +684,7 @@ def _known_farm_customer_filter(question):
     query = _normalized_text(question)
     if not query or len(query) < 3:
         return None
-    query = re.sub(r"\b(?:show|find|tell|me|please|customer|from|for|by|farm|sale|sales|income|revenue|total|summary|summaries|report|reports|top|biggest|largest|highest|this|last|year|month|week|today|yesterday)\b", " ", query)
+    query = re.sub(rf"\b(?:{FARM_CUSTOMER_STOP_WORDS})\b", " ", query)
     query = re.sub(rf"\b(?:{MONTH_PATTERN})\b", " ", query)
     query = re.sub(r"\b\d{4}\b", " ", query)
     query = " ".join(word for word in query.split() if len(word) > 1 and not word.isdigit())
@@ -930,15 +937,17 @@ def _sotephwar_income_summary(period, filters=None):
         "total_amount": 0,
         "amount_received": 0,
         "outstanding_amount": 0,
+        "customers": [],
     }
     if not _include_sotephwar_income(filters):
         return empty
-    result = sotephwar_transection_summary(period)
+    result = sotephwar_transection_summary(period, include_customers=False)
     return {
         "invoice_count": int(result.get("invoice_count") or 0),
         "total_amount": int(result.get("total_amount") or 0),
         "amount_received": int(result.get("amount_received") or 0),
         "outstanding_amount": int(result.get("outstanding_amount") or 0),
+        "customers": [],
     }
 
 
@@ -1043,7 +1052,11 @@ def _sotephwar_income_rows(period, filters=None, limit=5):
     if not _include_sotephwar_income(filters):
         return []
     date_sql, params = _date_filter_for_column(period, 's."Invoice_Date"')
-    params["limit"] = limit
+    if limit is not None:
+        params["limit"] = limit
+        limit_sql = "LIMIT %(limit)s"
+    else:
+        limit_sql = ""
     rows = _fetch_all(
         f'''
         SELECT
@@ -1064,7 +1077,7 @@ def _sotephwar_income_rows(period, filters=None, limit=5):
           {date_sql}
         GROUP BY COALESCE({_linked_customer_expr("s")}, '')
         ORDER BY amount DESC NULLS LAST
-        LIMIT %(limit)s
+        {limit_sql}
         ''',
         params,
     )
@@ -1661,6 +1674,7 @@ def _pdf_requested(question):
 
 def sales_total(period="all_time", filters=None):
     transection_total = 0
+    transection_rows = []
     if _include_transaction_rows(filters):
         date_sql, params = _date_filter(period)
         filter_sql, filter_params = _dimension_filter(filters)
@@ -1678,12 +1692,13 @@ def sales_total(period="all_time", filters=None):
             params,
         )
         transection_total = int(row["total_sales"] or 0)
+        transection_rows = list_transactions(period, filters, limit=10).get("transactions") or []
     farm_summary = _farm_sales_summary(period, filters)
     sotephwar_summary = _sotephwar_income_summary(period, filters)
     farm_total = farm_summary["total_amount"]
     sotephwar_total = sotephwar_summary["total_amount"]
     total_sales = transection_total + farm_total + sotephwar_total
-    amount_received = farm_summary["amount_received"] + sotephwar_summary["amount_received"]
+    amount_received = transection_total + farm_summary["amount_received"] + sotephwar_summary["amount_received"]
     outstanding_amount = farm_summary["outstanding_amount"] + sotephwar_summary["outstanding_amount"]
     return _with_filters({
         "formula": "sales_total",
@@ -1691,6 +1706,15 @@ def sales_total(period="all_time", filters=None):
         "total_sales": total_sales,
         "amount_received": amount_received,
         "outstanding_amount": outstanding_amount,
+        "transection_income_rows": [
+            {
+                "Date": row.get("Date") or row.get("invoice_date") or row.get("date") or "",
+                "item": row.get("item") or row.get("category") or "-",
+                "amount": int(row.get("amount") or 0),
+                "payment_method": row.get("payment_method") or "-",
+            }
+            for row in transection_rows
+        ],
         "sources": {
             "transection_income": transection_total,
             "sotephwar_transection_total_amount": sotephwar_total,
@@ -2189,7 +2213,7 @@ def list_transactions(period="all_time", filters=None, limit=20):
     }, filters)
 
 
-def sotephwar_transection_summary(period="all_time"):
+def sotephwar_transection_summary(period="all_time", include_customers=True):
     date_sql, params = _date_filter_for_column(period, '"Invoice_Date"')
     row = _fetch_one(
         f'''
@@ -2205,7 +2229,7 @@ def sotephwar_transection_summary(period="all_time"):
         params,
     )
 
-    return {
+    result = {
         "formula": "sotephwar_transection_summary",
         "period": period,
         "invoice_count": int(row["invoice_count"] or 0),
@@ -2213,6 +2237,9 @@ def sotephwar_transection_summary(period="all_time"):
         "amount_received": int(row["amount_received"] or 0),
         "outstanding_amount": int(row["outstanding_amount"] or 0),
     }
+    if include_customers:
+        result["customers"] = _sotephwar_income_rows(period, None, limit=None)
+    return result
 
 
 def sotephwar_transection_monthly_summary(period="this_year"):

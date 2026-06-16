@@ -216,6 +216,14 @@ def _chart_spec(result, question):
 
     if (
         bi_intent.get("business") == "farm"
+        and bi_intent.get("module") == "income"
+        and report == "income_summary"
+        and formula == "category_summary"
+    ):
+        return _farm_customer_revenue_spec(result, title="Farm Customer Revenue Report")
+
+    if (
+        bi_intent.get("business") == "farm"
         and bi_intent.get("module") in {"income", "expense"}
         and report not in {
             "expense_by_category",
@@ -223,6 +231,7 @@ def _chart_spec(result, question):
             "income_by_category",
             "income_detail",
             "income_transactions",
+            "total_income",
         }
         and not forced
     ):
@@ -239,6 +248,27 @@ def _chart_spec(result, question):
             "reason": "Best method: pie chart shows the income and expense share quickly; bar chart is useful when comparing exact amounts.",
             "values": values,
             "table": [("Metric", "Amount")] + values + [("Profit", result.get("net_profit", result.get("gross_profit", 0)))],
+        }
+
+    if formula == "sales_total":
+        total_sales = int(result.get("total_sales") or 0)
+        paid = int(result.get("amount_received") or 0)
+        outstanding = int(result.get("outstanding_amount") or 0)
+        values = [("Paid", paid), ("Outstanding", outstanding)]
+        if not any(value for _, value in values) and total_sales:
+            values = [("Total Income", total_sales)]
+        title = "Total Income"
+        if bi_intent.get("business") == "farm":
+            title = "Farm Total Income"
+        elif bi_intent.get("business") == "sote_phwar":
+            title = "Sote Phwar Total Income"
+        return {
+            "kind": forced or "pie",
+            "title": title,
+            "reason": "Best method: pie chart keeps total income simple by showing paid versus outstanding amount.",
+            "values": values,
+            "table": [("Metric", "Amount"), ("Total Income", total_sales)] + values,
+            "income_rows": result.get("transection_income_rows") or [],
         }
 
     if formula == "cash_flow":
@@ -292,6 +322,21 @@ def _chart_spec(result, question):
             "table": [("Category", "Income", "Expense", "Net", "Rows")] + [
                 (f"{row['sector']} / {row['category']}", row["income"], row["expense"], row["net"], row["transaction_count"]) for row in rows
             ] + [("Total", total_income, total_expense, net_total, transaction_count)],
+        }
+
+    if formula == "sales_total" and bi_intent.get("business") == "farm":
+        total_sales = int(result.get("total_sales") or 0)
+        paid = int(result.get("amount_received") or 0)
+        outstanding = int(result.get("outstanding_amount") or 0)
+        values = [("Paid", paid), ("Outstanding", outstanding)]
+        if not any(value for _, value in values) and total_sales:
+            values = [("Total Income", total_sales)]
+        return {
+            "kind": forced or "pie",
+            "title": "Farm Total Income",
+            "reason": "Best method: pie chart keeps total income simple by showing paid versus outstanding amount.",
+            "values": values,
+            "table": [("Metric", "Amount"), ("Total Income", total_sales)] + values,
         }
 
     if formula in ("top_expenses", "top_income"):
@@ -389,17 +434,57 @@ def _chart_spec(result, question):
             "table": table,
         }
 
+    if (
+        formula == "farm_transection_customer"
+        and bi_intent.get("business") == "farm"
+        and bi_intent.get("module") == "income"
+        and report in {"income_detail", "income_transactions"}
+    ):
+        return _voucher_table_spec("Farm Income Detail", result.get("invoices") or [])
+
     if formula == "sotephwar_transection_summary":
-        values = [
-            ("Received", result.get("amount_received", 0)),
-            ("Outstanding", result.get("outstanding_amount", 0)),
-        ]
+        if report == "total_income":
+            values = [
+                ("Paid", result.get("amount_received", 0)),
+                ("Outstanding", result.get("outstanding_amount", 0)),
+            ]
+            return {
+                "kind": forced or "pie",
+                "title": "Sote Phwar Total Income",
+                "reason": "Best method: pie chart keeps total income simple by showing paid versus outstanding amount.",
+                "values": values,
+                "table": [("Metric", "Amount"), ("Total Income", result.get("total_amount", 0))] + values,
+            }
+        customer_rows = sorted(
+            result.get("customers") or [],
+            key=lambda row: int(row.get("total_amount") or row.get("amount") or 0),
+            reverse=True,
+        )
+        if not customer_rows and int(result.get("total_amount") or 0):
+            customer_rows = [{
+                "customer_name": "All Customers",
+                "total_amount": result.get("total_amount", 0),
+                "amount_received": result.get("amount_received", 0),
+                "outstanding_amount": result.get("outstanding_amount", 0),
+            }]
         return {
-            "kind": forced or "pie",
-            "title": "Sote Phwar Received vs Outstanding",
-            "reason": "Best method: pie chart highlights how much of total invoice value is collected versus still outstanding.",
-            "values": values,
-            "table": [("Metric", "Amount"), ("Total", result.get("total_amount", 0))] + values,
+            "kind": "customer_revenue_report",
+            "title": "Customer Revenue Report",
+            "reason": "Best method: horizontal bars rank customers by revenue first, then grouped bars compare total sales, paid amount, and outstanding amount.",
+            "total_sales": result.get("total_amount", 0),
+            "total_paid": result.get("amount_received", 0),
+            "total_outstanding": result.get("outstanding_amount", 0),
+            "customers": customer_rows,
+            "values": [(row.get("customer_name") or row.get("item") or "-", row.get("total_amount", row.get("amount", 0))) for row in customer_rows[:12]],
+            "table": [("Customer Name", "Total Sales", "Paid Amount", "Outstanding Amount")] + [
+                (
+                    row.get("customer_name") or row.get("item") or "-",
+                    row.get("total_amount", row.get("amount", 0)),
+                    row.get("amount_received", 0),
+                    row.get("outstanding_amount", 0),
+                )
+                for row in customer_rows
+            ],
         }
 
     if formula in ("sotephwar_transection_top", "sotephwar_transection_quantity"):
@@ -468,6 +553,111 @@ def _chart_spec(result, question):
         }
 
     return None
+
+
+def _customer_revenue_spec(title, total_sales, total_paid, total_outstanding, customers):
+    customer_rows = sorted(
+        customers or [],
+        key=lambda row: int(row.get("total_amount") or row.get("amount") or 0),
+        reverse=True,
+    )
+    if not customer_rows and int(total_sales or 0):
+        customer_rows = [{
+            "customer_name": "All Customers",
+            "total_amount": total_sales,
+            "amount_received": total_paid,
+            "outstanding_amount": total_outstanding,
+        }]
+    return {
+        "kind": "customer_revenue_report",
+        "title": title,
+        "reason": "Best method: horizontal bars rank customers by revenue first, then grouped bars compare total sales, paid amount, and outstanding amount.",
+        "total_sales": total_sales,
+        "total_paid": total_paid,
+        "total_outstanding": total_outstanding,
+        "customers": customer_rows,
+        "values": [
+            (row.get("customer_name") or row.get("item") or "-", row.get("total_amount", row.get("amount", 0)))
+            for row in customer_rows[:12]
+        ],
+        "table": [("Customer Name", "Total Sales", "Paid Amount", "Outstanding Amount")] + [
+            (
+                row.get("customer_name") or row.get("item") or "-",
+                row.get("total_amount", row.get("amount", 0)),
+                row.get("amount_received", 0),
+                row.get("outstanding_amount", 0),
+            )
+            for row in customer_rows
+        ],
+    }
+
+
+def _farm_customer_revenue_spec(result, title="Farm Customer Revenue Report"):
+    customers = []
+    for row in result.get("categories") or []:
+        total_amount = int(row.get("income") or row.get("total_amount") or row.get("amount") or 0)
+        if not total_amount:
+            continue
+        customers.append({
+            "customer_name": row.get("customer_name") or row.get("category") or row.get("item") or "-",
+            "total_amount": total_amount,
+            "amount_received": int(row.get("amount_received", total_amount) or 0),
+            "outstanding_amount": int(row.get("outstanding_amount") or 0),
+            "invoice_count": int(row.get("transaction_count") or row.get("invoice_count") or 0),
+        })
+
+    total_sales = int(result.get("total_income") or sum(row["total_amount"] for row in customers) or 0)
+    total_paid = sum(row["amount_received"] for row in customers)
+    if not total_paid and total_sales:
+        total_paid = total_sales
+    total_outstanding = sum(row["outstanding_amount"] for row in customers)
+    return _customer_revenue_spec(
+        title,
+        total_sales,
+        total_paid,
+        total_outstanding,
+        customers,
+    )
+
+
+def _voucher_table_spec(title, vouchers):
+    normalized = []
+    for row in vouchers or []:
+        total = int(row.get("total_amount") or row.get("amount") or 0)
+        paid = int(row.get("amount_received") or row.get("paid") or total or 0)
+        outstanding = int(row.get("outstanding_amount") or max(total - paid, 0) or 0)
+        normalized.append({
+            "invoice_number": row.get("invoice_number") or row.get("voucher_number") or "-",
+            "invoice_date": row.get("invoice_date") or row.get("Date") or row.get("date") or "-",
+            "customer_name": row.get("customer_name") or row.get("customer") or row.get("item") or "-",
+            "total_amount": total,
+            "amount_received": paid,
+            "outstanding_amount": outstanding,
+        })
+
+    total = sum(row["total_amount"] for row in normalized)
+    paid = sum(row["amount_received"] for row in normalized)
+    outstanding = sum(row["outstanding_amount"] for row in normalized)
+    return {
+        "kind": "voucher_table",
+        "title": title,
+        "reason": "Best method: table format keeps voucher number, date, customer, total, paid, and outstanding readable.",
+        "total": total,
+        "paid": paid,
+        "outstanding": outstanding,
+        "vouchers": normalized,
+        "table": [("Voucher Number", "Date", "Customer", "Total", "Paid", "Outstanding")] + [
+            (
+                row["invoice_number"],
+                row["invoice_date"],
+                row["customer_name"],
+                row["total_amount"],
+                row["amount_received"],
+                row["outstanding_amount"],
+            )
+            for row in normalized
+        ],
+    }
 
 
 def _farm_financial_spec(result, question, intent):
@@ -617,6 +807,37 @@ def _unicode_voucher_lines(title, question, spec):
     return lines
 
 
+def _unicode_voucher_table_lines(title, question, spec):
+    lines = [
+        title,
+        f"Question: {question}",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        spec.get("title") or "Income Detail",
+        "",
+        f"Total: {_money(spec.get('total') or 0)} | Paid: {_money(spec.get('paid') or 0)} | Outstanding: {_money(spec.get('outstanding') or 0)}",
+        "",
+        "Voucher Number | Date | Customer | Total | Paid | Outstanding",
+    ]
+    vouchers = spec.get("vouchers") or []
+    if not vouchers:
+        lines.append("No vouchers found.")
+        return lines
+
+    for row in vouchers:
+        lines.append(
+            "{voucher} | {date} | {customer} | {total} | {paid} | {outstanding}".format(
+                voucher=_unicode_value(row.get("invoice_number")),
+                date=_unicode_value(row.get("invoice_date")),
+                customer=_unicode_value(row.get("customer_name")),
+                total=_money(row.get("total_amount") or 0),
+                paid=_money(row.get("amount_received") or 0),
+                outstanding=_money(row.get("outstanding_amount") or 0),
+            )
+        )
+    return lines
+
+
 def _unicode_farm_lines(title, question, spec):
     lines = [
         title,
@@ -662,6 +883,50 @@ def _unicode_farm_lines(title, question, spec):
     return lines
 
 
+def _unicode_customer_revenue_lines(title, question, spec):
+    lines = [
+        title,
+        f"Question: {question}",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        spec.get("title") or "Customer Revenue Report",
+        "",
+        "KPI Summary",
+        f"Total Sales: {_money(spec.get('total_sales') or 0)}",
+        f"Total Paid: {_money(spec.get('total_paid') or 0)}",
+        f"Total Outstanding: {_money(spec.get('total_outstanding') or 0)}",
+        "",
+        "Top Customers by Revenue",
+    ]
+    customers = spec.get("customers") or []
+    if not customers:
+        lines.append("No customer sales found for this period.")
+    for row in customers:
+        lines.append(
+            "{customer}: total {total}, paid {paid}, outstanding {outstanding}".format(
+                customer=_unicode_value(row.get("customer_name") or row.get("item")),
+                total=_money(row.get("total_amount", row.get("amount", 0))),
+                paid=_money(row.get("amount_received") or 0),
+                outstanding=_money(row.get("outstanding_amount") or 0),
+            )
+        )
+    lines.extend([
+        "",
+        "Customer Collection Status",
+        "Customer Name | Total Sales | Paid Amount | Outstanding Amount",
+    ])
+    for row in customers:
+        lines.append(
+            "{customer} | {total} | {paid} | {outstanding}".format(
+                customer=_unicode_value(row.get("customer_name") or row.get("item")),
+                total=_money(row.get("total_amount", row.get("amount", 0))),
+                paid=_money(row.get("amount_received") or 0),
+                outstanding=_money(row.get("outstanding_amount") or 0),
+            )
+        )
+    return lines
+
+
 def _unicode_table_lines(title, question, spec):
     lines = [
         title,
@@ -680,8 +945,12 @@ def _unicode_pdf_lines(title, question, spec):
     kind = spec.get("kind")
     if kind == "voucher_cards":
         return _unicode_voucher_lines(title, question, spec)
+    if kind == "voucher_table":
+        return _unicode_voucher_table_lines(title, question, spec)
     if kind == "farm_financial":
         return _unicode_farm_lines(title, question, spec)
+    if kind == "customer_revenue_report":
+        return _unicode_customer_revenue_lines(title, question, spec)
     if spec.get("table"):
         return _unicode_table_lines(title, question, spec)
     return None
@@ -931,6 +1200,64 @@ def _draw_voucher_summary(pdf, vouchers, x=50, y=698):
         pdf.text(cell_x + 10, y - 33, _money(value), size=13, bold=True)
 
 
+def _draw_voucher_table(pdf, vouchers, start_y=620):
+    headers = ("Voucher Number", "Date", "Customer", "Total", "Paid", "Outstanding")
+    column_width = 495 / len(headers)
+    widths = [column_width] * len(headers)
+    x_positions = [54 + (index * column_width) for index in range(len(headers))]
+    y = start_y
+    font_size = 6.3
+    line_gap = 9
+
+    def draw_header(current_y):
+        pdf.rect(50, current_y - 7, 495, 25, fill=(219, 226, 235))
+        for index, header in enumerate(headers):
+            pdf.text(x_positions[index], current_y, header, size=font_size, bold=True, max_width=widths[index] - 10)
+
+    draw_header(y)
+    y -= 30
+    if not vouchers:
+        pdf.text(58, y, "No vouchers found.", size=9)
+        return
+
+    for index, row in enumerate(vouchers):
+        if y < 58:
+            pdf.new_page()
+            pdf.text(50, 795, "Income Detail", size=16, bold=True)
+            y = 755
+            draw_header(y)
+            y -= 30
+
+        values = (
+            f"Voucher {row.get('invoice_number') or '-'}",
+            row.get("invoice_date") or "-",
+            row.get("customer_name") or "-",
+            _money(row.get("total_amount") or 0),
+            _money(row.get("amount_received") or 0),
+            _money(row.get("outstanding_amount") or 0),
+        )
+        wrapped_cells = [
+            _wrap_pdf_text(value, widths[col_index] - 10, font_size)
+            for col_index, value in enumerate(values)
+        ]
+        line_count = max(len(lines) for lines in wrapped_cells)
+        row_height = max(30, 15 + (line_count * line_gap))
+        if index % 2 == 0:
+            pdf.rect(50, y - row_height + 10, 495, row_height, fill=(246, 248, 251))
+
+        for col_index, lines in enumerate(wrapped_cells):
+            for line_index, line in enumerate(lines):
+                pdf.text(
+                    x_positions[col_index],
+                    y - (line_index * line_gap),
+                    line,
+                    size=font_size,
+                    bold=True,
+                    max_width=widths[col_index] - 10,
+                )
+        y -= row_height
+
+
 def _stock_quantity(row):
     for key in ("stock_qty", "quantity", "qty", "stock"):
         if key in row:
@@ -1133,6 +1460,165 @@ def _draw_farm_financial_report(pdf, spec, start_y=720):
         _draw_farm_report_rows(pdf, spec.get("rows") or [], start_y - 170)
 
 
+def _draw_customer_metric_card(pdf, x, y, label, value, fill):
+    pdf.rect(x, y - 50, 155, 50, fill=fill, stroke=(180, 190, 204))
+    pdf.text(x + 10, y - 17, label, size=8.7, bold=True, color=(75, 85, 99))
+    pdf.text(x + 10, y - 38, _money(value), size=14.3, bold=True)
+
+
+def _draw_customer_detail_table(pdf, rows, start_y=760):
+    headers = ("Customer Name", "Total Sales", "Paid Amount", "Outstanding Amount")
+    widths = (205, 96, 96, 98)
+    x_positions = (54, 259, 355, 451)
+    y = start_y
+
+    def draw_header(current_y):
+        pdf.rect(50, current_y - 7, 495, 25, fill=(219, 226, 235))
+        for index, header in enumerate(headers):
+            pdf.text(x_positions[index], current_y, header, size=8.3, bold=True, max_width=widths[index] - 8)
+
+    pdf.text(50, y + 30, "Customer Detail Table", size=12, bold=True)
+    draw_header(y)
+    y -= 30
+    if not rows:
+        pdf.text(58, y, "No customer sales found for this period.", size=9)
+        return
+
+    for index, row in enumerate(rows):
+        if y < 62:
+            pdf.new_page()
+            pdf.text(50, 795, "Customer Detail Table", size=16, bold=True)
+            y = 755
+            draw_header(y)
+            y -= 30
+
+        customer = row.get("customer_name") or row.get("item") or "-"
+        customer_lines = _wrap_pdf_text(customer, widths[0] - 8, 8.2)
+        row_height = max(24, 13 + (len(customer_lines) * 11))
+        if index % 2 == 0:
+            pdf.rect(50, y - row_height + 10, 495, row_height, fill=(246, 248, 251))
+        for line_index, line in enumerate(customer_lines):
+            pdf.text(x_positions[0], y - (line_index * 11), line, size=8.2, bold=True, max_width=widths[0] - 8)
+        pdf.text(x_positions[1], y, _money(row.get("total_amount", row.get("amount", 0))), size=8.2, bold=True, max_width=widths[1] - 8)
+        pdf.text(x_positions[2], y, _money(row.get("amount_received") or 0), size=8.2, bold=True, max_width=widths[2] - 8)
+        pdf.text(x_positions[3], y, _money(row.get("outstanding_amount") or 0), size=8.2, bold=True, max_width=widths[3] - 8)
+        y -= row_height
+
+
+def _draw_customer_collection_grouped_bars(pdf, rows, x=60, y=278, width=475, height=118):
+    rows = rows[:6]
+    if not rows:
+        pdf.text(x, y + height / 2, "No customer sales found for this period.", size=10)
+        return
+
+    max_value = max(
+        max(
+            int(row.get("total_amount", row.get("amount", 0)) or 0),
+            int(row.get("amount_received") or 0),
+            int(row.get("outstanding_amount") or 0),
+        )
+        for row in rows
+    ) or 1
+    label_width = 130
+    bar_x = x + label_width + 10
+    bar_width = width - label_width - 95
+    group_gap = 7
+    bar_height = 5
+    group_height = max(16, min(28, (height - group_gap * (len(rows) - 1)) / len(rows)))
+    series = [
+        ("Sales", "total_amount", (47, 128, 237)),
+        ("Paid", "amount_received", (39, 174, 96)),
+        ("Outstanding", "outstanding_amount", (235, 87, 87)),
+    ]
+
+    for index, row in enumerate(rows):
+        yy = y + height - ((index + 1) * group_height) - (index * group_gap)
+        pdf.text(x, yy + group_height - 4, _short_label(row.get("customer_name") or row.get("item") or "-", 22), size=7.4, bold=True, max_width=label_width)
+        for s_index, (_, key, color) in enumerate(series):
+            value = int(row.get(key, row.get("amount", 0) if key == "total_amount" else 0) or 0)
+            bar_y = yy + group_height - 8 - (s_index * (bar_height + 1))
+            pdf.rect(bar_x, bar_y, max(1, bar_width * (value / max_value)), bar_height, fill=color)
+        pdf.text(bar_x + bar_width + 8, yy + group_height - 9, _money(row.get("outstanding_amount") or 0), size=7.2, bold=True, max_width=70)
+
+    legend_x = x
+    for label, _, color in series:
+        pdf.rect(legend_x, y - 22, 9, 9, fill=color)
+        pdf.text(legend_x + 13, y - 21, label, size=7.8)
+        legend_x += 78
+    pdf.text(bar_x + bar_width + 8, y - 21, "Right value: outstanding", size=7.5, color=(75, 85, 99))
+
+
+def _draw_customer_revenue_bar_page(pdf, rows, max_value, x=60, y=80, width=475, height=480):
+    if not rows:
+        pdf.text(x, y + height / 2, "No customer sales found for this period.", size=10)
+        return
+
+    label_width = 165
+    value_width = 82
+    bar_x = x + label_width + 12
+    bar_width = max(90, width - label_width - value_width - 26)
+    value_x = bar_x + bar_width + 10
+    row_gap = 5
+    row_height = max(16, min(23, (height - row_gap * (len(rows) - 1)) / len(rows)))
+    pdf.line(bar_x, y, bar_x + bar_width, y, color=(190, 190, 190))
+
+    for index, row in enumerate(rows):
+        label = row.get("customer_name") or row.get("item") or "-"
+        value = abs(int(row.get("total_amount", row.get("amount", 0)) or 0))
+        yy = y + height - ((index + 1) * row_height) - (index * row_gap)
+        drawn_width = max(1, bar_width * (value / (max_value or 1)))
+        pdf.text(x, yy + row_height - 4, _short_label(label, 30), size=7.2, bold=True, max_width=label_width)
+        pdf.rect(bar_x, yy + 2, drawn_width, max(8, row_height - 4), fill=PALETTE[index % len(PALETTE)])
+        pdf.text(value_x, yy + row_height - 5, _money(value), size=7.3, bold=True, max_width=value_width)
+
+
+def _draw_customer_revenue_report(pdf, spec, start_y=720):
+    customers = spec.get("customers") or []
+    pdf.text(50, start_y, spec["title"], size=13, bold=True)
+
+    pdf.text(50, start_y - 28, "KPI Summary", size=11.2, bold=True)
+    metric_y = start_y - 48
+    _draw_customer_metric_card(pdf, 50, metric_y, "Total Sales", spec.get("total_sales", 0), (230, 239, 251))
+    _draw_customer_metric_card(pdf, 220, metric_y, "Total Paid", spec.get("total_paid", 0), (226, 242, 233))
+    _draw_customer_metric_card(pdf, 390, metric_y, "Total Outstanding", spec.get("total_outstanding", 0), (249, 233, 233))
+
+    pdf.text(50, start_y - 120, "Top Customers by Revenue", size=11.2, bold=True)
+    max_sales = max((int(row.get("total_amount", row.get("amount", 0)) or 0) for row in customers), default=1)
+    first_page_count = 14
+    continued_page_count = 24
+    _draw_customer_revenue_bar_page(
+        pdf,
+        customers[:first_page_count],
+        max_sales,
+        x=60,
+        y=82,
+        width=475,
+        height=start_y - 225,
+    )
+
+    offset = first_page_count
+    while offset < len(customers):
+        pdf.new_page()
+        pdf.text(50, 795, "Top Customers by Revenue (continued)", size=13, bold=True)
+        _draw_customer_revenue_bar_page(
+            pdf,
+            customers[offset:offset + continued_page_count],
+            max_sales,
+            x=60,
+            y=82,
+            width=475,
+            height=665,
+        )
+        offset += continued_page_count
+
+    pdf.new_page()
+    pdf.text(50, 795, "Customer Collection Status", size=13, bold=True)
+    _draw_customer_collection_grouped_bars(pdf, customers, x=60, y=560, width=475, height=165)
+
+    pdf.new_page()
+    _draw_customer_detail_table(pdf, customers, start_y=760)
+
+
 def create_chart_pdf_report(question, output_path, title="BigShot Finance Report"):
     formula_name = choose_formula(question)
     if formula_name not in FAST_FORMULAS:
@@ -1174,6 +1660,31 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
         pdf.finish(output_path)
         return True
 
+    if kind == "voucher_table":
+        pdf.text(50, 720, spec["title"], size=12, bold=True)
+        vouchers = spec.get("vouchers") or []
+        _draw_voucher_summary(pdf, vouchers, y=698)
+        _draw_voucher_table(pdf, vouchers, start_y=620)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "pie" and result.get("formula") == "sales_total":
+        pdf.text(50, 720, spec["title"], size=12, bold=True)
+        _draw_pie(pdf, spec)
+        pdf.text(50, 415, "Data Table", size=12, bold=True)
+        _draw_table(pdf, spec.get("table"), start_y=392)
+        income_rows = spec.get("income_rows") or []
+        if income_rows:
+            pdf.new_page()
+            pdf.text(50, 795, "Transection Income", size=13, bold=True)
+            rows = [("Date", "Item", "Amount", "Payment")] + [
+                (row.get("Date") or "-", row.get("item") or "-", row.get("amount") or 0, row.get("payment_method") or "-")
+                for row in income_rows
+            ]
+            _draw_table(pdf, rows, start_y=760)
+        pdf.finish(output_path)
+        return True
+
     if kind == "stock_sheet":
         pdf.text(50, 720, spec["title"], size=12, bold=True)
         _draw_stock_sheet(pdf, spec.get("stock") or [], start_y=698)
@@ -1182,6 +1693,11 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
 
     if kind == "farm_financial":
         _draw_farm_financial_report(pdf, spec, start_y=720)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "customer_revenue_report":
+        _draw_customer_revenue_report(pdf, spec, start_y=720)
         pdf.finish(output_path)
         return True
 

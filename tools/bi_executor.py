@@ -17,6 +17,7 @@ from tools.formula_engine import (
     sotephwar_inventory_movement_summary,
     sotephwar_inventory_stock,
     sotephwar_transection_customer,
+    sotephwar_transection_list,
     sotephwar_transection_quantity,
     sotephwar_transection_summary,
     sotephwar_transection_top,
@@ -134,6 +135,8 @@ def execute_intent(intent):
 
     if intent.business == "sote_phwar" and report in {"total_income", "income_summary"}:
         result = sotephwar_transection_summary(period)
+    elif intent.business == "farm" and report == "total_income":
+        result = sales_total(period, _filters(intent, "Income"))
     elif report == "financial_obligation_summary":
         result = financial_obligation_summary()
     elif report == "financial_obligation_due":

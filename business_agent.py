@@ -287,6 +287,14 @@ def _fast_answer(result):
             lines.append(f"Paid / received: {result['amount_received']:,}")
         if "outstanding_amount" in result:
             lines.append(f"Remained: {result['outstanding_amount']:,}")
+        income_rows = result.get("transection_income_rows") or []
+        if income_rows:
+            lines.extend(["", "Transection Income"])
+            for row in income_rows[:10]:
+                lines.append(
+                    f"{row.get('Date') or '-'} | {row.get('item') or '-'} | "
+                    f"{int(row.get('amount') or 0):,} | {row.get('payment_method') or '-'}"
+                )
         return "\n".join(lines)
 
     if formula == "expense_total":
@@ -347,6 +355,51 @@ def _fast_answer(result):
         return "\n".join(lines)
 
     if formula == "category_summary":
+        filters = result.get("filters") or {}
+        if filters.get("sector") == "Farm" and filters.get("income_expense") == "Income":
+            customers = sorted(
+                result.get("categories") or [],
+                key=lambda row: int(row.get("income") or row.get("total_amount") or row.get("amount") or 0),
+                reverse=True,
+            )
+            total_sales = int(result.get("total_income") or 0)
+            total_paid = sum(int(row.get("amount_received", row.get("income", 0)) or 0) for row in customers)
+            total_outstanding = sum(int(row.get("outstanding_amount") or 0) for row in customers)
+            lines = [
+                f"Farm Income Summary for {period}",
+                "",
+                "KPI Summary",
+                f"Total Sales: {total_sales:,}",
+                f"Total Paid: {total_paid:,}",
+                f"Total Outstanding: {total_outstanding:,}",
+                "",
+                "Top Customers by Revenue",
+            ]
+            if not customers:
+                lines.append("No customer sales found.")
+            for index, row in enumerate(customers[:10], start=1):
+                sales = int(row.get("income") or row.get("total_amount") or row.get("amount") or 0)
+                paid = int(row.get("amount_received", sales) or 0)
+                outstanding = int(row.get("outstanding_amount") or 0)
+                lines.append(
+                    f"{index}. {row.get('customer_name') or row.get('category') or row.get('item') or '-'} | "
+                    f"Total Sales: {sales:,} | Paid: {paid:,} | Outstanding: {outstanding:,}"
+                )
+            lines.extend([
+                "",
+                "Customer Collection Status",
+                "Customer Name | Total Sales | Paid Amount | Outstanding Amount",
+            ])
+            for row in customers[:20]:
+                sales = int(row.get("income") or row.get("total_amount") or row.get("amount") or 0)
+                paid = int(row.get("amount_received", sales) or 0)
+                outstanding = int(row.get("outstanding_amount") or 0)
+                lines.append(
+                    f"{row.get('customer_name') or row.get('category') or row.get('item') or '-'} | "
+                    f"{sales:,} | {paid:,} | {outstanding:,}"
+                )
+            return "\n".join(lines)
+
         lines = [f"Category summary for {period}"]
         if not result["categories"]:
             return f"Category summary for {period}: no matching data found."
@@ -415,13 +468,43 @@ def _fast_answer(result):
         return "\n".join(lines)
 
     if formula == "sotephwar_transection_summary":
-        return (
-            f"Sotephwar_Transection summary for {period}\n"
-            f"Invoices: {result['invoice_count']:,}\n"
-            f"Total amount: {result['total_amount']:,}\n"
-            f"Amount received: {result['amount_received']:,}\n"
-            f"Outstanding: {result['outstanding_amount']:,}"
+        customers = sorted(
+            result.get("customers") or [],
+            key=lambda row: int(row.get("total_amount") or row.get("amount") or 0),
+            reverse=True,
         )
+        lines = [
+            f"Sote Phwar Income Summary for {period}",
+            "",
+            "KPI Summary",
+            f"Total Sales: {result['total_amount']:,}",
+            f"Total Paid: {result['amount_received']:,}",
+            f"Total Outstanding: {result['outstanding_amount']:,}",
+            "",
+            "Top Customers by Revenue",
+        ]
+        if not customers:
+            lines.append("No customer sales found.")
+        for index, row in enumerate(customers[:10], start=1):
+            lines.append(
+                f"{index}. {row.get('customer_name') or row.get('item') or '-'} | "
+                f"Total Sales: {int(row.get('total_amount') or row.get('amount') or 0):,} | "
+                f"Paid: {int(row.get('amount_received') or 0):,} | "
+                f"Outstanding: {int(row.get('outstanding_amount') or 0):,}"
+            )
+        lines.extend([
+            "",
+            "Customer Collection Status",
+            "Customer Name | Total Sales | Paid Amount | Outstanding Amount",
+        ])
+        for row in customers[:20]:
+            lines.append(
+                f"{row.get('customer_name') or row.get('item') or '-'} | "
+                f"{int(row.get('total_amount') or row.get('amount') or 0):,} | "
+                f"{int(row.get('amount_received') or 0):,} | "
+                f"{int(row.get('outstanding_amount') or 0):,}"
+            )
+        return "\n".join(lines)
 
     if formula == "sotephwar_transection_monthly_summary":
         if not result["months"]:

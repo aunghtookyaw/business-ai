@@ -738,10 +738,11 @@ def _after_report_selected(message, context):
     if report_needs_category(report):
         state["awaiting"] = "category"
         state["categories"] = []
+        category_type = "income name" if module == "income" else "expense category"
         return _reply_text(
             message,
             context,
-            "Type expense category to search. You can type multiple lines, select more than one category, then press Done.",
+            f"Type {category_type} to search. You can type multiple lines, select more than one category, then press Done.",
             reply_markup=_remove_reply_keyboard(),
         )
     return _show_period_menu(message, context)
@@ -759,13 +760,14 @@ def _handle_search_text(message, context, text):
         seen = set()
         terms = [line.strip() for line in text.splitlines() if line.strip()] or [text]
         sector = BUSINESS_SECTOR.get(state.get("business"))
+        income_expense = "Income" if state.get("module") == "income" else "Expense"
         for term in terms:
-            for match in search_categories(term, sector=sector, income_expense="Expense"):
+            for match in search_categories(term, sector=sector, income_expense=income_expense):
                 if match["value"] in seen:
                     continue
                 seen.add(match["value"])
                 matches.append(match)
-        label = "category"
+        label = "income name" if state.get("module") == "income" else "category"
         prefix = "bi:select_category"
     else:
         return False
@@ -792,6 +794,16 @@ def _handle_search_text(message, context, text):
     return True
 
 
+def _uses_fixed_width_income_detail_pdf(payload):
+    result = payload.get("result") or {}
+    intent = payload.get("intent") or {}
+    return (
+        result.get("formula") == "list_transactions"
+        and intent.get("module") == "income"
+        and intent.get("report") in {"income_detail", "income_transactions"}
+    )
+
+
 def _execute_bi_output(message, context):
     state = _bi_state(context)
     intent = intent_from_state(state)
@@ -804,14 +816,17 @@ def _execute_bi_output(message, context):
 
     if output == "pdf":
         path = temp_report_path(".pdf")
-        created = create_chart_pdf_report_from_result(
-            payload["result"],
-            payload["title"],
-            path,
-            title=payload["title"],
-        )
-        if not created:
+        if _uses_fixed_width_income_detail_pdf(payload):
             _write_pdf_export(format_text_report(payload), path, title=payload["title"])
+        else:
+            created = create_chart_pdf_report_from_result(
+                payload["result"],
+                payload["title"],
+                path,
+                title=payload["title"],
+            )
+            if not created:
+                _write_pdf_export(format_text_report(payload), path, title=payload["title"])
         with path.open("rb") as document:
             _reply_document(
                 message,

@@ -345,11 +345,16 @@ class FinanceBotFilterTest(unittest.TestCase):
         finally:
             telegram_bot.search_categories = original_search_categories
 
-    def test_income_detail_uses_category_search_before_period(self):
+    def test_income_detail_asks_income_name_before_period(self):
         original_search_categories = telegram_bot.search_categories
-        telegram_bot.search_categories = lambda text, **kwargs: [
-            {"value": "Vegetable Sales", "score": 1.0},
-        ]
+        seen = {}
+
+        def fake_search_categories(text, **kwargs):
+            seen["text"] = text
+            seen["kwargs"] = kwargs
+            return [{"value": "Vegetable Sales", "score": 1.0}]
+
+        telegram_bot.search_categories = fake_search_categories
         try:
             message = FakeMessage(-1003850232296, 5)
             context = FakeContext()
@@ -363,11 +368,17 @@ class FinanceBotFilterTest(unittest.TestCase):
                     context,
                 )
 
+            self.assertEqual("category", context.user_data[telegram_bot.BI_STATE_KEY]["awaiting"])
+            self.assertIn("Type income name to search", message.replies[-1]["text"])
+
             search_message = FakeMessage(-1003850232296, 5, "Vegetable")
             telegram_bot.handle_message(FakeUpdate(search_message), context)
 
+            self.assertEqual("Vegetable", seen["text"])
+            self.assertEqual("Farm", seen["kwargs"]["sector"])
+            self.assertEqual("Income", seen["kwargs"]["income_expense"])
             self.assertEqual(["Vegetable Sales"], context.user_data[telegram_bot.BI_STATE_KEY]["candidates"])
-            self.assertEqual("Select category:", search_message.replies[-1]["text"])
+            self.assertEqual("Select income name:", search_message.replies[-1]["text"])
         finally:
             telegram_bot.search_categories = original_search_categories
 
@@ -434,6 +445,127 @@ class FinanceBotFilterTest(unittest.TestCase):
         finally:
             telegram_bot.search_categories = original_search_categories
             telegram_bot.execute_intent = original_execute_intent
+
+    def test_voucher_pdf_uses_chart_card_export(self):
+        original_execute_intent = telegram_bot.execute_intent
+        original_chart_pdf = telegram_bot.create_chart_pdf_report_from_result
+        original_write_pdf = telegram_bot._write_pdf_export
+        captured = {}
+
+        def fake_execute_intent(intent):
+            return {
+                "intent": intent.to_dict(),
+                "title": "Sote Phwar - Income - Sales By Customer",
+                "period_label": "This Month",
+                "result": {
+                    "formula": "sotephwar_transection_customer",
+                    "invoices": [
+                        {
+                            "invoice_number": "12",
+                            "invoice_date": "2026-06-01",
+                            "customer_name": "Very Long Customer Name That Must Not Shift Columns",
+                            "total_amount": 1000000,
+                            "amount_received": 250000,
+                            "outstanding_amount": 750000,
+                        },
+                    ],
+                },
+            }
+
+        def fake_chart_pdf(result, question, output_path, title=telegram_bot.PDF_EXPORT_TITLE, spec=None):
+            captured["formula"] = result["formula"]
+            captured["question"] = question
+            with open(output_path, "wb") as pdf_file:
+                pdf_file.write(b"%PDF-1.4\nvoucher cards\n%%EOF\n")
+            return True
+
+        def fake_write_pdf(text, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            raise AssertionError("Voucher PDFs should use chart card export")
+
+        telegram_bot.execute_intent = fake_execute_intent
+        telegram_bot.create_chart_pdf_report_from_result = fake_chart_pdf
+        telegram_bot._write_pdf_export = fake_write_pdf
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            context.user_data[telegram_bot.BI_STATE_KEY] = {
+                "business": "sote_phwar",
+                "module": "income",
+                "report": "sales_by_customer",
+                "period": {"type": "relative", "value": "this_month"},
+                "output": "pdf",
+                "customer": "Very Long Customer",
+            }
+
+            telegram_bot._execute_bi_output(message, context)
+        finally:
+            telegram_bot.execute_intent = original_execute_intent
+            telegram_bot.create_chart_pdf_report_from_result = original_chart_pdf
+            telegram_bot._write_pdf_export = original_write_pdf
+
+        self.assertEqual("document", message.replies[-1]["type"])
+        self.assertEqual("sotephwar_transection_customer", captured["formula"])
+        self.assertEqual("Sote Phwar - Income - Sales By Customer", captured["question"])
+
+    def test_income_detail_pdf_uses_fixed_width_text_export(self):
+        original_execute_intent = telegram_bot.execute_intent
+        original_chart_pdf = telegram_bot.create_chart_pdf_report_from_result
+        original_write_pdf = telegram_bot._write_pdf_export
+        captured = {}
+
+        def fake_execute_intent(intent):
+            return {
+                "intent": intent.to_dict(),
+                "title": "Farm - Income - Income Detail",
+                "period_label": "This Month",
+                "result": {
+                    "formula": "list_transactions",
+                    "transactions": [
+                        {
+                            "Date": "2026-06-01",
+                            "sector": "Farm",
+                            "category": "Vegetable Sales",
+                            "item": "General income filling",
+                            "amount": 500000,
+                            "payment_method": "K Pay",
+                        },
+                    ],
+                },
+            }
+
+        def fail_chart_pdf(*args, **kwargs):
+            raise AssertionError("Income Detail PDFs should use fixed-width text export")
+
+        def fake_write_pdf(text, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            captured["text"] = text
+            with open(output_path, "wb") as pdf_file:
+                pdf_file.write(b"%PDF-1.4\nincome detail fixed width\n%%EOF\n")
+
+        telegram_bot.execute_intent = fake_execute_intent
+        telegram_bot.create_chart_pdf_report_from_result = fail_chart_pdf
+        telegram_bot._write_pdf_export = fake_write_pdf
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            context.user_data[telegram_bot.BI_STATE_KEY] = {
+                "business": "farm",
+                "module": "income",
+                "report": "income_detail",
+                "period": {"type": "relative", "value": "this_month"},
+                "output": "pdf",
+                "category": "Vegetable Sales",
+            }
+
+            telegram_bot._execute_bi_output(message, context)
+        finally:
+            telegram_bot.execute_intent = original_execute_intent
+            telegram_bot.create_chart_pdf_report_from_result = original_chart_pdf
+            telegram_bot._write_pdf_export = original_write_pdf
+
+        self.assertEqual("document", message.replies[-1]["type"])
+        self.assertIn("Date       Item", captured["text"])
+        self.assertIn("General income filling", captured["text"])
+        self.assertIn("        500,000", captured["text"])
 
     def test_sotephwar_expense_category_search_is_sector_scoped(self):
         original_search_categories = telegram_bot.search_categories
