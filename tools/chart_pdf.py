@@ -212,10 +212,18 @@ def _chart_spec(result, question):
     formula = result.get("formula")
     forced = _forced_chart_type(question)
     bi_intent = result.get("_bi_intent") or {}
+    report = bi_intent.get("report") or ""
 
     if (
         bi_intent.get("business") == "farm"
         and bi_intent.get("module") in {"income", "expense"}
+        and report not in {
+            "expense_by_category",
+            "expense_detail",
+            "income_by_category",
+            "income_detail",
+            "income_transactions",
+        }
         and not forced
     ):
         return _farm_financial_spec(result, question, bi_intent)
@@ -267,15 +275,20 @@ def _chart_spec(result, question):
         total_expense = result.get("total_expense", sum(row.get("expense", 0) for row in result.get("categories") or []))
         net_total = result.get("net_total", total_income - total_expense)
         transaction_count = result.get("transaction_count", sum(row.get("transaction_count", 0) for row in result.get("categories") or []))
+        module = bi_intent.get("module") or ""
+        amount_key = "income" if module == "income" else "expense"
+        title = "Income by Category" if module == "income" else "Expense by Category"
+        if report in {"income_summary", "expense_summary"}:
+            title = "Income Summary" if module == "income" else "Expense Summary"
         return {
             "kind": forced or "bar",
-            "title": "Category Expense",
+            "title": title,
             "reason": "Best method: bar chart ranks categories, which is clearer than pie when there are many categories.",
             "total_income": total_income,
             "total_expense": total_expense,
             "net_total": net_total,
             "transaction_count": transaction_count,
-            "values": [(f"{row['sector']} / {row['category']}", row.get("expense") or row.get("income") or abs(row.get("net", 0))) for row in rows],
+            "values": [(f"{row['sector']} / {row['category']}", row.get(amount_key) or abs(row.get("net", 0))) for row in rows],
             "table": [("Category", "Income", "Expense", "Net", "Rows")] + [
                 (f"{row['sector']} / {row['category']}", row["income"], row["expense"], row["net"], row["transaction_count"]) for row in rows
             ] + [("Total", total_income, total_expense, net_total, transaction_count)],
@@ -317,6 +330,31 @@ def _chart_spec(result, question):
         rows = result.get("transactions") or result.get("invoices") or []
         amount_key = "amount" if result.get("transactions") else "total_amount"
         values = [int(row.get(amount_key) or 0) for row in rows]
+        if report in {"expense_detail", "income_detail", "income_transactions"}:
+            is_income = bi_intent.get("module") == "income"
+            return {
+                "kind": forced or "bar",
+                "title": "Income Detail" if is_income else "Expense Detail",
+                "reason": "Best method: bar chart ranks transaction lines by amount, with the table below for exact review.",
+                "values": [
+                    (
+                        row.get("item") or row.get("category") or row.get("Date") or row.get("invoice_date"),
+                        row.get(amount_key, 0),
+                    )
+                    for row in rows[:12]
+                ],
+                "table": [("Date", "Item", "Sector", "Category", "Payment", "Amount")] + [
+                    (
+                        row.get("Date") or row.get("invoice_date"),
+                        row.get("item") or row.get("customer_name") or "-",
+                        row.get("sector") or "-",
+                        row.get("category") or "-",
+                        row.get("payment_method") or "-",
+                        row.get(amount_key, 0),
+                    )
+                    for row in rows[:30]
+                ],
+            }
         if bi_intent.get("business") == "sote_phwar" and bi_intent.get("module") in {"income", "expense"}:
             return {
                 "kind": forced or "table",

@@ -72,7 +72,12 @@ def validate_intent(intent):
         "outstanding_balance",
     } and not intent.customer:
         missing.append("customer")
-    if intent.report in {"expense_by_category", "expense_detail"} and not intent.category and not intent.categories:
+    if intent.report in {
+        "expense_by_category",
+        "expense_detail",
+        "income_by_category",
+        "income_detail",
+    } and not intent.category and not intent.categories:
         missing.append("category")
 
     return missing

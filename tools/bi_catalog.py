@@ -63,11 +63,12 @@ MODULES = {
 INCOME_REPORTS = [
     ("total_income", "Total Income"),
     ("income_summary", "Income Summary"),
+    ("income_by_category", "Income by Category"),
+    ("income_detail", "Income Detail"),
     ("sales_by_customer", "Sales by Customer"),
     ("outstanding_balance", "Outstanding / Unpaid"),
     ("sales_by_product", "Sales by Product"),
     ("top_customers", "Top Customers"),
-    ("income_transactions", "Income Transactions"),
 ]
 
 EXPENSE_REPORTS = [
@@ -158,4 +159,9 @@ def report_needs_customer(report):
 
 
 def report_needs_category(report):
-    return report in {"expense_by_category", "expense_detail"}
+    return report in {
+        "expense_by_category",
+        "expense_detail",
+        "income_by_category",
+        "income_detail",
+    }

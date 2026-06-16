@@ -397,7 +397,7 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("Voucher 1", pdf_text)
             self.assertIn("Voucher 14", pdf_text)
 
-    def test_farm_expense_pdf_uses_farm_report_layout(self):
+    def test_farm_expense_pdf_uses_standard_detail_layout(self):
         result = {
             "formula": "list_transactions",
             "period": "last_month",
@@ -429,11 +429,115 @@ class ChartPdfTest(unittest.TestCase):
 
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
-            self.assertIn("Farm Expense Report", pdf_text)
-            self.assertIn("Total Farm Expense", pdf_text)
-            self.assertIn("Expense Lines", pdf_text)
+            self.assertIn("Expense Detail", pdf_text)
+            self.assertIn("Data Table", pdf_text)
             self.assertIn("Fertilizer", pdf_text)
             self.assertIn("NPK fertilizer", pdf_text)
+
+    def test_expense_detail_pdf_uses_standard_chart_table_layout(self):
+        result = {
+            "formula": "list_transactions",
+            "period": "last_month",
+            "_period_label": "Last Month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "expense",
+                "report": "expense_detail",
+            },
+            "transactions": [
+                {
+                    "Date": "2026-05-14",
+                    "sector": "Farm",
+                    "category": "Fertilizer",
+                    "item": "NPK fertilizer",
+                    "amount": 300000,
+                    "payment_method": "Cash",
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "expense-detail-standard.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Farm - Expense - Expense Detail",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Expense Detail", pdf_text)
+            self.assertIn("Data Table", pdf_text)
+            self.assertIn("NPK fertilizer", pdf_text)
+            self.assertNotIn("Farm Expense Report", pdf_text)
+
+    def test_income_by_category_and_detail_pdf_use_standard_layout(self):
+        category_result = {
+            "formula": "category_summary",
+            "period": "this_month",
+            "_period_label": "This Month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "income",
+                "report": "income_by_category",
+            },
+            "total_income": 500000,
+            "total_expense": 0,
+            "net_total": 500000,
+            "transaction_count": 2,
+            "categories": [
+                {
+                    "sector": "Farm",
+                    "category": "Vegetable Sales",
+                    "income": 500000,
+                    "expense": 0,
+                    "net": 500000,
+                    "transaction_count": 2,
+                },
+            ],
+        }
+        detail_result = {
+            "formula": "list_transactions",
+            "period": "this_month",
+            "_period_label": "This Month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "income",
+                "report": "income_detail",
+            },
+            "transactions": [
+                {
+                    "Date": "2026-06-01",
+                    "sector": "Farm",
+                    "category": "Vegetable Sales",
+                    "item": "Makro",
+                    "amount": 500000,
+                    "payment_method": "K Pay",
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            category_path = Path(temp_dir) / "income-category.pdf"
+            detail_path = Path(temp_dir) / "income-detail.pdf"
+
+            self.assertTrue(chart_pdf.create_chart_pdf_report_from_result(
+                category_result,
+                "Farm - Income - Income By Category",
+                category_path,
+            ))
+            self.assertTrue(chart_pdf.create_chart_pdf_report_from_result(
+                detail_result,
+                "Farm - Income - Income Detail",
+                detail_path,
+            ))
+
+            category_text = category_path.read_bytes().decode("latin-1")
+            detail_text = detail_path.read_bytes().decode("latin-1")
+            self.assertIn("Income by Category", category_text)
+            self.assertIn("Data Table", category_text)
+            self.assertIn("Income Detail", detail_text)
+            self.assertIn("Data Table", detail_text)
+            self.assertNotIn("Farm Income Report", detail_text)
 
     def test_unicode_voucher_pdf_does_not_use_ascii_question_marks(self):
         customer = "မောင်မောင်"
@@ -547,12 +651,14 @@ class ChartPdfTest(unittest.TestCase):
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertNotIn("...", pdf_text)
-            self.assertIn("Fertilizer and soil", pdf_text)
-            self.assertIn("monsoon paddy field", pdf_text)
+            self.assertIn("Fertilizer and", pdf_text)
+            self.assertIn("soil improvement", pdf_text)
+            self.assertIn("monsoon paddy", pdf_text)
             self.assertIn("preparation", pdf_text)
-            self.assertIn("before transplanting", pdf_text)
+            self.assertIn("before", pdf_text)
+            self.assertIn("transplanting", pdf_text)
 
-    def test_sotephwar_transaction_lines_pdf_uses_wrapped_table(self):
+    def test_sotephwar_transaction_lines_pdf_uses_standard_detail_layout(self):
         result = {
             "formula": "list_transactions",
             "period": "last_month",
@@ -584,10 +690,13 @@ class ChartPdfTest(unittest.TestCase):
 
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
-            self.assertIn("Sote Phwar Transaction Lines", pdf_text)
-            self.assertIn("Sote Phwar packaging", pdf_text)
-            self.assertIn("and delivery expense", pdf_text)
-            self.assertIn("for northern customer", pdf_text)
+            self.assertIn("Expense Detail", pdf_text)
+            self.assertIn("Data Table", pdf_text)
+            self.assertIn("Sote Phwar", pdf_text)
+            self.assertIn("packaging and", pdf_text)
+            self.assertIn("delivery expense", pdf_text)
+            self.assertIn("for northern", pdf_text)
+            self.assertIn("customer route", pdf_text)
             self.assertIn("route", pdf_text)
             self.assertIn("carton handling", pdf_text)
             self.assertIn("charges for wholesale", pdf_text)

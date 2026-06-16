@@ -345,6 +345,38 @@ class FinanceBotFilterTest(unittest.TestCase):
         finally:
             telegram_bot.search_categories = original_search_categories
 
+    def test_income_detail_uses_category_search_before_period(self):
+        original_search_categories = telegram_bot.search_categories
+        telegram_bot.search_categories = lambda text, **kwargs: [
+            {"value": "Vegetable Sales", "score": 1.0},
+        ]
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in (
+                "bi:business:farm",
+                "bi:module:income",
+                "bi:report:income_detail",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            search_message = FakeMessage(-1003850232296, 5, "Vegetable")
+            telegram_bot.handle_message(FakeUpdate(search_message), context)
+
+            self.assertEqual(["Vegetable Sales"], context.user_data[telegram_bot.BI_STATE_KEY]["candidates"])
+            self.assertEqual("Select category:", search_message.replies[-1]["text"])
+        finally:
+            telegram_bot.search_categories = original_search_categories
+
+    def test_income_reports_include_by_category_and_detail(self):
+        reports = dict(reports_for("farm", "income"))
+
+        self.assertEqual("Income by Category", reports["income_by_category"])
+        self.assertEqual("Income Detail", reports["income_detail"])
+
     def test_expense_by_category_uses_typed_category_search(self):
         original_search_categories = telegram_bot.search_categories
         original_execute_intent = telegram_bot.execute_intent

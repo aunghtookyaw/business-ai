@@ -142,7 +142,7 @@ def execute_intent(intent):
         result = financial_obligation_list(limit=50)
     elif report == "total_income":
         result = sales_total(period, _filters(intent, "Income"))
-    elif report == "income_summary":
+    elif report in {"income_summary", "income_by_category"}:
         result = category_summary(period, _filters(intent, "Income"))
     elif intent.business == "farm" and report == "sales_by_customer":
         result = farm_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
@@ -152,7 +152,7 @@ def execute_intent(intent):
         result = top_income(period, _filters(intent, "Income"), limit=10)
     elif report == "sales_by_product":
         result = sotephwar_transection_quantity(period, item=_product(intent))
-    elif report == "income_transactions":
+    elif report in {"income_detail", "income_transactions"}:
         result = list_transactions(period, _filters(intent, "Income"), limit=50)
     elif report == "total_expense":
         result = expense_total(period, _filters(intent, "Expense"))
