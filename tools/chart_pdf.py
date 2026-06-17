@@ -3,11 +3,19 @@ import re
 import subprocess
 import tempfile
 import textwrap
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from business_agent import FAST_FORMULAS, choose_formula
-from tools.formula_engine import run_formula
+from tools.formula_engine import (
+    cash_flow,
+    category_summary,
+    kpi_overview,
+    sector_summary,
+    sotephwar_inventory_movement_summary,
+    sotephwar_inventory_stock,
+    run_formula,
+)
 
 
 PALETTE = [
@@ -79,6 +87,39 @@ def _percentile(values, percent):
     if lower == upper:
         return ordered[int(position)]
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def _mmk(value):
+    return f"{int(value or 0):,} MMK"
+
+
+def _period_months(count=12, today=None):
+    today = today or date.today()
+    months = []
+    year = today.year
+    month = today.month
+    for _ in range(count):
+        months.append((year, month))
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+    return list(reversed(months))
+
+
+def _month_period(year, month):
+    return f"month:{year}-{month:02d}"
+
+
+def _month_label(year, month):
+    return date(year, month, 1).strftime("%b %Y")
+
+
+def _change_percent(current, previous):
+    previous = int(previous or 0)
+    if not previous:
+        return None
+    return round(((int(current or 0) - previous) / previous) * 100, 1)
 
 
 class PdfCanvas:
@@ -208,34 +249,165 @@ def _forced_chart_type(question):
     return None
 
 
+def _business_title(intent):
+    business = intent.get("business")
+    if business == "sote_phwar":
+        return "Sote Phwar"
+    if business == "farm":
+        return "Farm"
+    return ""
+
+
+def _module_title(intent):
+    return "Income" if intent.get("module") == "income" else "Expense"
+
+
+def _financial_totals(result, amount_key):
+    total_key = "total_income" if amount_key == "income" else "total_expense"
+    total = int(result.get(total_key) or result.get("total_sales") or result.get("total_amount") or 0)
+    rows = result.get("categories") or result.get("transactions") or result.get("invoices") or []
+    if not total and rows:
+        row_amount_key = "amount" if result.get("transactions") else ("total_amount" if result.get("invoices") else amount_key)
+        total = sum(int(row.get(row_amount_key) or 0) for row in rows)
+    paid = int(result.get("amount_received", result.get("paid", 0)) or 0)
+    if not paid:
+        paid = sum(int(row.get("amount_received") or 0) for row in rows)
+    if not paid and total:
+        paid = total
+    outstanding = int(result.get("outstanding_amount", 0) or 0)
+    if not outstanding:
+        outstanding = sum(int(row.get("outstanding_amount") or 0) for row in rows)
+    return total, paid, outstanding
+
+
+def _financial_total_spec(result, intent, amount_key):
+    total, paid, outstanding = _financial_totals(result, amount_key)
+    module_title = "Income" if amount_key == "income" else "Expense"
+    business_title = _business_title(intent)
+    title = f"{business_title} Total {module_title}".strip()
+    return {
+        "kind": "financial_total_report",
+        "title": title,
+        "amount_label": f"Total {module_title}",
+        "total": total,
+        "paid": paid,
+        "outstanding": outstanding,
+        "values": [("Paid", paid), ("Outstanding", outstanding)],
+        "table": [
+            ("Metric", "Amount"),
+            (f"Total {module_title}", total),
+            ("Paid", paid),
+            ("Outstanding", outstanding),
+            ("Rows", result.get("expense_count", result.get("invoice_count", result.get("transaction_count", 0)))),
+        ],
+    }
+
+
+def _financial_category_spec(result, intent, report, amount_key):
+    rows = result.get("categories") or []
+    total, paid, outstanding = _financial_totals(result, amount_key)
+    business_title = _business_title(intent)
+    module_title = "Income" if amount_key == "income" else "Expense"
+    title_kind = "Summary" if report in {"income_summary", "expense_summary"} else "by Category"
+    title = f"{business_title} {module_title} {title_kind}".strip()
+    transaction_count = int(result.get("transaction_count", sum(row.get("transaction_count", 0) for row in rows)) or 0)
+    return {
+        "kind": "financial_category_report",
+        "title": title,
+        "amount_label": f"Total {module_title}",
+        "chart_title": f"{module_title} Categories",
+        "table_title": f"{module_title} Category Table",
+        "total": total,
+        "paid": paid,
+        "outstanding": outstanding,
+        "values": [(row.get("category") or "-", row.get(amount_key) or abs(row.get("net", 0))) for row in rows],
+        "table": [("Category", module_title, "Paid", "Outstanding", "Rows")] + [
+            (
+                row.get("category") or "-",
+                row.get(amount_key) or abs(row.get("net", 0)),
+                row.get("amount_received", row.get(amount_key) or abs(row.get("net", 0))),
+                row.get("outstanding_amount", 0),
+                row.get("transaction_count", 0),
+            )
+            for row in rows
+        ] + [("Total", total, paid, outstanding, transaction_count)],
+    }
+
+
+def _financial_detail_spec(result, intent, amount_key):
+    rows = result.get("transactions") or result.get("invoices") or []
+    total, paid, outstanding = _financial_totals(result, amount_key)
+    business_title = _business_title(intent)
+    module_title = "Income" if amount_key == "income" else "Expense"
+    amount_field = "amount" if result.get("transactions") else "total_amount"
+    return {
+        "kind": "financial_detail_report",
+        "title": f"{business_title} {module_title} Detail".strip(),
+        "amount_label": f"Total {module_title}",
+        "chart_title": f"{module_title} Detail",
+        "table_title": f"{module_title} Detail Table",
+        "total": total,
+        "paid": paid,
+        "outstanding": outstanding,
+        "values": [
+            (
+                row.get("item") or row.get("customer_name") or row.get("category") or row.get("Date") or row.get("invoice_date") or "-",
+                row.get(amount_field, 0),
+            )
+            for row in rows
+        ],
+        "table": [("Date", "Item", "Category", "Payment", "Amount", "Paid", "Outstanding")] + [
+            (
+                row.get("Date") or row.get("invoice_date") or "-",
+                row.get("item") or row.get("customer_name") or "-",
+                row.get("category") or "-",
+                row.get("payment_method") or "-",
+                row.get(amount_field, 0),
+                row.get("amount_received", row.get(amount_field, 0)),
+                row.get("outstanding_amount", 0),
+            )
+            for row in rows
+        ],
+    }
+
+
 def _chart_spec(result, question):
     formula = result.get("formula")
     forced = _forced_chart_type(question)
     bi_intent = result.get("_bi_intent") or {}
     report = bi_intent.get("report") or ""
 
-    if (
-        bi_intent.get("business") == "farm"
-        and bi_intent.get("module") == "income"
-        and report == "income_summary"
-        and formula == "category_summary"
-    ):
-        return _farm_customer_revenue_spec(result, title="Farm Customer Revenue Report")
-
-    if (
-        bi_intent.get("business") == "farm"
-        and bi_intent.get("module") in {"income", "expense"}
-        and report not in {
-            "expense_by_category",
-            "expense_detail",
-            "income_by_category",
-            "income_detail",
-            "income_transactions",
-            "total_income",
+    if formula == "expense_period_comparison":
+        periods = result.get("periods") or []
+        categories = result.get("categories") or []
+        return {
+            "kind": "expense_comparison_report",
+            "title": result.get("_report_title") or "Expense Comparison",
+            "periods": periods,
+            "categories": categories,
+            "ai_comment": result.get("ai_comment") or "",
+            "values": [(row.get("label") or row.get("period") or "-", row.get("total_expense", 0)) for row in periods],
+            "summary_table": [("Period", "Total Expense", "Paid", "Outstanding", "Rows")] + [
+                (
+                    row.get("label") or row.get("period") or "-",
+                    row.get("total_expense", 0),
+                    row.get("paid", 0),
+                    row.get("outstanding", 0),
+                    row.get("transaction_count", 0),
+                )
+                for row in periods
+            ],
+            "table": [("Category", "Previous", "Current", "Change", "Change %")] + [
+                (
+                    row.get("category") or "-",
+                    row.get("previous_amount", 0),
+                    row.get("current_amount", 0),
+                    row.get("change", 0),
+                    "-" if row.get("change_percent") is None else f"{row['change_percent']}%",
+                )
+                for row in categories
+            ],
         }
-        and not forced
-    ):
-        return _farm_financial_spec(result, question, bi_intent)
 
     if formula in ("kpi_overview", "gross_profit"):
         values = [
@@ -251,25 +423,9 @@ def _chart_spec(result, question):
         }
 
     if formula == "sales_total":
-        total_sales = int(result.get("total_sales") or 0)
-        paid = int(result.get("amount_received") or 0)
-        outstanding = int(result.get("outstanding_amount") or 0)
-        values = [("Paid", paid), ("Outstanding", outstanding)]
-        if not any(value for _, value in values) and total_sales:
-            values = [("Total Income", total_sales)]
-        title = "Total Income"
-        if bi_intent.get("business") == "farm":
-            title = "Farm Total Income"
-        elif bi_intent.get("business") == "sote_phwar":
-            title = "Sote Phwar Total Income"
-        return {
-            "kind": forced or "pie",
-            "title": title,
-            "reason": "Best method: pie chart keeps total income simple by showing paid versus outstanding amount.",
-            "values": values,
-            "table": [("Metric", "Amount"), ("Total Income", total_sales)] + values,
-            "income_rows": result.get("transection_income_rows") or [],
-        }
+        spec = _financial_total_spec(result, bi_intent, "income")
+        spec["income_rows"] = result.get("transection_income_rows") or []
+        return spec
 
     if formula == "cash_flow":
         rows = result.get("by_payment_method") or []
@@ -307,6 +463,8 @@ def _chart_spec(result, question):
         transaction_count = result.get("transaction_count", sum(row.get("transaction_count", 0) for row in result.get("categories") or []))
         module = bi_intent.get("module") or ""
         amount_key = "income" if module == "income" else "expense"
+        if report in {"income_summary", "expense_summary", "income_by_category", "expense_by_category"}:
+            return _financial_category_spec(result, bi_intent, report, amount_key)
         title = "Income by Category" if module == "income" else "Expense by Category"
         if report in {"income_summary", "expense_summary"}:
             title = "Income Summary" if module == "income" else "Expense Summary"
@@ -323,6 +481,9 @@ def _chart_spec(result, question):
                 (f"{row['sector']} / {row['category']}", row["income"], row["expense"], row["net"], row["transaction_count"]) for row in rows
             ] + [("Total", total_income, total_expense, net_total, transaction_count)],
         }
+
+    if formula == "expense_total":
+        return _financial_total_spec(result, bi_intent, "expense")
 
     if formula == "sales_total" and bi_intent.get("business") == "farm":
         total_sales = int(result.get("total_sales") or 0)
@@ -376,30 +537,8 @@ def _chart_spec(result, question):
         amount_key = "amount" if result.get("transactions") else "total_amount"
         values = [int(row.get(amount_key) or 0) for row in rows]
         if report in {"expense_detail", "income_detail", "income_transactions"}:
-            is_income = bi_intent.get("module") == "income"
-            return {
-                "kind": forced or "bar",
-                "title": "Income Detail" if is_income else "Expense Detail",
-                "reason": "Best method: bar chart ranks transaction lines by amount, with the table below for exact review.",
-                "values": [
-                    (
-                        row.get("item") or row.get("category") or row.get("Date") or row.get("invoice_date"),
-                        row.get(amount_key, 0),
-                    )
-                    for row in rows[:12]
-                ],
-                "table": [("Date", "Item", "Sector", "Category", "Payment", "Amount")] + [
-                    (
-                        row.get("Date") or row.get("invoice_date"),
-                        row.get("item") or row.get("customer_name") or "-",
-                        row.get("sector") or "-",
-                        row.get("category") or "-",
-                        row.get("payment_method") or "-",
-                        row.get(amount_key, 0),
-                    )
-                    for row in rows[:30]
-                ],
-            }
+            amount_name = "income" if bi_intent.get("module") == "income" else "expense"
+            return _financial_detail_spec(result, bi_intent, amount_name)
         if bi_intent.get("business") == "sote_phwar" and bi_intent.get("module") in {"income", "expense"}:
             return {
                 "kind": forced or "table",
@@ -442,19 +581,16 @@ def _chart_spec(result, question):
     ):
         return _voucher_table_spec("Farm Income Detail", result.get("invoices") or [])
 
+    if (
+        formula == "farm_transection_customer"
+        and bi_intent.get("business") == "farm"
+        and bi_intent.get("module") == "income"
+    ):
+        return _farm_financial_spec(result, question, bi_intent)
+
     if formula == "sotephwar_transection_summary":
         if report == "total_income":
-            values = [
-                ("Paid", result.get("amount_received", 0)),
-                ("Outstanding", result.get("outstanding_amount", 0)),
-            ]
-            return {
-                "kind": forced or "pie",
-                "title": "Sote Phwar Total Income",
-                "reason": "Best method: pie chart keeps total income simple by showing paid versus outstanding amount.",
-                "values": values,
-                "table": [("Metric", "Amount"), ("Total Income", result.get("total_amount", 0))] + values,
-            }
+            return _financial_total_spec(result, bi_intent, "income")
         customer_rows = sorted(
             result.get("customers") or [],
             key=lambda row: int(row.get("total_amount") or row.get("amount") or 0),
@@ -468,23 +604,25 @@ def _chart_spec(result, question):
                 "outstanding_amount": result.get("outstanding_amount", 0),
             }]
         return {
-            "kind": "customer_revenue_report",
-            "title": "Customer Revenue Report",
-            "reason": "Best method: horizontal bars rank customers by revenue first, then grouped bars compare total sales, paid amount, and outstanding amount.",
-            "total_sales": result.get("total_amount", 0),
-            "total_paid": result.get("amount_received", 0),
-            "total_outstanding": result.get("outstanding_amount", 0),
-            "customers": customer_rows,
-            "values": [(row.get("customer_name") or row.get("item") or "-", row.get("total_amount", row.get("amount", 0))) for row in customer_rows[:12]],
-            "table": [("Customer Name", "Total Sales", "Paid Amount", "Outstanding Amount")] + [
+            "kind": "financial_category_report",
+            "title": "Sote Phwar Income Summary",
+            "amount_label": "Total Income",
+            "chart_title": "Top Customers by Revenue",
+            "table_title": "Income Summary Table",
+            "total": result.get("total_amount", 0),
+            "paid": result.get("amount_received", 0),
+            "outstanding": result.get("outstanding_amount", 0),
+            "values": [(row.get("customer_name") or row.get("item") or "-", row.get("total_amount", row.get("amount", 0))) for row in customer_rows],
+            "table": [("Customer", "Income", "Paid", "Outstanding", "Rows")] + [
                 (
                     row.get("customer_name") or row.get("item") or "-",
                     row.get("total_amount", row.get("amount", 0)),
                     row.get("amount_received", 0),
                     row.get("outstanding_amount", 0),
+                    row.get("invoice_count", 0),
                 )
                 for row in customer_rows
-            ],
+            ] + [("Total", result.get("total_amount", 0), result.get("amount_received", 0), result.get("outstanding_amount", 0), result.get("invoice_count", 0))],
         }
 
     if formula in ("sotephwar_transection_top", "sotephwar_transection_quantity"):
@@ -990,8 +1128,11 @@ def _write_unicode_text_pdf(lines, output_path, title="BigShot Finance Report"):
     return False
 
 
-def _draw_bar(pdf, spec, x=70, y=455, width=420, height=235):
-    values = [(label, abs(int(value or 0))) for label, value in _spec_values(spec) if int(value or 0) != 0][:12]
+def _bar_values(spec):
+    return [(label, abs(int(value or 0))) for label, value in _spec_values(spec) if int(value or 0) != 0]
+
+
+def _draw_bar_values(pdf, values, x=70, y=455, width=420, height=235, color_offset=0):
     if not values:
         pdf.text(x, y + height / 2, "No numeric values to chart.", size=11)
         return
@@ -1008,8 +1149,28 @@ def _draw_bar(pdf, spec, x=70, y=455, width=420, height=235):
         yy = y + height - ((index + 1) * row_height) - (index * row_gap)
         drawn_width = max(1, bar_width * (value / max_value))
         pdf.text(x, yy + row_height - 4, label, size=7.3, bold=True, max_width=label_width)
-        pdf.rect(bar_x, yy + 2, drawn_width, max(8, row_height - 4), fill=PALETTE[index % len(PALETTE)])
+        pdf.rect(bar_x, yy + 2, drawn_width, max(8, row_height - 4), fill=PALETTE[(index + color_offset) % len(PALETTE)])
         pdf.text(value_x, yy + row_height - 5, _money(value), size=7.6, bold=True, max_width=value_width)
+
+
+def _draw_bar(pdf, spec, x=70, y=455, width=420, height=235):
+    _draw_bar_values(pdf, _bar_values(spec)[:12], x=x, y=y, width=width, height=height)
+
+
+def _draw_bar_continuation_pages(pdf, spec, chart_title, start_index=12, page_size=22):
+    values = _bar_values(spec)
+    for offset in range(start_index, len(values), page_size):
+        pdf.new_page()
+        pdf.text(50, 795, f"{chart_title} (continued)", size=13, bold=True)
+        _draw_bar_values(
+            pdf,
+            values[offset:offset + page_size],
+            x=60,
+            y=70,
+            width=475,
+            height=685,
+            color_offset=offset,
+        )
 
 
 def _draw_stacked_bar(pdf, spec, x=70, y=455, width=420, height=235):
@@ -1102,38 +1263,197 @@ def _draw_box(pdf, spec, x=90, y=500, width=410):
     pdf.text(x + width - 55, y - 60, f"Max {_money(high)}", size=8)
 
 
-def _draw_table(pdf, table, start_y=365):
+def _draw_line_chart(pdf, values, x=70, y=455, width=420, height=220):
+    points = [(label, int(value or 0)) for label, value in values]
+    if not points:
+        pdf.text(x, y + height / 2, "No numeric values to chart.", size=11)
+        return
+    max_value = max(value for _, value in points) or 1
+    pdf.line(x, y, x + width, y, color=(190, 190, 190))
+    pdf.line(x, y, x, y + height, color=(190, 190, 190))
+    step = width / max(1, len(points) - 1)
+    coordinates = []
+    for index, (label, value) in enumerate(points):
+        px = x + index * step
+        py = y + (value / max_value) * height
+        coordinates.append((px, py, label, value))
+    for index in range(1, len(coordinates)):
+        previous = coordinates[index - 1]
+        current = coordinates[index]
+        pdf.line(previous[0], previous[1], current[0], current[1], color=(47, 128, 237), width=2)
+    for px, py, label, value in coordinates:
+        pdf.rect(px - 3, py - 3, 6, 6, fill=(47, 128, 237))
+        pdf.text(px - 38, y - 18, label, size=8.2, bold=True, max_width=78)
+        pdf.text(px - 38, py + 18, _money(value), size=8.2, bold=True, max_width=85)
+
+
+def _draw_table(pdf, table, start_y=365, column_widths=None, font_size=8.1, line_gap=11, min_row_height=22):
     if not table:
         return
     y = start_y
     col_count = max(len(row) for row in table)
-    col_width = 495 / col_count
-    for row_index, row in enumerate(table[:15]):
+    if column_widths and len(column_widths) == col_count:
+        widths = column_widths
+    else:
+        widths = [495 / col_count] * col_count
+    header = table[0]
+    x_positions = [54]
+    for width in widths[:-1]:
+        x_positions.append(x_positions[-1] + width)
+
+    def draw_row(row, row_index, y):
         wrapped = []
         line_count = 1
-        for cell in row:
+        for col_index, cell in enumerate(row):
             text = _money(cell) if isinstance(cell, (int, float)) else str(cell)
-            lines = _wrap_pdf_text(text, col_width - 8, 8.1)
+            lines = _wrap_pdf_text(text, widths[col_index] - 8, font_size)
             wrapped.append(lines)
             line_count = max(line_count, len(lines))
-        row_height = max(22, 10 + line_count * 11)
-        if y - row_height < 45:
-            pdf.new_page()
-            y = 785
+        row_height = max(min_row_height, 12 + line_count * line_gap)
         fill = (219, 226, 235) if row_index == 0 else ((244, 247, 251) if row_index % 2 == 0 else None)
         if fill:
             pdf.rect(50, y - row_height + 9, 495, row_height, fill=fill)
         for col_index, lines in enumerate(wrapped):
             for line_index, line in enumerate(lines):
                 pdf.text(
-                    54 + col_index * col_width,
-                    y - (line_index * 11),
+                    x_positions[col_index],
+                    y - (line_index * line_gap),
                     line,
-                    size=8.1,
+                    size=font_size,
                     bold=True,
-                    max_width=col_width - 8,
+                    max_width=widths[col_index] - 8,
                 )
-        y -= row_height
+        return y - row_height, row_height
+
+    for row_index, row in enumerate(table):
+        wrapped_line_count = 1
+        for col_index, cell in enumerate(row):
+            text = _money(cell) if isinstance(cell, (int, float)) else str(cell)
+            wrapped_line_count = max(wrapped_line_count, len(_wrap_pdf_text(text, widths[col_index] - 8, font_size)))
+        row_height = max(min_row_height, 12 + wrapped_line_count * line_gap)
+        if y - row_height < 45:
+            pdf.new_page()
+            y = 785
+            if row_index:
+                y, _ = draw_row(header, 0, y)
+        y, _ = draw_row(row, row_index, y)
+
+
+def _draw_metric_cards(pdf, metrics, x=50, y=680, cell_width=165, cell_height=46):
+    fills = [
+        (242, 246, 251),
+        (226, 242, 233),
+        (249, 233, 233),
+    ]
+    for index, (label, value) in enumerate(metrics):
+        cell_x = x + (cell_width * index)
+        pdf.rect(cell_x, y - cell_height, cell_width, cell_height, fill=fills[index % len(fills)], stroke=(180, 190, 204))
+        pdf.text(cell_x + 10, y - 16, label, size=8.8, bold=True, color=(75, 85, 99))
+        pdf.text(cell_x + 10, y - 36, _money(value), size=13.2, bold=True, max_width=cell_width - 20)
+
+
+def _draw_financial_total_report(pdf, spec):
+    pdf.text(50, 720, spec["title"], size=12, bold=True)
+    _draw_metric_cards(
+        pdf,
+        [
+            (spec.get("amount_label") or "Total", spec.get("total", 0)),
+            ("Paid", spec.get("paid", 0)),
+            ("Outstanding", spec.get("outstanding", 0)),
+        ],
+        y=692,
+    )
+    pdf.text(50, 610, "Paid vs Outstanding", size=11.5, bold=True)
+    _draw_pie(pdf, spec, cx=230, cy=492, radius=82)
+    pdf.text(50, 365, "Data Table", size=12, bold=True)
+    _draw_table(pdf, spec.get("table"), start_y=342)
+
+
+def _draw_financial_category_report(pdf, spec):
+    pdf.text(50, 720, spec["title"], size=12, bold=True)
+    _draw_metric_cards(
+        pdf,
+        [
+            (spec.get("amount_label") or "Total", spec.get("total", 0)),
+            ("Paid", spec.get("paid", 0)),
+            ("Outstanding", spec.get("outstanding", 0)),
+        ],
+        y=692,
+    )
+
+    chart_title = spec.get("chart_title") or "Categories"
+    pdf.text(50, 610, chart_title, size=11.5, bold=True)
+    _draw_bar(pdf, spec, x=60, y=110, width=475, height=465)
+    _draw_bar_continuation_pages(pdf, spec, chart_title)
+
+    pdf.new_page()
+    pdf.text(50, 795, "Data Table", size=13, bold=True)
+    pdf.text(50, 773, spec.get("table_title") or "Category Table", size=10.5, bold=True)
+    _draw_table(pdf, spec.get("table"), start_y=742)
+
+
+def _draw_financial_detail_report(pdf, spec):
+    pdf.text(50, 720, spec["title"], size=12, bold=True)
+    _draw_metric_cards(
+        pdf,
+        [
+            (spec.get("amount_label") or "Total", spec.get("total", 0)),
+            ("Paid", spec.get("paid", 0)),
+            ("Outstanding", spec.get("outstanding", 0)),
+        ],
+        y=692,
+    )
+
+    chart_title = spec.get("chart_title") or "Detail"
+    pdf.text(50, 610, chart_title, size=11.5, bold=True)
+    _draw_bar(pdf, spec, x=60, y=110, width=475, height=465)
+    _draw_bar_continuation_pages(pdf, spec, chart_title)
+
+    pdf.new_page()
+    pdf.text(50, 795, "Data Table", size=13, bold=True)
+    pdf.text(50, 773, spec.get("table_title") or "Detail Table", size=10.5, bold=True)
+    _draw_table(
+        pdf,
+        spec.get("table"),
+        start_y=742,
+        column_widths=[60, 130, 125, 55, 58, 50, 67],
+        font_size=7.4,
+        line_gap=12,
+        min_row_height=28,
+    )
+
+
+def _draw_expense_comparison_report(pdf, spec):
+    pdf.text(50, 720, spec["title"], size=12, bold=True)
+    periods = spec.get("periods") or []
+    if periods:
+        metrics = [
+            (row.get("label") or row.get("period") or "-", row.get("total_expense", 0))
+            for row in periods[:3]
+        ]
+        _draw_metric_cards(pdf, metrics, y=692, cell_width=165)
+
+    pdf.text(50, 610, "Expense Comparison Trend", size=11.5, bold=True)
+    _draw_line_chart(pdf, spec.get("values") or [], x=70, y=365, width=430, height=190)
+
+    pdf.text(50, 320, "Period Summary", size=11.5, bold=True)
+    _draw_table(pdf, spec.get("summary_table"), start_y=296)
+
+    pdf.new_page()
+    pdf.text(50, 795, "Local AI Comment", size=13, bold=True)
+    y = 770
+    for paragraph in (spec.get("ai_comment") or "-").splitlines():
+        if not paragraph:
+            y -= 8
+            continue
+        y -= pdf.text(50, y, paragraph, size=9.2, max_width=495)
+        if y < 80:
+            pdf.new_page()
+            y = 795
+
+    pdf.new_page()
+    pdf.text(50, 795, "Category Comparison Table", size=13, bold=True)
+    _draw_table(pdf, spec.get("table"), start_y=760)
 
 
 def _draw_voucher_cards(pdf, vouchers, start_y=620):
@@ -1619,7 +1939,281 @@ def _draw_customer_revenue_report(pdf, spec, start_y=720):
     _draw_customer_detail_table(pdf, customers, start_y=760)
 
 
+def _is_ceo_management_report_question(question):
+    text = question.lower()
+    return (
+        ("ceo" in text or "management report" in text or "monthly management report" in text)
+        and ("pdf" in text or "report" in text)
+    )
+
+
+def _safe_call(func, *args, default=None, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except Exception:
+        return default if default is not None else {}
+
+
+def _ceo_report_data(question):
+    months = _period_months(12)
+    monthly = []
+    for year, month in months:
+        period = _month_period(year, month)
+        kpi = _safe_call(kpi_overview, period, default={})
+        sector = _safe_call(sector_summary, period, default={})
+        monthly.append({
+            "period": period,
+            "label": _month_label(year, month),
+            "revenue": int(kpi.get("total_income") or 0),
+            "gross_profit": int(kpi.get("net_profit") or kpi.get("gross_profit") or 0),
+            "net_profit": int(kpi.get("net_profit") or 0),
+            "margin": float(kpi.get("profit_margin_percent") or 0),
+            "sectors": sector.get("sectors") or [],
+        })
+
+    current = monthly[-1] if monthly else {}
+    previous = monthly[-2] if len(monthly) > 1 else {}
+    current_period = current.get("period") or "this_month"
+    kpi = _safe_call(kpi_overview, current_period, default={})
+    sectors = (_safe_call(sector_summary, current_period, default={}) or {}).get("sectors") or []
+    categories = (_safe_call(category_summary, current_period, default={}) or {}).get("categories") or []
+    expense_categories = sorted(
+        [row for row in categories if int(row.get("expense") or 0) > 0],
+        key=lambda row: int(row.get("expense") or 0),
+        reverse=True,
+    )
+    cash = _safe_call(cash_flow, current_period, default={})
+    stock = (_safe_call(sotephwar_inventory_stock, default={}) or {}).get("stock") or []
+    movements = (_safe_call(sotephwar_inventory_movement_summary, current_period, default={}) or {}).get("movements") or []
+    total_stock_qty = sum(int(row.get("stock_qty") or 0) for row in stock)
+    production_volume = sum(
+        int(row.get("quantity") or 0)
+        for row in movements
+        if "production" in str(row.get("type") or "").lower()
+    )
+    if not production_volume:
+        production_volume = sum(int(row.get("quantity") or 0) for row in movements)
+
+    business_units = {
+        "Sote Phwar": {"revenue": 0, "profit": 0},
+        "Farm Vegetables": {"revenue": 0, "profit": 0},
+        "Extension Service": {"revenue": 0, "profit": 0},
+    }
+    for row in sectors:
+        sector = row.get("sector") or ""
+        key = None
+        if sector == "Sote Phwar":
+            key = "Sote Phwar"
+        elif sector == "Farm":
+            key = "Farm Vegetables"
+        elif sector == "SP Extension":
+            key = "Extension Service"
+        if key:
+            business_units[key]["revenue"] += int(row.get("income") or 0)
+            business_units[key]["profit"] += int(row.get("profit") or 0)
+
+    revenue_change = _change_percent(current.get("revenue", 0), previous.get("revenue", 0))
+    profit_change = _change_percent(current.get("net_profit", 0), previous.get("net_profit", 0))
+    expense_total = int(kpi.get("total_expense") or 0)
+    return {
+        "question": question,
+        "reporting_period": current.get("label") or datetime.now().strftime("%B %Y"),
+        "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "monthly": monthly,
+        "kpi": {
+            "revenue": int(kpi.get("total_income") or current.get("revenue") or 0),
+            "gross_profit": int(kpi.get("net_profit") or current.get("gross_profit") or 0),
+            "net_profit": int(kpi.get("net_profit") or current.get("net_profit") or 0),
+            "cash": int(cash.get("net_cash_flow") or 0),
+            "inventory_value": 0,
+            "inventory_qty": total_stock_qty,
+            "margin": float(kpi.get("profit_margin_percent") or current.get("margin") or 0),
+            "expense": expense_total,
+        },
+        "changes": {"revenue": revenue_change, "net_profit": profit_change},
+        "business_units": business_units,
+        "expense_categories": expense_categories[:10],
+        "stock": stock,
+        "movements": movements,
+        "production_volume": production_volume,
+    }
+
+
+def _ceo_page(pdf, page_no, title, report):
+    if page_no > 1:
+        pdf.new_page()
+    pdf.rect(0, 0, 595, 842, fill=(255, 255, 255))
+    pdf.rect(42, 790, 34, 24, fill=(17, 24, 39))
+    pdf.text(49, 798, "BS", size=10, bold=True, color=(255, 255, 255))
+    pdf.text(84, 805, "BigShot Company Limited", size=10.5, bold=True, color=(31, 41, 55))
+    pdf.text(84, 790, "CEO Business Report", size=8.2, color=(107, 114, 128))
+    pdf.text(425, 805, f"Generated: {report['generated']}", size=7.8, color=(107, 114, 128))
+    pdf.line(42, 778, 553, 778, color=(209, 213, 219))
+    pdf.text(42, 750, title, size=17, bold=True)
+    pdf.text(520, 28, f"Page {page_no}", size=8, color=(107, 114, 128))
+
+
+def _trend_color(value):
+    if value is None or value == 0:
+        return (75, 85, 99)
+    return (22, 163, 74) if value > 0 else (220, 38, 38)
+
+
+def _draw_ceo_kpi_card(pdf, x, y, label, value, change=None, width=96, height=58):
+    pdf.rect(x, y - height, width, height, fill=(249, 250, 251), stroke=(209, 213, 219))
+    pdf.text(x + 8, y - 17, label, size=7.8, bold=True, color=(75, 85, 99))
+    pdf.text(x + 8, y - 38, value, size=9.7, bold=True, max_width=width - 12)
+    if change is not None:
+        sign = "+" if change > 0 else ""
+        pdf.text(x + 8, y - 52, f"{sign}{change}% MoM", size=7.4, bold=True, color=_trend_color(change))
+
+
+def _draw_ceo_table(pdf, headers, rows, x=42, y=610, widths=None, font_size=7.8):
+    table = [headers] + rows
+    _draw_table(pdf, table, start_y=y, column_widths=widths, font_size=font_size, line_gap=11, min_row_height=24)
+
+
+def _draw_ceo_line_chart(pdf, title, rows, key, x=55, y=500, width=475, height=150):
+    pdf.text(x, y + height + 28, title, size=10.2, bold=True)
+    values = [(row["label"], int(row.get(key) or 0)) for row in rows]
+    _draw_line_chart(pdf, values, x=x, y=y, width=width, height=height)
+
+
+def _draw_ceo_bar_chart(pdf, title, rows, x=55, y=455, width=475, height=160):
+    pdf.text(x, y + height + 28, title, size=10.2, bold=True)
+    spec = {"values": rows}
+    _draw_bar(pdf, spec, x=x, y=y, width=width, height=height)
+
+
+def _draw_ceo_pie(pdf, title, rows, x=50, y=465):
+    pdf.text(x, y + 170, title, size=10.2, bold=True)
+    _draw_pie({"text": None} if False else pdf, {"values": rows}, cx=x + 145, cy=y + 70, radius=62)
+
+
+def _draw_ceo_paragraph(pdf, title, lines, x=42, y=220):
+    pdf.text(x, y, title, size=10.5, bold=True)
+    yy = y - 20
+    for line in lines:
+        yy -= pdf.text(x, yy, line, size=8.8, max_width=510)
+    return yy
+
+
+def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO Management Report"):
+    report = _ceo_report_data(question)
+    kpi = report["kpi"]
+    monthly = report["monthly"]
+    units = report["business_units"]
+    expense_rows = report["expense_categories"]
+    pdf = PdfCanvas(title)
+
+    _ceo_page(pdf, 1, "BigShot Company Limited\nMonthly Management Report", report)
+    pdf.text(42, 710, f"Reporting period: {report['reporting_period']}", size=9.5, bold=True, color=(75, 85, 99))
+    cards = [
+        ("Revenue", _mmk(kpi["revenue"]), report["changes"]["revenue"]),
+        ("Gross Profit", _mmk(kpi["gross_profit"]), None),
+        ("Net Profit", _mmk(kpi["net_profit"]), report["changes"]["net_profit"]),
+        ("Cash", _mmk(kpi["cash"]), None),
+        ("Inventory", _mmk(kpi["inventory_value"]), None),
+    ]
+    for index, card in enumerate(cards):
+        _draw_ceo_kpi_card(pdf, 42 + index * 102, 665, *card)
+    _draw_ceo_paragraph(pdf, "Executive Summary", [
+        f"Revenue for {report['reporting_period']} was {_mmk(kpi['revenue'])}. Net profit closed at {_mmk(kpi['net_profit'])}, with a gross margin of {kpi['margin']}%.",
+        "Sote Phwar, Farm Vegetables, and Extension Service are shown separately to make concentration risk and business-unit contribution visible.",
+        "Inventory value is shown as 0 MMK because unit cost data is not available in the current inventory table; stock quantity is tracked and should be connected to costing for CEO-level valuation.",
+    ], y=555)
+
+    _ceo_page(pdf, 2, "Revenue Analysis", report)
+    _draw_ceo_line_chart(pdf, "Monthly Revenue Trend - Last 12 Months", monthly, "revenue", y=505)
+    unit_rows = [(name, value["revenue"]) for name, value in units.items()]
+    _draw_ceo_bar_chart(pdf, "Revenue by Business Unit", unit_rows, y=265, height=135)
+    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
+        "Revenue growth should be read together with business-unit concentration. A high Sote Phwar share indicates product traction but also dependence on one operating line.",
+        "Farm Vegetables and Extension Service provide diversification; low contribution from either unit should be treated as an opportunity pipeline rather than a reporting error.",
+    ], y=165)
+
+    _ceo_page(pdf, 3, "Profitability Analysis", report)
+    _draw_ceo_line_chart(pdf, "Monthly Net Profit Trend", monthly, "net_profit", y=520)
+    _draw_ceo_line_chart(pdf, "Gross Margin Trend", monthly, "margin", y=300, height=125)
+    profit_rows = [(name, value["profit"]) for name, value in units.items()]
+    _draw_ceo_bar_chart(pdf, "Profit by Business Unit", profit_rows, y=110, height=115)
+    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
+        f"Net profit is {_mmk(kpi['net_profit'])}. Margin movement should be monitored against labor, logistics, and production categories.",
+        "Efficiency is improving when revenue grows faster than expenses; margin pressure appears when top expense categories expand faster than sales.",
+    ], y=88)
+
+    _ceo_page(pdf, 4, "Expense Analysis", report)
+    pie_rows = [(row.get("category") or "-", row.get("expense", 0)) for row in expense_rows[:6]]
+    _draw_ceo_pie(pdf, "Expense Breakdown by Category", pie_rows, x=42, y=480)
+    table_rows = [
+        (row.get("category") or "-", _mmk(row.get("expense", 0)), row.get("transaction_count", 0))
+        for row in expense_rows[:8]
+    ]
+    _draw_ceo_table(pdf, ("Category", "Expense", "Rows"), table_rows, y=410, widths=[260, 140, 95])
+    _draw_ceo_paragraph(pdf, "Month-over-Month Commentary", [
+        "Labor, marketing, logistics, and production costs should be reviewed against the top expense table above; categories with repeated monthly increases need owner-level budget limits.",
+        "The most material expense categories are the first candidates for negotiation, approval control, or operational redesign.",
+    ], y=170)
+
+    _ceo_page(pdf, 5, "Inventory & Operations", report)
+    stock_rows = [
+        (row.get("store") or "-", row.get("product") or "-", row.get("stock_qty", 0))
+        for row in report["stock"][:12]
+    ]
+    pdf.text(42, 705, f"Inventory valuation: {_mmk(kpi['inventory_value'])} (unit cost data required)", size=9.2, bold=True)
+    pdf.text(42, 685, f"Total stock quantity: {kpi['inventory_qty']:,}", size=9.2, bold=True)
+    pdf.text(42, 665, f"Production volume: {report['production_volume']:,}", size=9.2, bold=True)
+    _draw_ceo_table(pdf, ("Store", "Product", "Qty"), stock_rows, y=625, widths=[170, 230, 95])
+    _draw_ceo_paragraph(pdf, "Operational Observations", [
+        "Inventory turnover cannot be calculated reliably until cost of goods and sales quantity are linked to inventory movement data.",
+        "Slow-moving inventory should be identified by aging movement rows; current data supports stock position and production volume, not aging valuation.",
+    ], y=150)
+
+    _ceo_page(pdf, 6, "Management Insights", report)
+    total_profit = sum(abs(value["profit"]) for value in units.values()) or 1
+    sote_profit_share = round((units["Sote Phwar"]["profit"] / total_profit) * 100, 1) if total_profit else 0
+    insights = [
+        ("Key Strengths", f"Sote Phwar contributes {sote_profit_share}% of absolute business-unit profit, indicating strong product-market fit where profit is positive."),
+        ("Key Weaknesses", "Inventory valuation is not yet CEO-grade because unit cost data is missing from the stock report."),
+        ("Emerging Risks", "Profit concentration in one business unit can create earnings volatility if demand or collections weaken."),
+        ("Growth Opportunities", "Farm Vegetables and Extension Service can reduce concentration risk if revenue contribution improves."),
+    ]
+    y = 705
+    for heading, body in insights:
+        pdf.text(42, y, heading, size=11, bold=True)
+        y -= pdf.text(58, y - 18, body, size=9, max_width=490) + 20
+
+    _ceo_page(pdf, 7, "Recommended Actions", report)
+    sections = [
+        ("Immediate Actions (30 Days)", [
+            f"Review the top expense category and confirm necessity before the next payment cycle; current total expense is {_mmk(kpi['expense'])}.",
+            "Add unit cost fields to inventory records so future CEO reports can show inventory value, turnover, and margin by product.",
+        ]),
+        ("Medium-Term Actions (90 Days)", [
+            "Set monthly budget thresholds for labor, logistics, marketing, and production cost categories using the expense breakdown page.",
+            "Track business-unit revenue and profit targets separately for Sote Phwar, Farm Vegetables, and Extension Service.",
+        ]),
+        ("Strategic Actions (12 Months)", [
+            "Reduce profit concentration by scaling the business unit with the lowest revenue contribution and positive operating signals.",
+            "Build a monthly management review pack around the same KPI definitions so trend lines remain comparable month to month.",
+        ]),
+    ]
+    y = 705
+    for heading, items in sections:
+        pdf.text(42, y, heading, size=11, bold=True)
+        y -= 20
+        for item in items:
+            y -= pdf.text(58, y, f"- {item}", size=8.9, max_width=485)
+        y -= 16
+
+    pdf.finish(output_path)
+    return True
+
+
 def create_chart_pdf_report(question, output_path, title="BigShot Finance Report"):
+    if _is_ceo_management_report_question(question):
+        return create_ceo_management_pdf_report(question, output_path, title="BigShot CEO Management Report")
+
     formula_name = choose_formula(question)
     if formula_name not in FAST_FORMULAS:
         result = {"formula": "analysis"}
@@ -1698,6 +2292,35 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
 
     if kind == "customer_revenue_report":
         _draw_customer_revenue_report(pdf, spec, start_y=720)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "financial_total_report":
+        _draw_financial_total_report(pdf, spec)
+        income_rows = spec.get("income_rows") or []
+        if income_rows:
+            pdf.new_page()
+            pdf.text(50, 795, "Transection Income", size=13, bold=True)
+            rows = [("Date", "Item", "Amount", "Payment")] + [
+                (row.get("Date") or "-", row.get("item") or "-", row.get("amount") or 0, row.get("payment_method") or "-")
+                for row in income_rows
+            ]
+            _draw_table(pdf, rows, start_y=760)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "financial_category_report":
+        _draw_financial_category_report(pdf, spec)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "financial_detail_report":
+        _draw_financial_detail_report(pdf, spec)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "expense_comparison_report":
+        _draw_expense_comparison_report(pdf, spec)
         pdf.finish(output_path)
         return True
 

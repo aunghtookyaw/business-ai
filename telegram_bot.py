@@ -39,6 +39,12 @@ from tools.bi_periods import (
 from tools.bi_reports import format_text_report, temp_report_path, write_excel_report
 from tools.bi_search import search_categories, search_customers
 from tools.chart_pdf import create_chart_pdf_report, create_chart_pdf_report_from_result
+from tools.comparison_reports import (
+    BUSINESS_CONFIG,
+    comparison_business,
+    expense_month_comparison,
+    is_expense_month_comparison,
+)
 from tools.google_calendar_client import sync_financial_obligations_to_calendar
 
 SOTEPHWAR_PAYMENT_TEMPLATE = (
@@ -288,6 +294,8 @@ def _normalize_command(text):
         return COMMAND_QUESTIONS[command]
 
     normalized_text = " ".join(text.strip().lower().split())
+    if _is_ceo_management_pdf_request(normalized_text):
+        return f"{PDF_EXPORT_COMMAND}:{text.strip()}"
     if normalized_text in ("send pdf and jpeg", "send pdf and jpg", "send jpeg and pdf", "send jpg and pdf"):
         return PDF_JPEG_EXPORT_COMMAND
     if normalized_text.startswith("send pdf and jpeg "):
@@ -320,6 +328,13 @@ def _normalize_command(text):
             return f"{JPEG_EXPORT_COMMAND}:{text.strip()[:-len(suffix)].strip()}"
 
     return FINANCE_PROMPT_QUESTIONS.get(normalized_text, text)
+
+
+def _is_ceo_management_pdf_request(normalized_text):
+    return (
+        "pdf" in normalized_text
+        and ("ceo" in normalized_text or "management report" in normalized_text or "monthly management report" in normalized_text)
+    )
 
 
 def _export_command_with_question(export_command, parts):
@@ -660,12 +675,33 @@ def _show_output_menu(message, context):
         "bi:output",
         columns=1,
     )
-    intent = intent_from_state(_bi_state(context))
     return _send_bi_message(
         message,
         context,
-        "Choose output format:\n" + str(intent.to_dict()),
+        "Choose output format:",
         rows,
+    )
+
+
+def _show_comparison_output_menu(message, context, question):
+    state = _bi_state(context)
+    business = comparison_business(question)
+    business_title = BUSINESS_CONFIG[business]["title"]
+    state.clear()
+    state["comparison_question"] = question
+    state["comparison_business"] = business
+    state["step"] = "comparison_output"
+    rows = _button_rows(
+        [("text", "Text Report"), ("pdf", "PDF Report"), ("excel", "Excel Report")],
+        "bi:output",
+        columns=1,
+    )
+    return _send_bi_message(
+        message,
+        context,
+        f"Choose output format for {business_title} expense comparison:",
+        rows,
+        include_back=False,
     )
 
 
@@ -853,6 +889,54 @@ def _execute_bi_output(message, context):
     path.unlink(missing_ok=True)
 
 
+def _execute_comparison_output(message, context):
+    state = _bi_state(context)
+    output = state.get("output")
+    question = state.get("comparison_question") or "compare expenses last month and this month"
+    business = state.get("comparison_business") or comparison_business(question)
+    payload = expense_month_comparison(question, business)
+
+    if output == "text":
+        for part in _split_message(format_text_report(payload)):
+            _reply_text(message, context, part, reply_markup=_remove_reply_keyboard())
+        return
+
+    if output == "pdf":
+        path = temp_report_path(".pdf")
+        created = create_chart_pdf_report_from_result(
+            payload["result"],
+            payload["title"],
+            path,
+            title=payload["title"],
+        )
+        if not created:
+            _write_pdf_export(format_text_report(payload), path, title=payload["title"])
+        with path.open("rb") as document:
+            _reply_document(
+                message,
+                context,
+                document=document,
+                filename=_safe_export_filename(payload["title"], "pdf"),
+                caption=payload["title"],
+                reply_markup=_remove_reply_keyboard(),
+            )
+        path.unlink(missing_ok=True)
+        return
+
+    path = temp_report_path(".xlsx")
+    write_excel_report(payload, path)
+    with path.open("rb") as document:
+        _reply_document(
+            message,
+            context,
+            document=document,
+            filename=_safe_export_filename(payload["title"], "xlsx"),
+            caption=payload["title"],
+            reply_markup=_remove_reply_keyboard(),
+        )
+    path.unlink(missing_ok=True)
+
+
 def handle_bi_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     message = query.message
@@ -873,6 +957,10 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         return
     if data == "bi:back":
         step = state.get("step")
+        if step == "comparison_output":
+            _reset_bi_state(context)
+            _reply_text(message, context, "Comparison cancelled.", reply_markup=_remove_reply_keyboard())
+            return
         if step == "output":
             state.pop("period", None)
             state["step"] = "period"
@@ -980,7 +1068,10 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         state["output"] = data.rsplit(":", 1)[1]
         state["step"] = "done"
         try:
-            _execute_bi_output(message, context)
+            if state.get("comparison_question"):
+                _execute_comparison_output(message, context)
+            else:
+                _execute_bi_output(message, context)
         except Exception as exc:
             _reply_text(message, context, f"Report error: {exc}", reply_markup=_remove_reply_keyboard())
         return
@@ -1071,6 +1162,10 @@ def handle_message(update: Update, context: CallbackContext):
     print(f"Finance text: {user_text}", flush=True)
 
     if _handle_search_text(update.message, context, user_text):
+        return
+
+    if is_expense_month_comparison(user_text):
+        _show_comparison_output_menu(update.message, context, user_text)
         return
 
     question = _normalize_command(user_text)

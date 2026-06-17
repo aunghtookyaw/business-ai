@@ -662,6 +662,170 @@ class FinanceBotFilterTest(unittest.TestCase):
             telegram_bot.search_categories = original_search_categories
             telegram_bot.execute_intent = original_execute_intent
 
+    def test_sotephwar_expense_comparison_asks_for_output_format(self):
+        message = FakeMessage(-1003850232296, 5, "compare sote phwar expenses of last month and this month")
+        context = FakeContext()
+
+        telegram_bot.handle_message(FakeUpdate(message), context)
+
+        self.assertEqual("Choose output format for Sote Phwar expense comparison:", message.replies[-1]["text"])
+        self.assertEqual(
+            "compare sote phwar expenses of last month and this month",
+            context.user_data[telegram_bot.BI_STATE_KEY]["comparison_question"],
+        )
+
+    def test_farm_expense_comparison_asks_for_output_format(self):
+        message = FakeMessage(-1003850232296, 5, "compare last month and this month farm expenses")
+        context = FakeContext()
+
+        telegram_bot.handle_message(FakeUpdate(message), context)
+
+        self.assertEqual("Choose output format for Farm expense comparison:", message.replies[-1]["text"])
+        self.assertEqual("farm", context.user_data[telegram_bot.BI_STATE_KEY]["comparison_business"])
+        self.assertEqual(
+            "compare last month and this month farm expenses",
+            context.user_data[telegram_bot.BI_STATE_KEY]["comparison_question"],
+        )
+
+    def test_farm_expense_comparison_uses_farm_sector_data(self):
+        from tools import comparison_reports
+
+        original_category_summary = comparison_reports.category_summary
+        original_ask_ai = comparison_reports.ask_ai
+        seen_filters = []
+
+        def fake_category_summary(period, filters):
+            seen_filters.append(filters)
+            return {
+                "formula": "category_summary",
+                "total_expense": 1000 if period == "last_month" else 1500,
+                "transaction_count": 1,
+                "categories": [
+                    {
+                        "category": "Farm Wages",
+                        "expense": 1000 if period == "last_month" else 1500,
+                        "transaction_count": 1,
+                    },
+                ],
+            }
+
+        comparison_reports.category_summary = fake_category_summary
+        comparison_reports.ask_ai = lambda *args, **kwargs: "Business comment: Farm expense moved."
+        try:
+            payload = comparison_reports.expense_month_comparison(
+                "compare last month and this month farm expenses",
+                "farm",
+            )
+        finally:
+            comparison_reports.category_summary = original_category_summary
+            comparison_reports.ask_ai = original_ask_ai
+
+        self.assertEqual("Farm - Expense - Month Comparison", payload["title"])
+        self.assertEqual(
+            [
+                {"sector": "Farm", "income_expense": "Expense"},
+                {"sector": "Farm", "income_expense": "Expense"},
+            ],
+            seen_filters,
+        )
+
+    def test_farm_expense_comparison_text_is_business_report_not_json(self):
+        original_comparison = telegram_bot.expense_month_comparison
+        captured = {}
+
+        def fake_comparison(question, business):
+            captured["business"] = business
+            return {
+                "intent": {
+                    "business": business,
+                    "module": "expense",
+                    "report": "expense_comparison",
+                },
+                "title": "Farm - Expense - Month Comparison",
+                "period_label": "Last Month vs This Month",
+                "result": {
+                    "formula": "expense_period_comparison",
+                    "periods": [
+                        {"label": "Last Month", "total_expense": 1000, "paid": 1000, "outstanding": 0, "transaction_count": 1},
+                        {"label": "This Month", "total_expense": 1500, "paid": 1500, "outstanding": 0, "transaction_count": 2},
+                    ],
+                    "categories": [
+                        {"category": "Packaging", "previous_amount": 1000, "current_amount": 1500, "change": 500, "change_percent": 50},
+                    ],
+                    "total_change": 500,
+                    "total_change_percent": 50,
+                    "ai_comment": "Business comment: expenses increased. Review Packaging.",
+                },
+            }
+
+        telegram_bot.expense_month_comparison = fake_comparison
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            context.user_data[telegram_bot.BI_STATE_KEY] = {
+                "comparison_question": "compare last month and this month farm expenses",
+                "comparison_business": "farm",
+            }
+
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:output:text")),
+                context,
+            )
+
+            text = message.replies[-1]["text"]
+            self.assertIn("Expense Comparison", text)
+            self.assertIn("Local AI Comment", text)
+            self.assertIn("Category Comparison Table", text)
+            self.assertIn("Packaging | 1,000 | 1,500 | 500 | 50%", text)
+            self.assertNotIn("Structured intent", text)
+            self.assertNotIn("{'business'", text)
+            self.assertEqual("farm", captured["business"])
+        finally:
+            telegram_bot.expense_month_comparison = original_comparison
+
+    def test_sotephwar_expense_comparison_pdf_uses_chart_export(self):
+        original_comparison = telegram_bot.expense_month_comparison
+        original_chart_pdf = telegram_bot.create_chart_pdf_report_from_result
+        captured = {}
+
+        def fake_comparison(question, business):
+            captured["business"] = business
+            return {
+                "intent": {"business": business, "module": "expense", "report": "expense_comparison"},
+                "title": "Sote Phwar - Expense - Month Comparison",
+                "period_label": "Last Month vs This Month",
+                "result": {"formula": "expense_period_comparison", "periods": [], "categories": [], "ai_comment": "comment"},
+            }
+
+        def fake_chart_pdf(result, question, output_path, title=telegram_bot.PDF_EXPORT_TITLE, spec=None):
+            captured["formula"] = result["formula"]
+            with open(output_path, "wb") as pdf_file:
+                pdf_file.write(b"%PDF-1.4\ncomparison line chart\n%%EOF\n")
+            return True
+
+        telegram_bot.expense_month_comparison = fake_comparison
+        telegram_bot.create_chart_pdf_report_from_result = fake_chart_pdf
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            context.user_data[telegram_bot.BI_STATE_KEY] = {
+                "comparison_question": "compare sote phwar expenses of last month and this month",
+                "comparison_business": "sote_phwar",
+            }
+
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:output:pdf")),
+                context,
+            )
+
+            self.assertEqual("expense_period_comparison", captured["formula"])
+            self.assertEqual("sote_phwar", captured["business"])
+            self.assertEqual("document", message.replies[-1]["type"])
+            self.assertTrue(message.replies[-1]["content"].startswith(b"%PDF"))
+        finally:
+            telegram_bot.expense_month_comparison = original_comparison
+            telegram_bot.create_chart_pdf_report_from_result = original_chart_pdf
+
     def test_tapped_prompt_label_maps_to_finance_question(self):
         self.assertEqual(
             "business advice for this month",
@@ -794,6 +958,10 @@ class FinanceBotFilterTest(unittest.TestCase):
         self.assertEqual(
             f"{telegram_bot.PDF_JPEG_EXPORT_COMMAND}:cash flow",
             telegram_bot._normalize_command("cash flow send pdf and jpeg"),
+        )
+        self.assertEqual(
+            f"{telegram_bot.PDF_EXPORT_COMMAND}:CEO monthly management report pdf",
+            telegram_bot._normalize_command("CEO monthly management report pdf"),
         )
 
     def test_send_pdf_replies_with_document(self):

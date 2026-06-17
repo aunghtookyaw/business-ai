@@ -9,9 +9,6 @@ TELEGRAM_ALLOWED_THREAD_ID = os.getenv("TELEGRAM_ALLOWED_THREAD_ID")
 
 FAMILY_TELEGRAM_BOT_TOKEN = os.getenv("FAMILY_TELEGRAM_BOT_TOKEN", "PUT_YOUR_FAMILY_TELEGRAM_BOT_TOKEN_HERE")
 
-# Optional alias accepted by family_ai_bot.py and scripts/check_family_bot.py.
-BIGSHOT_GUY_BOT_TOKEN = os.getenv("BIGSHOT_GUY_BOT_TOKEN", "")
-
 FAMILY_ALLOWED_CHAT_ID = os.getenv("FAMILY_ALLOWED_CHAT_ID", "-1003850232296")
 
 # BigShot_Guy_Bot topic.
@@ -20,7 +17,7 @@ FAMILY_ALLOWED_THREAD_ID = os.getenv("FAMILY_ALLOWED_THREAD_ID", "4")
 # Comma-separated topic IDs the family bot should ignore, e.g. Finance.
 FAMILY_IGNORED_THREAD_IDS = os.getenv("FAMILY_IGNORED_THREAD_IDS", "5")
 
-FAMILY_AI_MODEL = os.getenv("FAMILY_AI_MODEL", "gemma4:e4b")
+FAMILY_AI_MODEL = os.getenv("FAMILY_AI_MODEL", "qwen3:14b")
 
 FAMILY_DEFAULT_WEATHER_LOCATION = os.getenv("FAMILY_DEFAULT_WEATHER_LOCATION", "BigShot Farm")
 
@@ -47,7 +44,7 @@ TABLE_ID = os.getenv("TABLE_ID", "moslcqfantzr0mo")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 
-AI_MODEL = os.getenv("AI_MODEL", "qwen3:latest")
+AI_MODEL = os.getenv("AI_MODEL", "qwen3:14b")
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 

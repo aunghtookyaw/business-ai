@@ -45,13 +45,12 @@ def telegram_get(base_url, method, **params):
 def main():
     token = setting(
         "FAMILY_TELEGRAM_BOT_TOKEN",
-        aliases=["BIGSHOT_GUY_BOT_TOKEN"],
     )
     chat_id = setting("FAMILY_ALLOWED_CHAT_ID", "-1003850232296")
 
     if not token:
         print("Family bot token: MISSING")
-        print("Add FAMILY_TELEGRAM_BOT_TOKEN or BIGSHOT_GUY_BOT_TOKEN to config.py.")
+        print("Add FAMILY_TELEGRAM_BOT_TOKEN to config.py.")
         return 1
 
     base_url = f"https://api.telegram.org/bot{token}"

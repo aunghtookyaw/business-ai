@@ -27,7 +27,7 @@ def setting(name, default=None):
 
 def main():
     url = setting("OLLAMA_URL", "http://localhost:11434/api/generate")
-    model = setting("FAMILY_AI_MODEL", setting("AI_MODEL", "qwen3:latest"))
+    model = setting("FAMILY_AI_MODEL", setting("AI_MODEL", "qwen3:14b"))
 
     print(f"Ollama URL: {url}")
     print(f"Model: {model}")

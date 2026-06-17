@@ -13,6 +13,8 @@ def _money(value):
 
 
 def _rows_from_result(result):
+    if result.get("formula") == "expense_period_comparison":
+        return result.get("categories") or []
     for key in (
         "transactions", "expenses", "income", "categories", "sectors", "invoices",
         "customers", "stock", "movements", "months", "summary", "obligations",
@@ -151,7 +153,35 @@ def format_text_report(payload):
     ]
 
     formula = result.get("formula")
-    if formula == "sales_total":
+    if formula == "expense_period_comparison":
+        periods = result.get("periods") or []
+        categories = result.get("categories") or []
+        previous = periods[0] if periods else {}
+        current = periods[1] if len(periods) > 1 else {}
+        lines.extend([
+            "Expense Comparison",
+            f"{previous.get('label', 'Previous')}: {_money(previous.get('total_expense', 0))}",
+            f"{current.get('label', 'Current')}: {_money(current.get('total_expense', 0))}",
+            f"Change: {_money(result.get('total_change', 0))}"
+            + (f" ({result['total_change_percent']}%)" if result.get("total_change_percent") is not None else ""),
+            "",
+            "Local AI Comment",
+            result.get("ai_comment") or "-",
+            "",
+            "Category Comparison Table",
+            "Category | Previous | Current | Change | Change %",
+        ])
+        for row in categories[:20]:
+            lines.append(
+                "{category} | {previous} | {current} | {change} | {percent}".format(
+                    category=row.get("category") or "-",
+                    previous=_money(row.get("previous_amount", 0)),
+                    current=_money(row.get("current_amount", 0)),
+                    change=_money(row.get("change", 0)),
+                    percent="-" if row.get("change_percent") is None else f"{row['change_percent']}%",
+                )
+            )
+    elif formula == "sales_total":
         lines.append(f"Total income: {_money(result.get('total_sales', 0))}")
         if "amount_received" in result:
             lines.append(f"Paid / received: {_money(result.get('amount_received', 0))}")
@@ -230,7 +260,6 @@ def format_text_report(payload):
     if result.get("note"):
         lines.extend(["", f"Note: {result['note']}"])
 
-    lines.extend(["", "Structured intent:", str(payload["intent"])])
     return "\n".join(str(line) for line in lines)
 
 
@@ -266,6 +295,11 @@ def write_excel_report(payload, output_path):
     sheet.append(["Period", payload["period_label"]])
     sheet.append([])
 
+    if payload["result"].get("formula") == "expense_period_comparison":
+        _write_expense_comparison_excel(workbook, sheet, payload)
+        workbook.save(output_path)
+        return
+
     rows = _rows_from_result(payload["result"])
     if rows:
         headers = sorted({key for row in rows for key in row.keys()})
@@ -279,6 +313,55 @@ def write_excel_report(payload, output_path):
                 sheet.append([key, value])
 
     workbook.save(output_path)
+
+
+def _write_expense_comparison_excel(workbook, sheet, payload):
+    try:
+        from openpyxl.chart import LineChart, Reference
+    except ImportError:
+        LineChart = None
+        Reference = None
+
+    result = payload["result"]
+    periods = result.get("periods") or []
+    categories = result.get("categories") or []
+    sheet.append(["Expense Trend"])
+    sheet.append(["Period", "Total Expense", "Paid", "Outstanding", "Rows"])
+    for row in periods:
+        sheet.append([
+            row.get("label"),
+            row.get("total_expense", 0),
+            row.get("paid", 0),
+            row.get("outstanding", 0),
+            row.get("transaction_count", 0),
+        ])
+
+    if LineChart and Reference and periods:
+        chart = LineChart()
+        chart.title = "Expense Comparison"
+        chart.y_axis.title = "Amount"
+        chart.x_axis.title = "Period"
+        data = Reference(sheet, min_col=2, min_row=5, max_row=4 + len(periods))
+        labels = Reference(sheet, min_col=1, min_row=5, max_row=4 + len(periods))
+        chart.add_data(data, titles_from_data=False)
+        chart.set_categories(labels)
+        sheet.add_chart(chart, "G4")
+
+    sheet.append([])
+    sheet.append(["Local AI Comment"])
+    for line in (result.get("ai_comment") or "-").splitlines():
+        sheet.append([line])
+
+    sheet.append([])
+    sheet.append(["Category", "Previous", "Current", "Change", "Change %"])
+    for row in categories:
+        sheet.append([
+            row.get("category"),
+            row.get("previous_amount", 0),
+            row.get("current_amount", 0),
+            row.get("change", 0),
+            row.get("change_percent"),
+        ])
 
 
 def _write_csv_fallback(payload, output_path):
