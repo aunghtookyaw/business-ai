@@ -26,6 +26,22 @@ class BISearchTest(unittest.TestCase):
         self.assertIn("Makro", values)
         self.assertEqual([{"value": "Makro", "score": 1.0}], matches)
 
+    def test_customer_search_supports_abbreviation_alias(self):
+        original_fetch_all = bi_search._fetch_all
+
+        def fake_fetch_all(sql, params=None):
+            if "customer_master" in sql:
+                return [{"value": "Pwint Aung Kyaw POL"}]
+            return []
+
+        bi_search._fetch_all = fake_fetch_all
+        try:
+            matches = bi_search.search_customers("PAK")
+        finally:
+            bi_search._fetch_all = original_fetch_all
+
+        self.assertEqual("Pwint Aung Kyaw POL", matches[0]["value"])
+
 
 if __name__ == "__main__":
     unittest.main()

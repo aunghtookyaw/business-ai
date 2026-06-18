@@ -507,7 +507,7 @@ class FinanceBotFilterTest(unittest.TestCase):
         self.assertEqual("sotephwar_transection_customer", captured["formula"])
         self.assertEqual("Sote Phwar - Income - Sales By Customer", captured["question"])
 
-    def test_income_detail_pdf_uses_fixed_width_text_export(self):
+    def test_income_detail_pdf_uses_transaction_ledger_export(self):
         original_execute_intent = telegram_bot.execute_intent
         original_chart_pdf = telegram_bot.create_chart_pdf_report_from_result
         original_write_pdf = telegram_bot._write_pdf_export
@@ -533,17 +533,20 @@ class FinanceBotFilterTest(unittest.TestCase):
                 },
             }
 
-        def fail_chart_pdf(*args, **kwargs):
-            raise AssertionError("Income Detail PDFs should use fixed-width text export")
-
-        def fake_write_pdf(text, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
-            captured["text"] = text
+        def fake_chart_pdf(result, question, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            captured["formula"] = result["formula"]
+            captured["question"] = question
+            captured["title"] = title
             with open(output_path, "wb") as pdf_file:
-                pdf_file.write(b"%PDF-1.4\nincome detail fixed width\n%%EOF\n")
+                pdf_file.write(b"%PDF-1.4\nincome detail ledger\n%%EOF\n")
+            return True
+
+        def fail_write_pdf(*args, **kwargs):
+            raise AssertionError("Income Detail PDFs should use chart_pdf ledger export")
 
         telegram_bot.execute_intent = fake_execute_intent
-        telegram_bot.create_chart_pdf_report_from_result = fail_chart_pdf
-        telegram_bot._write_pdf_export = fake_write_pdf
+        telegram_bot.create_chart_pdf_report_from_result = fake_chart_pdf
+        telegram_bot._write_pdf_export = fail_write_pdf
         try:
             message = FakeMessage(-1003850232296, 5)
             context = FakeContext()
@@ -563,9 +566,9 @@ class FinanceBotFilterTest(unittest.TestCase):
             telegram_bot._write_pdf_export = original_write_pdf
 
         self.assertEqual("document", message.replies[-1]["type"])
-        self.assertIn("Date       Item", captured["text"])
-        self.assertIn("General income filling", captured["text"])
-        self.assertIn("        500,000", captured["text"])
+        self.assertEqual("list_transactions", captured["formula"])
+        self.assertEqual("Farm - Income - Income Detail", captured["question"])
+        self.assertEqual("Farm - Income - Income Detail", captured["title"])
 
     def test_sotephwar_expense_category_search_is_sector_scoped(self):
         original_search_categories = telegram_bot.search_categories
@@ -728,6 +731,43 @@ class FinanceBotFilterTest(unittest.TestCase):
             ],
             seen_filters,
         )
+        self.assertIn("analytics", payload["result"])
+        self.assertIn("raw_data", payload["result"])
+
+    def test_expense_comparison_analytics_flags_business_signals(self):
+        from tools import comparison_reports
+
+        previous = {
+            "total_expense": 1_000,
+            "transaction_count": 3,
+            "categories": [
+                {"sector": "Farm", "category": "Fuel", "expense": 400},
+                {"sector": "Farm", "category": "Wages", "expense": 500},
+                {"sector": "Farm", "category": "Repairs", "expense": 100},
+            ],
+        }
+        current = {
+            "total_expense": 1_600,
+            "transaction_count": 2,
+            "categories": [
+                {"sector": "Farm", "category": "Fuel", "expense": 900},
+                {"sector": "Farm", "category": "Wages", "expense": 500},
+                {"sector": "Farm", "category": "Seed", "expense": 200},
+            ],
+        }
+
+        rows = comparison_reports._category_rows(previous, current)
+        analytics = comparison_reports._analytics(previous, current, rows)
+
+        self.assertEqual("Fuel", analytics["top_5_increases"][0]["category"])
+        self.assertEqual(500, analytics["top_5_increases"][0]["change"])
+        self.assertEqual("Repairs", analytics["top_5_decreases"][0]["category"])
+        self.assertEqual("Fuel", analytics["largest_expense_categories"][0]["category"])
+        self.assertEqual(56.25, analytics["largest_expense_categories"][0]["current_contribution_percent"])
+        self.assertEqual("Fuel", analytics["categories_over_20_percent_change"][0]["category"])
+        self.assertEqual("Repairs", analytics["zero_current_value_with_previous_spending"][0]["category"])
+        self.assertEqual("Seed", analytics["new_current_spending_categories"][0]["category"])
+        self.assertEqual(600, analytics["kpi_summary_statistics"]["expense_change"])
 
     def test_farm_expense_comparison_text_is_business_report_not_json(self):
         original_comparison = telegram_bot.expense_month_comparison
@@ -963,6 +1003,50 @@ class FinanceBotFilterTest(unittest.TestCase):
             f"{telegram_bot.PDF_EXPORT_COMMAND}:CEO monthly management report pdf",
             telegram_bot._normalize_command("CEO monthly management report pdf"),
         )
+        self.assertEqual(
+            "CEO monthly management report pdf",
+            telegram_bot._pdf_export_question(f"{telegram_bot.PDF_EXPORT_COMMAND}:CEO monthly management report pdf"),
+        )
+        self.assertEqual(
+            f"{telegram_bot.PDF_EXPORT_COMMAND}:local AI qwen 3 finance report pdf",
+            telegram_bot._normalize_command("local AI qwen 3 finance report pdf"),
+        )
+        self.assertEqual(
+            telegram_bot.CEO_PDF_EXPORT_TITLE,
+            telegram_bot._export_title_for_question("local AI qwen 3 finance report pdf"),
+        )
+
+    def test_local_ai_finance_pdf_uses_ceo_report_renderer(self):
+        original_create_chart_pdf_report = telegram_bot.create_chart_pdf_report
+        original_answer_question = telegram_bot.answer_question
+        seen = []
+
+        def fake_create_chart_pdf_report(question, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            seen.append({"question": question, "title": title})
+            with open(output_path, "wb") as pdf_file:
+                pdf_file.write(b"%PDF-1.4\nceo report\n%%EOF\n")
+            return True
+
+        def fail_answer_question(question):
+            raise AssertionError("CEO PDF export should not fall back to local-AI text export")
+
+        telegram_bot.create_chart_pdf_report = fake_create_chart_pdf_report
+        telegram_bot.answer_question = fail_answer_question
+        try:
+            message = FakeMessage(-1003850232296, 5)
+
+            telegram_bot._answer_finance_question(
+                message,
+                telegram_bot._normalize_command("local AI qwen 3 finance report pdf"),
+            )
+
+            self.assertEqual("document", message.replies[0]["type"])
+            self.assertEqual("local AI qwen 3 finance report pdf", seen[0]["question"])
+            self.assertEqual(telegram_bot.CEO_PDF_EXPORT_TITLE, seen[0]["title"])
+            self.assertTrue(message.replies[0]["kwargs"]["filename"].startswith("bigshot_ceo_management_report_"))
+        finally:
+            telegram_bot.create_chart_pdf_report = original_create_chart_pdf_report
+            telegram_bot.answer_question = original_answer_question
 
     def test_send_pdf_replies_with_document(self):
         original_answer_question = telegram_bot.answer_question
@@ -1029,18 +1113,53 @@ class FinanceBotFilterTest(unittest.TestCase):
             telegram_bot.create_chart_pdf_report = original_create_chart_pdf_report
             telegram_bot._write_jpeg_export = original_write_jpeg_export
 
-    def test_direct_finance_text_question_is_answered(self):
-        original_answer_question = telegram_bot.answer_question
-        telegram_bot.answer_question = lambda question: f"answer for {question}"
+    def test_direct_finance_text_question_uses_executive_mode(self):
+        original_executive_answer = telegram_bot.answer_executive_question
+        telegram_bot.answer_executive_question = lambda question: f"executive answer for {question}"
         try:
             message = FakeMessage(-1003850232296, 5, "this month income")
             context = FakeContext()
 
             telegram_bot.handle_message(FakeUpdate(message), context)
 
-            self.assertEqual("answer for this month income", message.replies[-1]["text"])
+            self.assertEqual("executive answer for this month income", message.replies[-1]["text"])
+        finally:
+            telegram_bot.answer_executive_question = original_executive_answer
+
+    def test_slash_command_still_uses_structured_finance_answer(self):
+        original_answer_question = telegram_bot.answer_question
+        original_executive_answer = telegram_bot.answer_executive_question
+        telegram_bot.answer_question = lambda question: f"structured answer for {question}"
+
+        def fail_executive_answer(question):
+            raise AssertionError("Slash commands should stay on structured finance path")
+
+        telegram_bot.answer_executive_question = fail_executive_answer
+        try:
+            message = FakeMessage(-1003850232296, 5, "/month_income")
+            context = FakeContext()
+
+            telegram_bot.handle_message(FakeUpdate(message), context)
+
+            self.assertEqual("structured answer for this month income", message.replies[-1]["text"])
         finally:
             telegram_bot.answer_question = original_answer_question
+            telegram_bot.answer_executive_question = original_executive_answer
+
+    def test_executive_pdf_request_sends_document(self):
+        original_executive_answer = telegram_bot.answer_executive_question
+        telegram_bot.answer_executive_question = lambda question: "BigShot Intelligence Report\n\nExecutive Summary\nRevenue is stable."
+        try:
+            message = FakeMessage(-1003850232296, 5, "Analyze revenue pdf")
+            context = FakeContext()
+
+            telegram_bot.handle_message(FakeUpdate(message), context)
+
+            self.assertEqual("document", message.replies[-1]["type"])
+            self.assertTrue(message.replies[-1]["content"].startswith(b"%PDF"))
+            self.assertTrue(message.replies[-1]["kwargs"]["filename"].endswith(".pdf"))
+        finally:
+            telegram_bot.answer_executive_question = original_executive_answer
 
     def test_legacy_kpi_bot_rejects_family_thread(self):
         message = FakeMessage(-1003850232296, 4)

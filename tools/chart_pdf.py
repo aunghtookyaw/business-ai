@@ -93,6 +93,30 @@ def _mmk(value):
     return f"{int(value or 0):,} MMK"
 
 
+def _display_date(value):
+    text = str(value or "").strip()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%d %B %Y").lstrip("0")
+        except ValueError:
+            pass
+    return text or "-"
+
+
+def _ledger_description(row):
+    parts = []
+    description = row.get("description")
+    category = row.get("category")
+    customer = row.get("customer")
+    if description:
+        parts.append(str(description))
+    if category and category != "-" and category not in parts[0:1]:
+        parts.append(str(category))
+    if customer and all(customer not in part for part in parts):
+        parts.append(str(customer))
+    return " - ".join(parts) or "-"
+
+
 def _period_months(count=12, today=None):
     today = today or date.today()
     months = []
@@ -303,6 +327,27 @@ def _financial_total_spec(result, intent, amount_key):
     }
 
 
+def _is_farm_total_income_spec(result, spec):
+    intent = result.get("_bi_intent") or {}
+    return (
+        spec.get("kind") == "financial_total_report"
+        and intent.get("business") == "farm"
+        and intent.get("module") == "income"
+        and intent.get("report") == "total_income"
+    )
+
+
+def _should_use_unicode_text_pdf(result, spec, question, title):
+    if _is_farm_total_income_spec(result, spec):
+        return False
+    return (
+        _contains_non_ascii(result)
+        or _contains_non_ascii(spec)
+        or _contains_non_ascii(question)
+        or _contains_non_ascii(title)
+    )
+
+
 def _financial_category_spec(result, intent, report, amount_key):
     rows = result.get("categories") or []
     total, paid, outstanding = _financial_totals(result, amount_key)
@@ -341,31 +386,26 @@ def _financial_detail_spec(result, intent, amount_key):
     module_title = "Income" if amount_key == "income" else "Expense"
     amount_field = "amount" if result.get("transactions") else "total_amount"
     return {
-        "kind": "financial_detail_report",
+        "kind": "transaction_ledger_report",
         "title": f"{business_title} {module_title} Detail".strip(),
         "amount_label": f"Total {module_title}",
-        "chart_title": f"{module_title} Detail",
-        "table_title": f"{module_title} Detail Table",
+        "business": business_title,
+        "module": module_title,
+        "period_label": result.get("_period_label") or result.get("period") or "-",
+        "customer": intent.get("customer"),
+        "category": intent.get("category") or ", ".join(intent.get("categories") or []),
         "total": total,
         "paid": paid,
         "outstanding": outstanding,
-        "values": [
-            (
-                row.get("item") or row.get("customer_name") or row.get("category") or row.get("Date") or row.get("invoice_date") or "-",
-                row.get(amount_field, 0),
-            )
-            for row in rows
-        ],
-        "table": [("Date", "Item", "Category", "Payment", "Amount", "Paid", "Outstanding")] + [
-            (
-                row.get("Date") or row.get("invoice_date") or "-",
-                row.get("item") or row.get("customer_name") or "-",
-                row.get("category") or "-",
-                row.get("payment_method") or "-",
-                row.get(amount_field, 0),
-                row.get("amount_received", row.get(amount_field, 0)),
-                row.get("outstanding_amount", 0),
-            )
+        "transactions": [
+            {
+                "date": row.get("Date") or row.get("invoice_date") or "-",
+                "description": row.get("item") or row.get("customer_name") or row.get("category") or "-",
+                "category": row.get("category") or "-",
+                "customer": row.get("customer_name") or "",
+                "payment": row.get("payment_method") or row.get("payment") or "-",
+                "amount": row.get(amount_field, 0),
+            }
             for row in rows
         ],
     }
@@ -579,7 +619,7 @@ def _chart_spec(result, question):
         and bi_intent.get("module") == "income"
         and report in {"income_detail", "income_transactions"}
     ):
-        return _voucher_table_spec("Farm Income Detail", result.get("invoices") or [])
+        return _financial_detail_spec(result, bi_intent, "income")
 
     if (
         formula == "farm_transection_customer"
@@ -1065,6 +1105,43 @@ def _unicode_customer_revenue_lines(title, question, spec):
     return lines
 
 
+def _unicode_transaction_ledger_lines(title, question, spec):
+    lines = [
+        spec.get("title") or title,
+        "",
+        f"Period: {spec.get('period_label') or '-'}",
+    ]
+    if spec.get("customer"):
+        lines.append(f"Customer: {_unicode_value(spec.get('customer'))}")
+    if spec.get("category"):
+        lines.append(f"Category: {_unicode_value(spec.get('category'))}")
+    lines.extend([
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+    ])
+
+    transactions = spec.get("transactions") or []
+    if not transactions:
+        lines.append("No matching transactions found.")
+    for row in transactions:
+        description = _ledger_description(row)
+        lines.extend([
+            _display_date(row.get("date")),
+            f"Amount: {_money(row.get('amount') or 0)} MMK",
+            f"Payment: {_unicode_value(row.get('payment'))}",
+            f"Description: {_unicode_value(description)}",
+            "-" * 48,
+            "",
+        ])
+
+    lines.extend([
+        "Summary",
+        f"Total Transactions: {len(transactions)}",
+        f"Total Amount: {_money(spec.get('total') or 0)} MMK",
+    ])
+    return lines
+
+
 def _unicode_table_lines(title, question, spec):
     lines = [
         title,
@@ -1089,6 +1166,8 @@ def _unicode_pdf_lines(title, question, spec):
         return _unicode_farm_lines(title, question, spec)
     if kind == "customer_revenue_report":
         return _unicode_customer_revenue_lines(title, question, spec)
+    if kind == "transaction_ledger_report":
+        return _unicode_transaction_ledger_lines(title, question, spec)
     if spec.get("table"):
         return _unicode_table_lines(title, question, spec)
     return None
@@ -1421,6 +1500,53 @@ def _draw_financial_detail_report(pdf, spec):
         line_gap=12,
         min_row_height=28,
     )
+
+
+def _draw_transaction_ledger_report(pdf, spec):
+    pdf.text(50, 720, spec["title"], size=15, bold=True)
+    y = 690
+    pdf.text(50, y, f"Period: {spec.get('period_label') or '-'}", size=9.5, bold=True)
+    y -= 18
+    if spec.get("customer"):
+        pdf.text(50, y, f"Customer: {spec.get('customer')}", size=9.5, bold=True, max_width=495)
+        y -= 18
+    if spec.get("category"):
+        pdf.text(50, y, f"Category: {spec.get('category')}", size=9.5, bold=True, max_width=495)
+        y -= 18
+
+    pdf.line(50, y - 4, 545, y - 4, color=(209, 213, 219))
+    y -= 34
+    transactions = spec.get("transactions") or []
+    if not transactions:
+        pdf.text(50, y, "No matching transactions found.", size=10)
+        y -= 26
+
+    for row in transactions:
+        if y < 145:
+            pdf.new_page()
+            pdf.text(50, 795, spec["title"], size=14, bold=True)
+            y = 755
+        description = _ledger_description(row)
+        pdf.text(50, y, _display_date(row.get("date")), size=10.5, bold=True)
+        pdf.text(360, y, "Amount:", size=9.2, bold=True, color=(75, 85, 99))
+        pdf.text(420, y, _mmk(row.get("amount") or 0), size=9.2, bold=True, max_width=120)
+        y -= 18
+        pdf.text(50, y, f"Payment: {row.get('payment') or '-'}", size=9.2, max_width=230)
+        y -= 18
+        pdf.text(50, y, "Description:", size=9.2, bold=True, color=(75, 85, 99))
+        used = pdf.text(135, y, description, size=9.2, max_width=400)
+        y -= max(22, used + 8)
+        pdf.line(50, y, 545, y, color=(229, 231, 235))
+        y -= 24
+
+    if y < 120:
+        pdf.new_page()
+        y = 760
+    pdf.text(50, y, "Summary", size=11, bold=True)
+    y -= 22
+    pdf.text(50, y, f"Total Transactions: {len(transactions)}", size=9.7, bold=True)
+    y -= 20
+    pdf.text(50, y, f"Total Amount: {_mmk(spec.get('total') or 0)}", size=9.7, bold=True)
 
 
 def _draw_expense_comparison_report(pdf, spec):
@@ -1940,11 +2066,20 @@ def _draw_customer_revenue_report(pdf, spec, start_y=720):
 
 
 def _is_ceo_management_report_question(question):
-    text = question.lower()
-    return (
-        ("ceo" in text or "management report" in text or "monthly management report" in text)
-        and ("pdf" in text or "report" in text)
+    text = " ".join(str(question).lower().split())
+    is_report = "pdf" in text or "report" in text
+    explicit_ceo_report = (
+        "ceo" in text
+        or "chief executive" in text
+        or "management report" in text
+        or "monthly management report" in text
     )
+    local_ai_ceo_alias = (
+        is_report
+        and ("local ai" in text or "qwen" in text or "qwen3" in text)
+        and ("finance" in text or "business" in text)
+    )
+    return is_report and (explicit_ceo_report or local_ai_ceo_alias)
 
 
 def _safe_call(func, *args, default=None, **kwargs):
@@ -2232,12 +2367,7 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
     if not spec:
         return False
 
-    if (
-        _contains_non_ascii(result)
-        or _contains_non_ascii(spec)
-        or _contains_non_ascii(question)
-        or _contains_non_ascii(title)
-    ):
+    if _should_use_unicode_text_pdf(result, spec, question, title):
         unicode_lines = _unicode_pdf_lines(title, question, spec)
         if unicode_lines and _write_unicode_text_pdf(unicode_lines, output_path, title=title):
             return True
@@ -2297,15 +2427,6 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
 
     if kind == "financial_total_report":
         _draw_financial_total_report(pdf, spec)
-        income_rows = spec.get("income_rows") or []
-        if income_rows:
-            pdf.new_page()
-            pdf.text(50, 795, "Transection Income", size=13, bold=True)
-            rows = [("Date", "Item", "Amount", "Payment")] + [
-                (row.get("Date") or "-", row.get("item") or "-", row.get("amount") or 0, row.get("payment_method") or "-")
-                for row in income_rows
-            ]
-            _draw_table(pdf, rows, start_y=760)
         pdf.finish(output_path)
         return True
 
@@ -2316,6 +2437,11 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
 
     if kind == "financial_detail_report":
         _draw_financial_detail_report(pdf, spec)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "transaction_ledger_report":
+        _draw_transaction_ledger_report(pdf, spec)
         pdf.finish(output_path)
         return True
 

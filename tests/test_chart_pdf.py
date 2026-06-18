@@ -115,6 +115,19 @@ class ChartPdfTest(unittest.TestCase):
                 self.assertIn("Recommended Actions", pdf_text)
                 self.assertIn("Page 7", pdf_text)
                 self.assertIn("MMK", pdf_text)
+
+                alias_output_path = Path(temp_dir) / "qwen-ceo-report.pdf"
+                alias_created = chart_pdf.create_chart_pdf_report(
+                    "local AI qwen 3 finance report pdf",
+                    alias_output_path,
+                )
+
+                self.assertTrue(alias_created)
+                alias_pdf_bytes = alias_output_path.read_bytes()
+                alias_pdf_text = alias_pdf_bytes.decode("latin-1")
+                self.assertTrue(alias_pdf_bytes.startswith(b"%PDF"))
+                self.assertEqual(7, alias_pdf_bytes.count(b"/Type /Page "))
+                self.assertIn("Monthly Management Report", alias_pdf_text)
         finally:
             chart_pdf.kpi_overview = original_kpi
             chart_pdf.sector_summary = original_sector
@@ -428,7 +441,7 @@ class ChartPdfTest(unittest.TestCase):
                 },
                 {
                     "Date": "2026-06-11",
-                    "item": "Misc income",
+                    "item": "အထွေထွေ ဝင်ငွေ",
                     "amount": 400,
                     "payment_method": "Cash",
                 },
@@ -449,8 +462,10 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("Paid", pdf_text)
             self.assertIn("Outstanding", pdf_text)
             self.assertIn("4,200", pdf_text)
-            self.assertIn("Transection Income", pdf_text)
-            self.assertIn("Old item resell", pdf_text)
+            self.assertIn("Data Table", pdf_text)
+            self.assertIn("Paid vs Outstanding", pdf_text)
+            self.assertNotIn("Transection Income", pdf_text)
+            self.assertNotIn("Old item resell", pdf_text)
             self.assertNotIn("Top Customers by Revenue", pdf_text)
             self.assertNotIn("Customer Detail Table", pdf_text)
 
@@ -741,11 +756,17 @@ class ChartPdfTest(unittest.TestCase):
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Expense Detail", pdf_text)
-            self.assertIn("Data Table", pdf_text)
-            self.assertIn("Fertilizer", pdf_text)
+            self.assertIn("14 May 2026", pdf_text)
+            self.assertIn("Amount:", pdf_text)
+            self.assertIn("300,000 MMK", pdf_text)
+            self.assertIn("Payment: Cash", pdf_text)
             self.assertIn("NPK fertilizer", pdf_text)
+            self.assertIn("Total Transactions: 1", pdf_text)
+            self.assertIn("Total Amount: 300,000 MMK", pdf_text)
+            self.assertNotIn("Data Table", pdf_text)
+            self.assertNotIn("Paid vs Outstanding", pdf_text)
 
-    def test_expense_detail_pdf_uses_standard_chart_table_layout(self):
+    def test_expense_detail_pdf_uses_transaction_ledger_layout(self):
         result = {
             "formula": "list_transactions",
             "period": "last_month",
@@ -778,9 +799,13 @@ class ChartPdfTest(unittest.TestCase):
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Expense Detail", pdf_text)
-            self.assertIn("Data Table", pdf_text)
+            self.assertIn("14 May 2026", pdf_text)
+            self.assertIn("Amount:", pdf_text)
+            self.assertIn("Payment: Cash", pdf_text)
             self.assertIn("NPK fertilizer", pdf_text)
+            self.assertIn("Summary", pdf_text)
             self.assertNotIn("Farm Expense Report", pdf_text)
+            self.assertNotIn("Data Table", pdf_text)
 
     def test_income_by_category_and_detail_pdf_use_standard_layout(self):
         category_result = {
@@ -847,10 +872,12 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("Income by Category", category_text)
             self.assertIn("Data Table", category_text)
             self.assertIn("Income Detail", detail_text)
-            self.assertIn("Data Table", detail_text)
+            self.assertIn("1 June 2026", detail_text)
+            self.assertIn("Payment: K Pay", detail_text)
             self.assertIn("General income filling", detail_text)
-            self.assertIn("Vegetable", detail_text)
-            self.assertIn("Sales", detail_text)
+            self.assertIn("Total Transactions: 1", detail_text)
+            self.assertIn("Total Amount: 500,000 MMK", detail_text)
+            self.assertNotIn("Data Table", detail_text)
             self.assertNotIn("Voucher Number", detail_text)
             self.assertNotIn("Farm Income Report", detail_text)
 
@@ -892,7 +919,7 @@ class ChartPdfTest(unittest.TestCase):
             self.assertTrue(created)
             self.assertTrue(output_path.read_bytes().startswith(b"%PDF"))
 
-    def test_unicode_sotephwar_income_detail_uses_standard_detail_table(self):
+    def test_unicode_sotephwar_income_detail_uses_transaction_ledger(self):
         item = "အထွေထွေ ဝင်ငွေ"
         result = {
             "formula": "list_transactions",
@@ -917,12 +944,18 @@ class ChartPdfTest(unittest.TestCase):
         lines = chart_pdf._unicode_pdf_lines("Unicode Test", "မြန်မာ income detail", spec)
         joined = "\n".join(lines)
 
-        self.assertEqual("financial_detail_report", spec["kind"])
-        self.assertIn("Date | Item | Category | Payment | Amount | Paid | Outstanding", joined)
+        self.assertEqual("transaction_ledger_report", spec["kind"])
+        self.assertIn("Sote Phwar Income Detail", joined)
+        self.assertIn("1 June 2026", joined)
+        self.assertIn("Amount: 100,000 MMK", joined)
+        self.assertIn("Payment: Cash", joined)
+        self.assertIn("Description:", joined)
         self.assertIn(item, joined)
+        self.assertIn("Total Transactions: 1", joined)
+        self.assertIn("Total Amount: 100,000 MMK", joined)
         self.assertNotIn("????", joined)
 
-    def test_unicode_farm_income_detail_uses_voucher_table(self):
+    def test_unicode_farm_income_detail_uses_transaction_ledger(self):
         customer = "ဒေါ်အေး"
         result = {
             "formula": "farm_transection_customer",
@@ -947,10 +980,15 @@ class ChartPdfTest(unittest.TestCase):
         lines = chart_pdf._unicode_pdf_lines("Unicode Test", "မြန်မာ farm income detail", spec)
         joined = "\n".join(lines)
 
-        self.assertEqual("voucher_table", spec["kind"])
-        self.assertIn("Voucher Number | Date | Customer | Total | Paid | Outstanding", joined)
+        self.assertEqual("transaction_ledger_report", spec["kind"])
+        self.assertIn("Farm Income Detail", joined)
+        self.assertIn("2 June 2026", joined)
+        self.assertIn("Amount: 200,000 MMK", joined)
+        self.assertIn("Payment:", joined)
+        self.assertIn("Description:", joined)
         self.assertIn(customer, joined)
-        self.assertIn("Total: 200,000 | Paid: 125,000 | Outstanding: 75,000", joined)
+        self.assertIn("Total Transactions: 1", joined)
+        self.assertIn("Total Amount: 200,000 MMK", joined)
         self.assertNotIn("????", joined)
 
     def test_unicode_farm_expense_detail_pdf_uses_unicode_fallback(self):
@@ -1069,7 +1107,9 @@ class ChartPdfTest(unittest.TestCase):
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Expense Detail", pdf_text)
-            self.assertIn("Data Table", pdf_text)
+            self.assertIn("14 May 2026", pdf_text)
+            self.assertIn("Payment: Cash", pdf_text)
+            self.assertIn("Total Transactions: 1", pdf_text)
             self.assertIn("Sote Phwar", pdf_text)
             self.assertIn("packaging and", pdf_text)
             self.assertIn("delivery", pdf_text)
@@ -1081,6 +1121,7 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("handling", pdf_text)
             self.assertIn("charges for", pdf_text)
             self.assertIn("wholesale", pdf_text)
+            self.assertNotIn("Data Table", pdf_text)
             self.assertNotIn("...", pdf_text)
 
     def test_detail_pdf_uses_wider_fixed_columns_for_wrapped_text(self):

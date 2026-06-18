@@ -686,6 +686,49 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             result["sources"]["sotephwar_transection_total_amount"],
         )
 
+    def test_comparison_analytics_identifies_category_drivers(self):
+        previous_kpi = {
+            "total_income": 2_000,
+            "total_expense": 1_000,
+            "net_profit": 1_000,
+            "profit_margin_percent": 50,
+        }
+        current_kpi = {
+            "total_income": 2_100,
+            "total_expense": 1_600,
+            "net_profit": 500,
+            "profit_margin_percent": 23.81,
+        }
+        previous_summary = {
+            "total_expense": 1_000,
+            "categories": [
+                {"sector": "Farm", "category": "Fuel", "expense": 400},
+                {"sector": "Farm", "category": "Repairs", "expense": 100},
+            ],
+        }
+        current_summary = {
+            "total_expense": 1_600,
+            "categories": [
+                {"sector": "Farm", "category": "Fuel", "expense": 900},
+                {"sector": "Farm", "category": "Seed", "expense": 200},
+            ],
+        }
+
+        analytics = business_agent._comparison_analytics(
+            previous_kpi,
+            current_kpi,
+            previous_summary,
+            current_summary,
+        )
+
+        self.assertEqual("Fuel", analytics["top_5_increases"][0]["category"])
+        self.assertEqual("Repairs", analytics["top_5_decreases"][0]["category"])
+        self.assertEqual("Fuel", analytics["largest_expense_categories"][0]["category"])
+        self.assertEqual("Fuel", analytics["categories_over_20_percent_change"][0]["category"])
+        self.assertEqual("Repairs", analytics["zero_current_value_with_previous_spending"][0]["category"])
+        self.assertEqual("Seed", analytics["new_current_spending_categories"][0]["category"])
+        self.assertEqual(600, analytics["kpi_summary_statistics"]["expense_change"])
+
     def test_top_limit_is_extracted_from_question(self):
         self.assertEqual(
             4,

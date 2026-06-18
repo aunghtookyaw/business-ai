@@ -12,6 +12,12 @@ from tools.formula_engine import (
 import config
 
 
+QUERY_ALIASES = {
+    "pak": "pwint aung kyaw",
+    "pwint aung kyaw": "pwint aung kyaw",
+}
+
+
 def _unique_values(values):
     seen = set()
     unique = []
@@ -31,6 +37,7 @@ def _master_table_ref(table_name):
 
 def _rank_matches(query, values, limit=8):
     normalized_query = search_intelligence.normalize_text(query)
+    normalized_query = QUERY_ALIASES.get(normalized_query, normalized_query)
     if len(normalized_query) < 2:
         return []
 

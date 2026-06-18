@@ -45,6 +45,8 @@ from tools.comparison_reports import (
     expense_month_comparison,
     is_expense_month_comparison,
 )
+from tools.executive_agent import answer_executive_question
+from tools.executive_reports import write_executive_excel_report
 from tools.google_calendar_client import sync_financial_obligations_to_calendar
 
 SOTEPHWAR_PAYMENT_TEMPLATE = (
@@ -57,6 +59,7 @@ JPEG_EXPORT_COMMAND = "__send_jpeg__"
 PDF_JPEG_EXPORT_COMMAND = "__send_pdf_jpeg__"
 PDF_EXPORT_DEFAULT_QUESTION = "this month kpi"
 PDF_EXPORT_TITLE = "BigShot Finance Report"
+CEO_PDF_EXPORT_TITLE = "BigShot CEO Management Report"
 AUTO_DELETE_SECONDS = int(os.getenv("FINANCE_AUTO_DELETE_SECONDS", "86400"))
 BI_STATE_KEY = "bi_wizard"
 BI_PERSISTENCE_FILE = os.getenv("FINANCE_BI_PERSISTENCE_FILE", "/private/tmp/business-ai-bi-wizard-state.pkl")
@@ -331,10 +334,31 @@ def _normalize_command(text):
 
 
 def _is_ceo_management_pdf_request(normalized_text):
-    return (
-        "pdf" in normalized_text
-        and ("ceo" in normalized_text or "management report" in normalized_text or "monthly management report" in normalized_text)
+    if _is_export_command(normalized_text):
+        normalized_text = _export_question(normalized_text)
+    is_pdf_report = "pdf" in normalized_text or "report" in normalized_text
+    explicit_ceo_report = (
+        "ceo" in normalized_text
+        or "chief executive" in normalized_text
+        or "management report" in normalized_text
+        or "monthly management report" in normalized_text
     )
+    local_ai_ceo_alias = (
+        is_pdf_report
+        and ("local ai" in normalized_text or "qwen" in normalized_text or "qwen3" in normalized_text)
+        and ("finance" in normalized_text or "business" in normalized_text)
+    )
+    return (
+        is_pdf_report
+        and (explicit_ceo_report or local_ai_ceo_alias)
+    )
+
+
+def _export_title_for_question(question):
+    normalized_text = " ".join(str(question).strip().lower().split())
+    if _is_ceo_management_pdf_request(normalized_text):
+        return CEO_PDF_EXPORT_TITLE
+    return PDF_EXPORT_TITLE
 
 
 def _export_command_with_question(export_command, parts):
@@ -367,7 +391,13 @@ def _export_question(command):
         if command.startswith(prefix):
             question = command[len(prefix):].strip()
             if question:
-                return _normalize_command(question)
+                normalized = _normalize_command(question)
+                nested_prefix = f"{export_command}:"
+                if normalized.startswith(nested_prefix):
+                    return normalized[len(nested_prefix):].strip()
+                if _is_export_command(normalized):
+                    return _export_question(normalized)
+                return normalized
 
     return PDF_EXPORT_DEFAULT_QUESTION
 
@@ -535,15 +565,16 @@ def _send_export(message, command, context=None):
     send_pdf = command == PDF_EXPORT_COMMAND or command.startswith(f"{PDF_EXPORT_COMMAND}:")
     send_jpeg = command == JPEG_EXPORT_COMMAND or command.startswith(f"{JPEG_EXPORT_COMMAND}:")
     send_both = command == PDF_JPEG_EXPORT_COMMAND or command.startswith(f"{PDF_JPEG_EXPORT_COMMAND}:")
+    export_title = _export_title_for_question(export_question)
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        pdf_filename = _safe_export_filename(PDF_EXPORT_TITLE, "pdf")
-        jpeg_filename = _safe_export_filename(PDF_EXPORT_TITLE, "jpg")
+        pdf_filename = _safe_export_filename(export_title, "pdf")
+        jpeg_filename = _safe_export_filename(export_title, "jpg")
         pdf_path = Path(temp_dir) / pdf_filename
         jpeg_path = Path(temp_dir) / jpeg_filename
-        if not create_chart_pdf_report(export_question, pdf_path, title=PDF_EXPORT_TITLE):
+        if not create_chart_pdf_report(export_question, pdf_path, title=export_title):
             answer = answer_question(export_question)
-            _write_pdf_export(answer, pdf_path, title=PDF_EXPORT_TITLE)
+            _write_pdf_export(answer, pdf_path, title=export_title)
         if send_pdf or send_both:
             with pdf_path.open("rb") as pdf_file:
                 _reply_document(
@@ -830,16 +861,6 @@ def _handle_search_text(message, context, text):
     return True
 
 
-def _uses_fixed_width_income_detail_pdf(payload):
-    result = payload.get("result") or {}
-    intent = payload.get("intent") or {}
-    return (
-        result.get("formula") == "list_transactions"
-        and intent.get("module") == "income"
-        and intent.get("report") in {"income_detail", "income_transactions"}
-    )
-
-
 def _execute_bi_output(message, context):
     state = _bi_state(context)
     intent = intent_from_state(state)
@@ -852,17 +873,14 @@ def _execute_bi_output(message, context):
 
     if output == "pdf":
         path = temp_report_path(".pdf")
-        if _uses_fixed_width_income_detail_pdf(payload):
+        created = create_chart_pdf_report_from_result(
+            payload["result"],
+            payload["title"],
+            path,
+            title=payload["title"],
+        )
+        if not created:
             _write_pdf_export(format_text_report(payload), path, title=payload["title"])
-        else:
-            created = create_chart_pdf_report_from_result(
-                payload["result"],
-                payload["title"],
-                path,
-                title=payload["title"],
-            )
-            if not created:
-                _write_pdf_export(format_text_report(payload), path, title=payload["title"])
         with path.open("rb") as document:
             _reply_document(
                 message,
@@ -935,6 +953,50 @@ def _execute_comparison_output(message, context):
             reply_markup=_remove_reply_keyboard(),
         )
     path.unlink(missing_ok=True)
+
+
+def _executive_output_format(text):
+    normalized = " ".join(str(text or "").lower().split())
+    if "excel" in normalized or "xlsx" in normalized:
+        return "excel"
+    if "pdf" in normalized:
+        return "pdf"
+    return "text"
+
+
+def _send_executive_answer(message, context, question):
+    answer = answer_executive_question(question)
+    output = _executive_output_format(question)
+    if output == "pdf":
+        path = temp_report_path(".pdf")
+        _write_pdf_export(answer, path, title="BigShot Business Intelligence Report")
+        with path.open("rb") as document:
+            _reply_document(
+                message,
+                context,
+                document=document,
+                filename=_safe_export_filename("BigShot Business Intelligence Report", "pdf"),
+                caption="BigShot Business Intelligence Report",
+                reply_markup=_remove_reply_keyboard(),
+            )
+        path.unlink(missing_ok=True)
+        return
+    if output == "excel":
+        path = temp_report_path(".xlsx")
+        write_executive_excel_report(answer, path)
+        with path.open("rb") as document:
+            _reply_document(
+                message,
+                context,
+                document=document,
+                filename=_safe_export_filename("BigShot Business Intelligence Report", "xlsx"),
+                caption="BigShot Business Intelligence Report",
+                reply_markup=_remove_reply_keyboard(),
+            )
+        path.unlink(missing_ok=True)
+        return
+    for part in _split_message(answer):
+        _reply_text(message, context, part, reply_markup=_remove_reply_keyboard())
 
 
 def handle_bi_callback(update: Update, context: CallbackContext):
@@ -1170,7 +1232,10 @@ def handle_message(update: Update, context: CallbackContext):
 
     question = _normalize_command(user_text)
     try:
-        _answer_finance_question(update.message, question, context=context)
+        if _is_export_command(question) or str(user_text).strip().startswith("/"):
+            _answer_finance_question(update.message, question, context=context)
+            return
+        _send_executive_answer(update.message, context, user_text)
     except Exception as e:
         _reply_text(
             update.message,

@@ -809,6 +809,100 @@ def _combined_kpi_for_period(period):
     return _combined_kpi(period, kpi, sector_summary, sotephwar_summary)
 
 
+def _category_comparison_rows(previous_summary, current_summary):
+    previous_by_category = {
+        (row.get("sector") or "-", row.get("category") or "-"): _number(row.get("expense", 0))
+        for row in previous_summary.get("categories") or []
+    }
+    current_by_category = {
+        (row.get("sector") or "-", row.get("category") or "-"): _number(row.get("expense", 0))
+        for row in current_summary.get("categories") or []
+    }
+    total_current = _number(current_summary.get("total_expense", 0))
+    rows = []
+    for sector, category in sorted(set(previous_by_category) | set(current_by_category)):
+        previous_amount = previous_by_category.get((sector, category), 0)
+        current_amount = current_by_category.get((sector, category), 0)
+        change = current_amount - previous_amount
+        change_percent = _percent_change(change, previous_amount)
+        rows.append({
+            "sector": sector,
+            "category": category,
+            "previous_amount": previous_amount,
+            "current_amount": current_amount,
+            "change": change,
+            "change_percent": change_percent,
+            "current_contribution_percent": round((current_amount / total_current) * 100, 2) if total_current else 0,
+            "flag_change_over_20_percent": (
+                previous_amount > 0
+                and change_percent is not None
+                and abs(change_percent) > 20
+            ),
+            "flag_zero_current_previous_spending": current_amount == 0 and previous_amount > 0,
+            "flag_new_current_spending": previous_amount == 0 and current_amount > 0,
+        })
+    return sorted(rows, key=lambda row: abs(row["change"]), reverse=True)
+
+
+def _comparison_analytics(previous_kpi, current_kpi, previous_summary, current_summary):
+    rows = _category_comparison_rows(previous_summary, current_summary)
+    increases = sorted(
+        (row for row in rows if row["change"] > 0),
+        key=lambda row: row["change"],
+        reverse=True,
+    )
+    decreases = sorted(
+        (row for row in rows if row["change"] < 0),
+        key=lambda row: row["change"],
+    )
+    largest_categories = sorted(rows, key=lambda row: row["current_amount"], reverse=True)
+    expense_change = current_kpi["total_expense"] - previous_kpi["total_expense"]
+    profit_change = current_kpi["net_profit"] - previous_kpi["net_profit"]
+    return {
+        "top_5_increases": increases[:5],
+        "top_5_decreases": decreases[:5],
+        "largest_expense_categories": largest_categories[:5],
+        "percentage_contribution_by_category": [
+            {
+                "sector": row["sector"],
+                "category": row["category"],
+                "current_amount": row["current_amount"],
+                "current_contribution_percent": row["current_contribution_percent"],
+            }
+            for row in largest_categories
+            if row["current_amount"] > 0
+        ],
+        "categories_over_20_percent_change": [
+            row for row in rows if row["flag_change_over_20_percent"]
+        ],
+        "zero_current_value_with_previous_spending": [
+            row for row in rows if row["flag_zero_current_previous_spending"]
+        ],
+        "new_current_spending_categories": [
+            row for row in rows if row["flag_new_current_spending"]
+        ],
+        "kpi_summary_statistics": {
+            "current_total_income": current_kpi["total_income"],
+            "previous_total_income": previous_kpi["total_income"],
+            "current_total_expense": current_kpi["total_expense"],
+            "previous_total_expense": previous_kpi["total_expense"],
+            "expense_change": expense_change,
+            "expense_change_percent": _percent_change(expense_change, previous_kpi["total_expense"]),
+            "current_net_profit": current_kpi["net_profit"],
+            "previous_net_profit": previous_kpi["net_profit"],
+            "net_profit_change": profit_change,
+            "net_profit_change_percent": _percent_change(profit_change, previous_kpi["net_profit"]),
+            "current_profit_margin_percent": current_kpi["profit_margin_percent"],
+            "previous_profit_margin_percent": previous_kpi["profit_margin_percent"],
+            "profit_margin_points": round(
+                current_kpi["profit_margin_percent"] - previous_kpi["profit_margin_percent"],
+                2,
+            ),
+        },
+        "raw_category_comparison": rows,
+    }
+
+
 def _comparison_context(question):
     current_period = _comparison_base_period(question)
     previous_period = _previous_period(current_period)
@@ -819,6 +913,14 @@ def _comparison_context(question):
 
     current = _combined_kpi_for_period(current_period)
     previous = _combined_kpi_for_period(previous_period)
+    current_category_summary = FORMULAS["category_summary"](current_period, {"income_expense": "Expense"})
+    previous_category_summary = FORMULAS["category_summary"](previous_period, {"income_expense": "Expense"})
+    analytics = _comparison_analytics(
+        previous,
+        current,
+        previous_category_summary,
+        current_category_summary,
+    )
 
     income_change = current["total_income"] - previous["total_income"]
     expense_change = current["total_expense"] - previous["total_expense"]
@@ -841,6 +943,11 @@ def _comparison_context(question):
                     current["profit_margin_percent"] - previous["profit_margin_percent"],
                     2,
                 ),
+            },
+            "analytics": analytics,
+            "raw_data": {
+                "previous_category_summary": previous_category_summary,
+                "current_category_summary": current_category_summary,
             },
         }
     }
@@ -941,11 +1048,15 @@ Answer style:
 - Then give 2-4 risks or likely causes visible from the data.
 - Then give 2-4 practical recommended actions.
 - Use combined_kpi as the main KPI because it combines Transection with Sotephwar_Transection.
+- If analytics is present, use it before totals: explain top_5_increases, top_5_decreases, largest_expense_categories, percentage contribution, >20% change flags, and zero-current previous-spending flags.
+- Explain business implications of the largest changes instead of repeating totals.
+- Focus on cost drivers, missing transactions, operational risks, spending anomalies, and management actions.
 - Use cash flow, sector, category, top expense, and Sotephwar_Transection data as supporting evidence.
 - Treat Sotephwar_Transection as the source of truth for Sote Phwar income; do not require duplicated Sote Phwar income rows in Transection.
 - Treat Financial_Obligations as reminder data only; do not include it in KPI, profit, income, expense, or statistics calculations.
 - Mention exact numbers only where they support the comment.
 - Do not return a KPI-only answer unless the user specifically asks only for KPI.
+- Do not use generic advice such as "review transactions" unless a specific category, amount, or anomaly is named.
 - Do not use "$" or any currency symbol; show amounts as plain numbers.
 - Do not say changing payment method reduces expense. Payment method only affects cash-flow tracking.
 - Do not recommend automation, staff cuts, supplier discounts, or percentage savings unless the data directly supports it.
