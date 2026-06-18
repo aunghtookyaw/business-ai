@@ -103,17 +103,20 @@ class ChartPdfTest(unittest.TestCase):
                 pdf_bytes = output_path.read_bytes()
                 pdf_text = pdf_bytes.decode("latin-1")
                 self.assertTrue(pdf_bytes.startswith(b"%PDF"))
-                self.assertEqual(7, pdf_bytes.count(b"/Type /Page "))
+                self.assertEqual(8, pdf_bytes.count(b"/Type /Page "))
                 self.assertIn("BigShot Company Limited", pdf_text)
-                self.assertIn("Monthly Management Report", pdf_text)
+                self.assertIn("KPI Management Report", pdf_text)
                 self.assertIn("Executive Summary", pdf_text)
+                self.assertIn("KPI Dashboard", pdf_text)
                 self.assertIn("Revenue Analysis", pdf_text)
+                self.assertIn("Revenue Trend Line Chart", pdf_text)
                 self.assertIn("Profitability Analysis", pdf_text)
                 self.assertIn("Expense Analysis", pdf_text)
+                self.assertIn("Customer Analysis", pdf_text)
                 self.assertIn("Inventory & Operations", pdf_text)
-                self.assertIn("Management Insights", pdf_text)
-                self.assertIn("Recommended Actions", pdf_text)
-                self.assertIn("Page 7", pdf_text)
+                self.assertIn("Business Growth, Risks & Opportunities", pdf_text)
+                self.assertIn("Recommendations & Management Conclusion", pdf_text)
+                self.assertIn("Page 8", pdf_text)
                 self.assertIn("MMK", pdf_text)
 
                 alias_output_path = Path(temp_dir) / "qwen-ceo-report.pdf"
@@ -126,8 +129,19 @@ class ChartPdfTest(unittest.TestCase):
                 alias_pdf_bytes = alias_output_path.read_bytes()
                 alias_pdf_text = alias_pdf_bytes.decode("latin-1")
                 self.assertTrue(alias_pdf_bytes.startswith(b"%PDF"))
-                self.assertEqual(7, alias_pdf_bytes.count(b"/Type /Page "))
-                self.assertIn("Monthly Management Report", alias_pdf_text)
+                self.assertEqual(8, alias_pdf_bytes.count(b"/Type /Page "))
+                self.assertIn("KPI Management Report", alias_pdf_text)
+
+                kpi_output_path = Path(temp_dir) / "kpi-management-report.pdf"
+                kpi_created = chart_pdf.create_chart_pdf_report(
+                    "this month KPI pdf",
+                    kpi_output_path,
+                )
+                kpi_pdf_text = kpi_output_path.read_bytes().decode("latin-1")
+                self.assertTrue(kpi_created)
+                self.assertIn("KPI Management Report", kpi_pdf_text)
+                self.assertIn("KPI Dashboard", kpi_pdf_text)
+                self.assertIn("Customer Analysis", kpi_pdf_text)
         finally:
             chart_pdf.kpi_overview = original_kpi
             chart_pdf.sector_summary = original_sector

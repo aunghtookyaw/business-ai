@@ -124,6 +124,18 @@ class FinanceBotFilterTest(unittest.TestCase):
         self.assertEqual("Business Intelligence", message.replies[1]["text"])
         self.assertIn("reply_markup", message.replies[1]["kwargs"])
 
+    def test_prompts_shows_prebuilt_prompt_enquiry_with_overall_kpi_first(self):
+        message = FakeMessage(-1003850232296, 5)
+        context = FakeContext()
+
+        telegram_bot.prompts(FakeUpdate(message), context)
+
+        self.assertEqual("Prebuilt Prompt Enquiry", message.replies[0]["text"])
+        markup = message.replies[0]["kwargs"]["reply_markup"]
+        first_button = markup.inline_keyboard[0][0]
+        self.assertEqual("Overall KPI", first_button.text)
+        self.assertEqual("finance:overall_kpi", first_button.callback_data)
+
     def test_financial_obligation_is_available_in_bi_wizard(self):
         self.assertIn(("financial_obligation", "Financial Obligation"), BUSINESS_MENU)
         self.assertEqual(
@@ -954,6 +966,10 @@ class FinanceBotFilterTest(unittest.TestCase):
 
     def test_obligation_inline_prompt_callback_maps_to_question(self):
         self.assertEqual(
+            "this year KPI pdf",
+            telegram_bot._callback_question("finance:overall_kpi"),
+        )
+        self.assertEqual(
             "financial obligations due soon",
             telegram_bot._callback_question("finance:obl_due"),
         )
@@ -965,6 +981,13 @@ class FinanceBotFilterTest(unittest.TestCase):
             telegram_bot.SOTEPHWAR_PAYMENT_TEMPLATE,
             telegram_bot._callback_question("finance:sote_payment_template"),
         )
+
+    def test_overall_kpi_is_first_prebuilt_prompt(self):
+        markup = telegram_bot._finance_inline_markup()
+
+        first_button = markup.inline_keyboard[0][0]
+        self.assertEqual("Overall KPI", first_button.text)
+        self.assertEqual("finance:overall_kpi", first_button.callback_data)
 
     def test_send_pdf_text_maps_to_pdf_export(self):
         self.assertEqual(
@@ -1014,6 +1037,14 @@ class FinanceBotFilterTest(unittest.TestCase):
         self.assertEqual(
             telegram_bot.CEO_PDF_EXPORT_TITLE,
             telegram_bot._export_title_for_question("local AI qwen 3 finance report pdf"),
+        )
+        self.assertEqual(
+            f"{telegram_bot.PDF_EXPORT_COMMAND}:this month KPI pdf",
+            telegram_bot._normalize_command("this month KPI pdf"),
+        )
+        self.assertEqual(
+            telegram_bot.CEO_PDF_EXPORT_TITLE,
+            telegram_bot._export_title_for_question("this month KPI pdf"),
         )
 
     def test_local_ai_finance_pdf_uses_ceo_report_renderer(self):

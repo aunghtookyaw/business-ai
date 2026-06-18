@@ -2135,6 +2135,15 @@ def _draw_customer_revenue_report(pdf, spec, start_y=720):
 def _is_ceo_management_report_question(question):
     text = " ".join(str(question).lower().split())
     is_report = "pdf" in text or "report" in text
+    is_kpi_management_report = (
+        "kpi" in text
+        and (
+            "pdf" in text
+            or "report" in text
+            or "management" in text
+            or "dashboard" in text
+        )
+    )
     explicit_ceo_report = (
         "ceo" in text
         or "chief executive" in text
@@ -2146,7 +2155,7 @@ def _is_ceo_management_report_question(question):
         and ("local ai" in text or "qwen" in text or "qwen3" in text)
         and ("finance" in text or "business" in text)
     )
-    return is_report and (explicit_ceo_report or local_ai_ceo_alias)
+    return is_report and (explicit_ceo_report or local_ai_ceo_alias or is_kpi_management_report)
 
 
 def _safe_call(func, *args, default=None, **kwargs):
@@ -2185,8 +2194,14 @@ def _ceo_report_data(question):
         reverse=True,
     )
     cash = _safe_call(cash_flow, current_period, default={})
+    sotephwar_sales = _safe_call(sotephwar_transection_summary, current_period, default={})
     stock = (_safe_call(sotephwar_inventory_stock, default={}) or {}).get("stock") or []
     movements = (_safe_call(sotephwar_inventory_movement_summary, current_period, default={}) or {}).get("movements") or []
+    customers = sorted(
+        (sotephwar_sales.get("customers") or []),
+        key=lambda row: int(row.get("outstanding_amount") or 0),
+        reverse=True,
+    )
     total_stock_qty = sum(int(row.get("stock_qty") or 0) for row in stock)
     production_volume = sum(
         int(row.get("quantity") or 0)
@@ -2235,6 +2250,9 @@ def _ceo_report_data(question):
         "changes": {"revenue": revenue_change, "net_profit": profit_change},
         "business_units": business_units,
         "expense_categories": expense_categories[:10],
+        "customers": customers[:10],
+        "receivables": int(sotephwar_sales.get("outstanding_amount") or 0),
+        "collected": int(sotephwar_sales.get("amount_received") or 0),
         "stock": stock,
         "movements": movements,
         "production_volume": production_volume,
@@ -2275,6 +2293,22 @@ def _draw_ceo_table(pdf, headers, rows, x=42, y=610, widths=None, font_size=7.8)
     _draw_table(pdf, table, start_y=y, column_widths=widths, font_size=font_size, line_gap=11, min_row_height=24)
 
 
+def _draw_ceo_kpi_dashboard(pdf, report, x=42, y=455):
+    kpi = report["kpi"]
+    rows = [
+        ("Revenue", _mmk(kpi["revenue"]), "-", _change_label(report["changes"].get("revenue")), _trend_label(report["changes"].get("revenue"))),
+        ("Expenses", _mmk(kpi["expense"]), "-", "-", "Monitor"),
+        ("Net Profit", _mmk(kpi["net_profit"]), "-", _change_label(report["changes"].get("net_profit")), _trend_label(report["changes"].get("net_profit"))),
+        ("Profit Margin %", f"{kpi['margin']}%", "-", "-", "Monitor"),
+        ("Outstanding Receivables", _mmk(report.get("receivables", 0)), "-", "-", "Collection risk" if report.get("receivables") else "Stable"),
+        ("Inventory Value", _mmk(kpi["inventory_value"]), "-", "-", "Cost data needed"),
+        ("Cash Position", _mmk(kpi["cash"]), "-", "-", "Cash pressure" if kpi["cash"] < 0 else "Stable"),
+        ("Loan Balance", "-", "-", "-", "Not available"),
+    ]
+    pdf.text(x, y, "KPI Dashboard", size=11, bold=True)
+    _draw_ceo_table(pdf, ("KPI", "Current", "Previous", "Change %", "Trend"), rows, y=y - 25, widths=[145, 105, 80, 80, 105], font_size=7.3)
+
+
 def _draw_ceo_line_chart(pdf, title, rows, key, x=55, y=500, width=475, height=150):
     pdf.text(x, y + height + 28, title, size=10.2, bold=True)
     values = [(row["label"], int(row.get(key) or 0)) for row in rows]
@@ -2300,6 +2334,41 @@ def _draw_ceo_paragraph(pdf, title, lines, x=42, y=220):
     return yy
 
 
+def _change_label(value):
+    if value is None:
+        return "-"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value}%"
+
+
+def _trend_label(value):
+    if value is None:
+        return "No baseline"
+    if value > 5:
+        return "Growing"
+    if value < -5:
+        return "Contracting"
+    return "Stable"
+
+
+def _risk_lines_for_report(report):
+    kpi = report["kpi"]
+    risks = []
+    revenue_change = report["changes"].get("revenue")
+    profit_change = report["changes"].get("net_profit")
+    if revenue_change is not None and revenue_change < -10:
+        risks.append(f"Revenue declined {_change_label(revenue_change)}, above the 10% management threshold.")
+    if profit_change is not None and profit_change < -10:
+        risks.append(f"Profit declined {_change_label(profit_change)}, requiring margin and cost review.")
+    if report.get("receivables", 0) > 0:
+        risks.append(f"Outstanding receivables are {_mmk(report['receivables'])}; collection follow-up should be prioritized by customer.")
+    if not kpi.get("inventory_value"):
+        risks.append("Potential Data Quality Issue Detected: inventory value is not available because unit cost data is missing.")
+    if kpi.get("cash", 0) < 0:
+        risks.append(f"Cash position is negative at {_mmk(kpi['cash'])}, indicating possible short-term cash pressure.")
+    return risks or ["No critical risk threshold was triggered by the available data."]
+
+
 def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO Management Report"):
     report = _ceo_report_data(question)
     kpi = report["kpi"]
@@ -2308,7 +2377,7 @@ def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO M
     expense_rows = report["expense_categories"]
     pdf = PdfCanvas(title)
 
-    _ceo_page(pdf, 1, "BigShot Company Limited\nMonthly Management Report", report)
+    _ceo_page(pdf, 1, "BigShot Company Limited\nKPI Management Report", report)
     pdf.text(42, 710, f"Reporting period: {report['reporting_period']}", size=9.5, bold=True, color=(75, 85, 99))
     cards = [
         ("Revenue", _mmk(kpi["revenue"]), report["changes"]["revenue"]),
@@ -2322,21 +2391,27 @@ def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO M
     _draw_ceo_paragraph(pdf, "Executive Summary", [
         f"Revenue for {report['reporting_period']} was {_mmk(kpi['revenue'])}. Net profit closed at {_mmk(kpi['net_profit'])}, with a gross margin of {kpi['margin']}%.",
         "Sote Phwar, Farm Vegetables, and Extension Service are shown separately to make concentration risk and business-unit contribution visible.",
-        "Inventory value is shown as 0 MMK because unit cost data is not available in the current inventory table; stock quantity is tracked and should be connected to costing for CEO-level valuation.",
+        "What does this mean for BigShot? Management should protect cash and profit first, then scale the revenue drivers that are supported by repeatable demand.",
     ], y=555)
+    _draw_ceo_kpi_dashboard(pdf, report, y=415)
 
     _ceo_page(pdf, 2, "Revenue Analysis", report)
-    _draw_ceo_line_chart(pdf, "Monthly Revenue Trend - Last 12 Months", monthly, "revenue", y=505)
+    _draw_ceo_line_chart(pdf, "Revenue Trend Line Chart - Last 12 Months", monthly, "revenue", y=505)
     unit_rows = [(name, value["revenue"]) for name, value in units.items()]
     _draw_ceo_bar_chart(pdf, "Revenue by Business Unit", unit_rows, y=265, height=135)
+    revenue_table_rows = [
+        (name, _mmk(value["revenue"]), _mmk(value["profit"]))
+        for name, value in units.items()
+    ]
+    _draw_ceo_table(pdf, ("Business Unit", "Revenue", "Profit"), revenue_table_rows, y=195, widths=[210, 145, 145])
     _draw_ceo_paragraph(pdf, "Analyst Commentary", [
         "Revenue growth should be read together with business-unit concentration. A high Sote Phwar share indicates product traction but also dependence on one operating line.",
         "Farm Vegetables and Extension Service provide diversification; low contribution from either unit should be treated as an opportunity pipeline rather than a reporting error.",
-    ], y=165)
+    ], y=88)
 
     _ceo_page(pdf, 3, "Profitability Analysis", report)
-    _draw_ceo_line_chart(pdf, "Monthly Net Profit Trend", monthly, "net_profit", y=520)
-    _draw_ceo_line_chart(pdf, "Gross Margin Trend", monthly, "margin", y=300, height=125)
+    _draw_ceo_line_chart(pdf, "Profit Trend Line Chart", monthly, "net_profit", y=520)
+    _draw_ceo_line_chart(pdf, "Profit Margin Trend Line Chart", monthly, "margin", y=300, height=125)
     profit_rows = [(name, value["profit"]) for name, value in units.items()]
     _draw_ceo_bar_chart(pdf, "Profit by Business Unit", profit_rows, y=110, height=115)
     _draw_ceo_paragraph(pdf, "Analyst Commentary", [
@@ -2357,7 +2432,25 @@ def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO M
         "The most material expense categories are the first candidates for negotiation, approval control, or operational redesign.",
     ], y=170)
 
-    _ceo_page(pdf, 5, "Inventory & Operations", report)
+    _ceo_page(pdf, 5, "Customer Analysis", report)
+    customer_rows = [
+        (
+            row.get("customer_name") or row.get("item") or "-",
+            _mmk(row.get("total_amount") or row.get("amount") or 0),
+            _mmk(row.get("amount_received") or 0),
+            _mmk(row.get("outstanding_amount") or 0),
+        )
+        for row in report["customers"][:10]
+    ]
+    pdf.text(42, 712, f"Collected: {_mmk(report.get('collected', 0))}", size=9.2, bold=True)
+    pdf.text(250, 712, f"Outstanding receivables: {_mmk(report.get('receivables', 0))}", size=9.2, bold=True)
+    _draw_ceo_table(pdf, ("Customer", "Revenue", "Paid", "Outstanding"), customer_rows, y=675, widths=[205, 105, 95, 105], font_size=7.2)
+    _draw_ceo_paragraph(pdf, "Collection Commentary", [
+        "High-value customers should be protected through service quality and reliable supply.",
+        "Customers with high outstanding balances should be reviewed first because receivables convert accounting revenue into usable cash.",
+    ], y=170)
+
+    _ceo_page(pdf, 6, "Inventory & Operations", report)
     stock_rows = [
         (row.get("store") or "-", row.get("product") or "-", row.get("stock_qty", 0))
         for row in report["stock"][:12]
@@ -2371,21 +2464,24 @@ def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO M
         "Slow-moving inventory should be identified by aging movement rows; current data supports stock position and production volume, not aging valuation.",
     ], y=150)
 
-    _ceo_page(pdf, 6, "Management Insights", report)
+    _ceo_page(pdf, 7, "Business Growth, Risks & Opportunities", report)
+    growth_rows = [
+        ("Revenue Growth", _change_label(report["changes"].get("revenue")), _trend_label(report["changes"].get("revenue"))),
+        ("Profit Growth", _change_label(report["changes"].get("net_profit")), _trend_label(report["changes"].get("net_profit"))),
+        ("Customer Growth", "-", "Data needed"),
+        ("Inventory Growth", "-", "Data needed"),
+    ]
+    _draw_ceo_table(pdf, ("Growth KPI", "Change %", "Classification"), growth_rows, y=705, widths=[205, 145, 165])
+    y = _draw_ceo_paragraph(pdf, "Risk Analysis", _risk_lines_for_report(report), y=500)
     total_profit = sum(abs(value["profit"]) for value in units.values()) or 1
     sote_profit_share = round((units["Sote Phwar"]["profit"] / total_profit) * 100, 1) if total_profit else 0
-    insights = [
-        ("Key Strengths", f"Sote Phwar contributes {sote_profit_share}% of absolute business-unit profit, indicating strong product-market fit where profit is positive."),
-        ("Key Weaknesses", "Inventory valuation is not yet CEO-grade because unit cost data is missing from the stock report."),
-        ("Emerging Risks", "Profit concentration in one business unit can create earnings volatility if demand or collections weaken."),
-        ("Growth Opportunities", "Farm Vegetables and Extension Service can reduce concentration risk if revenue contribution improves."),
-    ]
-    y = 705
-    for heading, body in insights:
-        pdf.text(42, y, heading, size=11, bold=True)
-        y -= pdf.text(58, y - 18, body, size=9, max_width=490) + 20
+    _draw_ceo_paragraph(pdf, "Opportunities", [
+        f"Sote Phwar contributes {sote_profit_share}% of absolute business-unit profit, so positive demand signals should be converted into disciplined growth targets.",
+        "Farm Vegetables and Extension Service can reduce concentration risk if revenue contribution improves.",
+        "Inventory optimization requires unit cost and movement aging so management can separate fast-moving products from slow-moving stock.",
+    ], y=y - 15)
 
-    _ceo_page(pdf, 7, "Recommended Actions", report)
+    _ceo_page(pdf, 8, "Recommendations & Management Conclusion", report)
     sections = [
         ("Immediate Actions (30 Days)", [
             f"Review the top expense category and confirm necessity before the next payment cycle; current total expense is {_mmk(kpi['expense'])}.",
@@ -2407,6 +2503,12 @@ def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO M
         for item in items:
             y -= pdf.text(58, y, f"- {item}", size=8.9, max_width=485)
         y -= 16
+    _draw_ceo_paragraph(pdf, "Management Conclusion", [
+        f"Business strength versus previous period: {_trend_label(report['changes'].get('revenue'))} on revenue and {_trend_label(report['changes'].get('net_profit'))} on profit.",
+        "Top 3 management priorities: cash collection, profit margin protection, and inventory costing discipline.",
+        "CEO focus next: convert the highest-confidence revenue driver into a target while controlling the largest expense category.",
+        "What should management do next? Use this report as the monthly decision pack and assign owners to cash, margin, revenue, inventory, and debt actions.",
+    ], y=max(245, y))
 
     pdf.finish(output_path)
     return True

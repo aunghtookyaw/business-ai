@@ -94,6 +94,7 @@ COMMAND_QUESTIONS = {
 }
 
 FINANCE_PROMPT_QUESTIONS = {
+    "overall kpi": "this year KPI pdf",
     "today kpi": "today kpi",
     "today income": "today income",
     "today expense": "today expense",
@@ -133,6 +134,7 @@ FINANCE_PROMPT_QUESTIONS = {
 }
 
 FINANCE_PROMPT_CALLBACKS = {
+    "overall_kpi": "Overall KPI",
     "today_kpi": "Today KPI",
     "today_income": "Today income",
     "today_expense": "Today expense",
@@ -176,20 +178,20 @@ def _remove_reply_keyboard():
 
 def _finance_inline_markup():
     rows = [
-        ["today_kpi", "today_income"],
-        ["today_expense", "today_profit"],
-        ["month_kpi", "cash_flow"],
-        ["top_expenses", "top_income"],
-        ["month_transactions", "sote_summary"],
-        ["sote_top", "sote_vouchers"],
-        ["sote_unpaid", "sote_customer"],
-        ["sote_4l", "sote_1l"],
-        ["sote_500ml", "sote_100ml"],
-        ["inv_stock", "inv_movement"],
-        ["inv_factory", "inv_heho"],
-        ["obl_summary", "obl_due"],
-        ["obl_list", "obl_calendar"],
-        ["sote_payment_template"],
+        ["overall_kpi", "today_kpi"],
+        ["today_income", "today_expense"],
+        ["today_profit", "month_kpi"],
+        ["cash_flow", "top_expenses"],
+        ["top_income", "month_transactions"],
+        ["sote_summary", "sote_top"],
+        ["sote_vouchers", "sote_unpaid"],
+        ["sote_customer", "sote_4l"],
+        ["sote_1l", "sote_500ml"],
+        ["sote_100ml", "inv_stock"],
+        ["inv_movement", "inv_factory"],
+        ["inv_heho", "obl_summary"],
+        ["obl_due", "obl_list"],
+        ["obl_calendar", "sote_payment_template"],
     ]
     return InlineKeyboardMarkup([
         [
@@ -341,6 +343,15 @@ def _is_ceo_management_pdf_request(normalized_text):
     if _is_export_command(normalized_text):
         normalized_text = _export_question(normalized_text)
     is_pdf_report = "pdf" in normalized_text or "report" in normalized_text
+    is_kpi_management_report = (
+        "kpi" in normalized_text
+        and (
+            "pdf" in normalized_text
+            or "report" in normalized_text
+            or "management" in normalized_text
+            or "dashboard" in normalized_text
+        )
+    )
     explicit_ceo_report = (
         "ceo" in normalized_text
         or "chief executive" in normalized_text
@@ -354,7 +365,7 @@ def _is_ceo_management_pdf_request(normalized_text):
     )
     return (
         is_pdf_report
-        and (explicit_ceo_report or local_ai_ceo_alias)
+        and (explicit_ceo_report or local_ai_ceo_alias or is_kpi_management_report)
     )
 
 
@@ -1185,6 +1196,20 @@ def menu(update: Update, context: CallbackContext):
     _show_bi_home(message, context)
 
 
+def prompts(update: Update, context: CallbackContext):
+    message = update.message
+    if not _is_allowed_message(message):
+        return
+
+    _schedule_auto_delete(context, message)
+    _reply_text(
+        message,
+        context,
+        "Prebuilt Prompt Enquiry",
+        reply_markup=_finance_inline_markup(),
+    )
+
+
 def sync_obligations_calendar(update: Update, context: CallbackContext):
     message = update.message
     if not _is_allowed_message(message):
@@ -1273,7 +1298,7 @@ def main():
 
     dispatcher.add_handler(CommandHandler("whereami", whereami))
     dispatcher.add_handler(CommandHandler("menu", menu))
-    dispatcher.add_handler(CommandHandler("prompts", menu))
+    dispatcher.add_handler(CommandHandler("prompts", prompts))
     dispatcher.add_handler(CommandHandler("start", menu))
     dispatcher.add_handler(CommandHandler("sync_obligations_calendar", sync_obligations_calendar))
     dispatcher.add_handler(CallbackQueryHandler(handle_bi_callback, pattern=r"^bi:"))
