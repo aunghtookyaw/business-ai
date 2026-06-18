@@ -25,6 +25,30 @@ def _metric_value(result, metric):
     return 0
 
 
+def _tool_result(tool_results, tool_name):
+    for item in tool_results:
+        if item.get("tool") == tool_name:
+            return item.get("result") or {}
+    return {}
+
+
+def _change_percent(current, previous):
+    previous = _number(previous)
+    if not previous:
+        return None
+    return round(((_number(current) - previous) / previous) * 100, 1)
+
+
+def _trend_word(change_percent):
+    if change_percent is None:
+        return "No baseline"
+    if change_percent > 5:
+        return "Up"
+    if change_percent < -5:
+        return "Down"
+    return "Stable"
+
+
 def _summarize_tool(tool_result):
     tool = tool_result.get("tool")
     result = tool_result.get("result") or {}
@@ -112,32 +136,43 @@ def _analysis_lines(tool_results):
 
 
 def _kpi_dashboard_lines(tool_results):
-    metrics = []
-    for item in tool_results:
-        tool = item.get("tool")
-        result = item.get("result") or {}
-        if tool == "kpi":
-            metrics.extend([
-                f"Revenue: {_money(result.get('total_income'))}",
-                f"Expense: {_money(result.get('total_expense'))}",
-                f"Net Profit: {_money(result.get('net_profit'))}",
-                f"Profit Margin: {result.get('profit_margin_percent', 0)}%",
-            ])
-        elif tool == "revenue":
-            metrics.extend([
-                f"Revenue: {_money(result.get('total_sales'))}",
-                f"Collected: {_money(result.get('amount_received'))}",
-                f"Outstanding: {_money(result.get('outstanding_amount'))}",
-            ])
-        elif tool == "expense":
-            metrics.append(f"Expense: {_money(result.get('total_expense'))}")
-        elif tool == "cash_flow":
-            metrics.extend([
-                f"Cash Inflow: {_money(result.get('total_inflow'))}",
-                f"Cash Outflow: {_money(result.get('total_outflow'))}",
-                f"Net Cash Flow: {_money(result.get('net_cash_flow'))}",
-            ])
-    return metrics or ["No KPI metrics were available from the selected tools."]
+    kpi = _tool_result(tool_results, "kpi")
+    revenue = _tool_result(tool_results, "revenue")
+    expense = _tool_result(tool_results, "expense")
+    cash = _tool_result(tool_results, "cash_flow")
+    comparison = _tool_result(tool_results, "comparison")
+    inventory = _tool_result(tool_results, "inventory")
+
+    current_revenue = _number(kpi.get("total_income") or revenue.get("total_sales"))
+    current_expense = _number(kpi.get("total_expense") or expense.get("total_expense"))
+    current_profit = _number(kpi.get("net_profit") or kpi.get("gross_profit"))
+    previous_revenue = _metric_value(comparison.get("previous") or {}, "revenue")
+    previous_profit = _metric_value(comparison.get("previous") or {}, "profit")
+    revenue_change = _change_percent(current_revenue, previous_revenue)
+    profit_change = _change_percent(current_profit, previous_profit)
+    stock_rows = inventory.get("stock") or []
+    inventory_qty = sum(_number(row.get("stock_qty")) for row in stock_rows)
+    rows = [
+        ("Revenue", _money(current_revenue), _money(previous_revenue), revenue_change, _trend_word(revenue_change)),
+        ("Expenses", _money(current_expense), "-", None, "Monitor"),
+        ("Net Profit", _money(current_profit), _money(previous_profit), profit_change, _trend_word(profit_change)),
+        ("Profit Margin %", f"{kpi.get('profit_margin_percent', 0)}%", "-", None, "Monitor"),
+        ("Revenue Growth %", f"{revenue_change}%" if revenue_change is not None else "-", "-", None, _trend_word(revenue_change)),
+        ("Profit Growth %", f"{profit_change}%" if profit_change is not None else "-", "-", None, _trend_word(profit_change)),
+        ("Outstanding Receivables", _money(revenue.get("outstanding_amount")), "-", None, "Collection risk" if _number(revenue.get("outstanding_amount")) else "Stable"),
+        ("Inventory Value", "0 MMK", "-", None, "Cost data needed" if stock_rows else "Not available"),
+        ("Cash Position", _money(cash.get("net_cash_flow")), "-", None, "Cash pressure" if _number(cash.get("net_cash_flow")) < 0 else "Stable"),
+        ("Loan Balance", "-", "-", None, "Not available"),
+    ]
+    return [
+        "| KPI | Current | Previous | Change % | Trend |",
+        "| --- | ------- | -------- | -------- | ----- |",
+    ] + [
+        f"| {name} | {current} | {previous} | {'-' if change is None else str(change) + '%'} | {trend} |"
+        for name, current, previous, change, trend in rows
+    ] + [
+        f"Inventory quantity signal: {inventory_qty:,} units." if stock_rows else "Potential Data Quality Issue Detected: inventory value or quantity data is not available for this report."
+    ]
 
 
 def _risk_lines(tool_results):
@@ -205,6 +240,116 @@ def _forecast_lines(tool_results):
     return []
 
 
+def _business_meaning_line(tool_results):
+    risks = _risk_lines(tool_results)
+    opportunities = _opportunity_lines(tool_results)
+    risk = risks[0] if risks else "No critical risk threshold was triggered by the available data."
+    opportunity = opportunities[0] if opportunities else "Convert this analysis into one measurable management action."
+    return f"What this means for BigShot: {risk} {opportunity}"
+
+
+def _top_rows(result, key, amount_keys=("amount", "total_amount")):
+    rows = result.get(key) or []
+    output = []
+    total = sum(_number(row.get(amount_keys[0]) or row.get(amount_keys[-1])) for row in rows) or 1
+    for row in rows[:5]:
+        amount = _number(row.get(amount_keys[0]) or row.get(amount_keys[-1]))
+        label = row.get("customer_name") or row.get("item") or row.get("category") or row.get("product") or "-"
+        output.append(f"- {label}: {_money(amount)} ({round((amount / total) * 100, 1)}% of shown total)")
+    return output
+
+
+def _revenue_analysis_lines(tool_results):
+    revenue = _tool_result(tool_results, "revenue")
+    top_customers = _tool_result(tool_results, "top_customers")
+    comparison = _tool_result(tool_results, "comparison")
+    lines = [
+        f"Revenue: {_money(revenue.get('total_sales') or revenue.get('total_income'))}; collected {_money(revenue.get('amount_received'))}; outstanding {_money(revenue.get('outstanding_amount'))}.",
+    ]
+    if comparison:
+        current = _metric_value(comparison.get("current") or {}, "revenue")
+        previous = _metric_value(comparison.get("previous") or {}, "revenue")
+        change = _change_percent(current, previous)
+        lines.append(f"Revenue comparison: current {_money(current)} vs previous {_money(previous)}; growth {'-' if change is None else str(change) + '%'}; trend {_trend_word(change)}.")
+    rows = _top_rows(top_customers, "income")
+    lines.extend(rows or ["- No top customer or product contribution data was available."])
+    lines.append("Key revenue driver interpretation: prioritize contributors with the highest share and check whether growth is repeatable or one-time.")
+    return lines
+
+
+def _expense_analysis_lines(tool_results):
+    expense = _tool_result(tool_results, "expense")
+    top_expense_rows = _top_rows(_tool_result(tool_results, "top_expenses"), "expenses")
+    lines = [f"Expenses: {_money(expense.get('total_expense'))} across {expense.get('expense_count', 0)} rows."]
+    lines.extend(top_expense_rows or ["- No top expense category data was available."])
+    lines.append("Cost-driver interpretation: management attention should start with the largest categories and any category that increased above 10%.")
+    lines.append("Potential Data Quality Issue Detected: categories falling to zero or missing categories require source review when they conflict with normal operations.")
+    return lines
+
+
+def _profitability_lines(tool_results):
+    kpi = _tool_result(tool_results, "kpi")
+    revenue = _number(kpi.get("total_income"))
+    expense = _number(kpi.get("total_expense"))
+    profit = _number(kpi.get("net_profit") or kpi.get("gross_profit"))
+    margin = kpi.get("profit_margin_percent", 0)
+    sustainability = "sustainable" if profit > 0 and float(margin or 0) > 10 else "under pressure"
+    return [
+        f"Revenue {_money(revenue)}, expenses {_money(expense)}, net profit {_money(profit)}, profit margin {margin}%.",
+        f"Profitability is {sustainability}; management should protect margin before pursuing revenue growth that requires heavy spending.",
+    ]
+
+
+def _customer_analysis_lines(tool_results):
+    revenue = _tool_result(tool_results, "revenue")
+    top_customers = _tool_result(tool_results, "top_customers")
+    lines = _top_rows(top_customers, "income") or ["- No customer concentration data was available."]
+    outstanding = _number(revenue.get("outstanding_amount"))
+    if outstanding:
+        lines.append(f"Collection risk: outstanding receivables are {_money(outstanding)} and should be followed up by customer priority.")
+    return lines
+
+
+def _inventory_analysis_lines(tool_results):
+    inventory = _tool_result(tool_results, "inventory")
+    stock = inventory.get("stock") or []
+    if not stock:
+        return ["Potential Data Quality Issue Detected: inventory rows were not available for this business unit or period."]
+    lines = ["| Product | Region | Quantity | Reorder Level | Status |", "| ------- | ------ | -------- | ------------- | ------ |"]
+    for row in stock[:10]:
+        qty = _number(row.get("stock_qty"))
+        status = "Low stock" if qty <= 10 else "Available"
+        lines.append(f"| {row.get('product') or '-'} | {row.get('store') or row.get('region') or '-'} | {qty:,} | 10 | {status} |")
+    return lines
+
+
+def _growth_analysis_lines(tool_results):
+    comparison = _tool_result(tool_results, "comparison")
+    if not comparison:
+        return ["Growth comparison data was not available. Use the selected period against the previous period to calculate growth."]
+    metric = comparison.get("metric") or "revenue"
+    current = _metric_value(comparison.get("current") or {}, metric)
+    previous = _metric_value(comparison.get("previous") or {}, metric)
+    growth = _change_percent(current, previous)
+    status = "Growing" if growth is not None and growth > 5 else "Contracting" if growth is not None and growth < -5 else "Stable"
+    return [
+        f"{metric.title()} growth rate = (current {_money(current)} - previous {_money(previous)}) / previous x 100 = {'-' if growth is None else str(growth) + '%'}.",
+        f"Growth classification: {status}.",
+    ]
+
+
+def _management_conclusion_lines(tool_results):
+    risks = _risk_lines(tool_results)
+    recommendations = _recommendations(tool_results)
+    risk_text = risks[0] if risks else "No critical risk threshold was triggered."
+    return [
+        f"Business strength: {risk_text}",
+        "Top 3 management priorities: cash discipline, profit margin protection, and revenue quality.",
+        f"CEO focus next: {recommendations[0] if recommendations else 'Set one measurable KPI action for the next period.'}",
+        "What does this mean for BigShot and what should management do next? Management should focus first on cash and profit protection, then scale the revenue drivers that are supported by repeatable customer demand.",
+    ]
+
+
 def format_executive_report(question, tool_results, ai_comment=None):
     findings = _key_findings(tool_results)
     lines = [
@@ -214,24 +359,43 @@ def format_executive_report(question, tool_results, ai_comment=None):
         "",
         "Executive Summary",
         ai_comment or findings[0],
+        _business_meaning_line(tool_results),
         "",
         "KPI Dashboard",
     ]
-    lines.extend(f"- {metric}" for metric in _kpi_dashboard_lines(tool_results))
+    lines.extend(_kpi_dashboard_lines(tool_results))
     lines.extend(["", "Key Findings"])
     lines.extend(f"- {finding}" for finding in findings[:6])
+    lines.extend(["", "Revenue Analysis"])
+    lines.extend(_revenue_analysis_lines(tool_results))
+    lines.extend(["", "Expense Analysis"])
+    lines.extend(_expense_analysis_lines(tool_results))
+    lines.extend(["", "Profitability Analysis"])
+    lines.extend(f"- {line}" for line in _profitability_lines(tool_results))
+    lines.extend(["", "Customer Analysis"])
+    lines.extend(_customer_analysis_lines(tool_results))
+    lines.extend(["", "Inventory Analysis"])
+    lines.extend(_inventory_analysis_lines(tool_results))
+    lines.extend(["", "Business Growth Analysis"])
+    lines.extend(f"- {line}" for line in _growth_analysis_lines(tool_results))
     lines.extend(["", "Trend Analysis"])
     lines.extend(f"- {line}" for line in _analysis_lines(tool_results))
-    lines.extend(["", "Risks & Concerns"])
+    lines.extend(["", "Risk Analysis / Risks & Concerns"])
     lines.extend(f"- {line}" for line in _risk_lines(tool_results))
     lines.extend(["", "Opportunities"])
     lines.extend(f"- {line}" for line in _opportunity_lines(tool_results))
     lines.extend(["", "Recommendations"])
-    lines.extend(f"- {line}" for line in _recommendations(tool_results))
+    recommendations = _recommendations(tool_results)
+    action_labels = ["Immediate Actions", "Short-Term Actions", "Strategic Actions"]
+    for index, label in enumerate(action_labels):
+        action = recommendations[index] if index < len(recommendations) else recommendations[-1]
+        lines.append(f"- {label}: {action}")
     forecast = _forecast_lines(tool_results)
     if forecast:
         lines.extend(["", "Forecast"])
         lines.extend(f"- {line}" for line in forecast)
+    lines.extend(["", "Management Conclusion"])
+    lines.extend(f"- {line}" for line in _management_conclusion_lines(tool_results))
     lines.extend(["", "Supporting Data"])
     lines.extend(f"- {finding}" for finding in findings[:4])
     return "\n".join(lines)

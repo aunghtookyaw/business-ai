@@ -1148,7 +1148,17 @@ class FinanceBotFilterTest(unittest.TestCase):
 
     def test_executive_pdf_request_sends_document(self):
         original_executive_answer = telegram_bot.answer_executive_question
+        original_ceo_pdf = telegram_bot.create_ceo_management_pdf_report
         telegram_bot.answer_executive_question = lambda question: "BigShot Intelligence Report\n\nExecutive Summary\nRevenue is stable."
+        calls = []
+
+        def fake_ceo_pdf(question, output_path, title=""):
+            calls.append({"question": question, "title": title})
+            with open(output_path, "wb") as output:
+                output.write(b"%PDF CEO report")
+            return True
+
+        telegram_bot.create_ceo_management_pdf_report = fake_ceo_pdf
         try:
             message = FakeMessage(-1003850232296, 5, "Analyze revenue pdf")
             context = FakeContext()
@@ -1158,8 +1168,27 @@ class FinanceBotFilterTest(unittest.TestCase):
             self.assertEqual("document", message.replies[-1]["type"])
             self.assertTrue(message.replies[-1]["content"].startswith(b"%PDF"))
             self.assertTrue(message.replies[-1]["kwargs"]["filename"].endswith(".pdf"))
+            self.assertEqual([{"question": "Analyze revenue pdf", "title": telegram_bot.CEO_PDF_EXPORT_TITLE}], calls)
         finally:
             telegram_bot.answer_executive_question = original_executive_answer
+            telegram_bot.create_ceo_management_pdf_report = original_ceo_pdf
+
+    def test_executive_pdf_request_falls_back_to_text_pdf(self):
+        original_executive_answer = telegram_bot.answer_executive_question
+        original_ceo_pdf = telegram_bot.create_ceo_management_pdf_report
+        telegram_bot.answer_executive_question = lambda question: "BigShot Intelligence Report\n\nExecutive Summary\nRevenue is stable."
+        telegram_bot.create_ceo_management_pdf_report = lambda question, output_path, title="": False
+        try:
+            message = FakeMessage(-1003850232296, 5, "Analyze revenue pdf")
+            context = FakeContext()
+
+            telegram_bot.handle_message(FakeUpdate(message), context)
+
+            self.assertEqual("document", message.replies[-1]["type"])
+            self.assertTrue(message.replies[-1]["content"].startswith(b"%PDF"))
+        finally:
+            telegram_bot.answer_executive_question = original_executive_answer
+            telegram_bot.create_ceo_management_pdf_report = original_ceo_pdf
 
     def test_legacy_kpi_bot_rejects_family_thread(self):
         message = FakeMessage(-1003850232296, 4)

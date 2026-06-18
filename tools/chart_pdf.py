@@ -10,10 +10,13 @@ from business_agent import FAST_FORMULAS, choose_formula
 from tools.formula_engine import (
     cash_flow,
     category_summary,
+    expense_total,
     kpi_overview,
+    sales_total,
     sector_summary,
     sotephwar_inventory_movement_summary,
     sotephwar_inventory_stock,
+    sotephwar_transection_summary,
     run_formula,
 )
 
@@ -304,6 +307,40 @@ def _financial_totals(result, amount_key):
     return total, paid, outstanding
 
 
+def _financial_trend_filters(intent, income_expense):
+    filters = {}
+    business = intent.get("business")
+    if business == "sote_phwar":
+        filters["sector"] = "Sote Phwar"
+    elif business == "farm":
+        filters["sector"] = "Farm"
+    elif business == "extension":
+        filters["sector"] = "SP Extension"
+    if income_expense:
+        filters["income_expense"] = income_expense
+    return filters
+
+
+def _financial_total_trend(intent, amount_key, month_count=6):
+    values = []
+    income_expense = "Income" if amount_key == "income" else "Expense"
+    filters = _financial_trend_filters(intent, income_expense)
+    for year, month in _period_months(month_count):
+        period = _month_period(year, month)
+        label = _month_label(year, month)
+        if amount_key == "income" and intent.get("business") == "sote_phwar":
+            row = _safe_call(sotephwar_transection_summary, period, default={})
+            amount = int(row.get("total_amount") or 0)
+        elif amount_key == "income":
+            row = _safe_call(sales_total, period, filters, default={})
+            amount = int(row.get("total_sales") or row.get("total_income") or 0)
+        else:
+            row = _safe_call(expense_total, period, filters, default={})
+            amount = int(row.get("total_expense") or 0)
+        values.append((label, amount))
+    return values
+
+
 def _financial_total_spec(result, intent, amount_key):
     total, paid, outstanding = _financial_totals(result, amount_key)
     module_title = "Income" if amount_key == "income" else "Expense"
@@ -317,6 +354,8 @@ def _financial_total_spec(result, intent, amount_key):
         "paid": paid,
         "outstanding": outstanding,
         "values": [("Paid", paid), ("Outstanding", outstanding)],
+        "trend_title": f"Monthly {module_title} Trend",
+        "trend_values": _financial_total_trend(intent, amount_key),
         "table": [
             ("Metric", "Amount"),
             (f"Total {module_title}", total),
@@ -1432,7 +1471,7 @@ def _draw_metric_cards(pdf, metrics, x=50, y=680, cell_width=165, cell_height=46
 
 
 def _draw_financial_total_report(pdf, spec):
-    pdf.text(50, 720, spec["title"], size=12, bold=True)
+    pdf.text(50, 720, spec["title"], size=13.5, bold=True)
     _draw_metric_cards(
         pdf,
         [
@@ -1442,10 +1481,38 @@ def _draw_financial_total_report(pdf, spec):
         ],
         y=692,
     )
-    pdf.text(50, 610, "Paid vs Outstanding", size=11.5, bold=True)
-    _draw_pie(pdf, spec, cx=230, cy=492, radius=82)
-    pdf.text(50, 365, "Data Table", size=12, bold=True)
-    _draw_table(pdf, spec.get("table"), start_y=342)
+    pdf.text(50, 610, spec.get("trend_title") or "Monthly Trend", size=11.5, bold=True)
+    _draw_line_chart(pdf, spec.get("trend_values") or [], x=70, y=410, width=430, height=145)
+
+    pdf.text(50, 360, "Paid vs Outstanding", size=11.5, bold=True)
+    _draw_pie(pdf, spec, cx=185, cy=235, radius=68)
+
+    pdf.text(320, 360, "Collection Status Bar", size=11.5, bold=True)
+    _draw_bar_values(
+        pdf,
+        spec.get("values") or [],
+        x=315,
+        y=160,
+        width=225,
+        height=155,
+    )
+
+    pdf.new_page()
+    pdf.text(50, 795, "Necessary Table", size=13, bold=True)
+    _draw_table(pdf, spec.get("table"), start_y=762)
+    y = 610
+    pdf.text(50, y, "Management Note", size=12, bold=True)
+    y -= 24
+    outstanding = int(spec.get("outstanding") or 0)
+    total = int(spec.get("total") or 0)
+    outstanding_share = round((outstanding / total) * 100, 1) if total else 0
+    notes = [
+        f"Outstanding represents {outstanding_share}% of the selected total.",
+        "Use the trend line to check whether the current period is normal or an unusual movement.",
+        "If the latest month is materially different from the prior trend, management should check the source category, customer, or payment timing before making spending decisions.",
+    ]
+    for note in notes:
+        y -= pdf.text(50, y, f"- {note}", size=9.2, max_width=495)
 
 
 def _draw_financial_category_report(pdf, spec):

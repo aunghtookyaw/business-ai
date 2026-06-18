@@ -457,13 +457,18 @@ class ChartPdfTest(unittest.TestCase):
             )
 
             self.assertTrue(created)
-            pdf_text = output_path.read_bytes().decode("latin-1")
+            pdf_bytes = output_path.read_bytes()
+            pdf_text = pdf_bytes.decode("latin-1")
+            self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
             self.assertIn("Farm Total Income", pdf_text)
             self.assertIn("Paid", pdf_text)
             self.assertIn("Outstanding", pdf_text)
             self.assertIn("4,200", pdf_text)
-            self.assertIn("Data Table", pdf_text)
+            self.assertIn("Monthly Income Trend", pdf_text)
             self.assertIn("Paid vs Outstanding", pdf_text)
+            self.assertIn("Collection Status Bar", pdf_text)
+            self.assertIn("Necessary Table", pdf_text)
+            self.assertIn("Management Note", pdf_text)
             self.assertNotIn("Transection Income", pdf_text)
             self.assertNotIn("Old item resell", pdf_text)
             self.assertNotIn("Top Customers by Revenue", pdf_text)
@@ -1201,7 +1206,7 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("1,200,000", pdf_text)
             self.assertNotIn("...", pdf_text)
 
-    def test_sotephwar_total_expense_pdf_uses_paid_outstanding_pie(self):
+    def test_sotephwar_total_expense_pdf_uses_visual_management_layout(self):
         result = {
             "formula": "expense_total",
             "period": "this_month",
@@ -1225,16 +1230,52 @@ class ChartPdfTest(unittest.TestCase):
             )
 
             self.assertTrue(created)
-            pdf_text = output_path.read_bytes().decode("latin-1")
+            pdf_bytes = output_path.read_bytes()
+            pdf_text = pdf_bytes.decode("latin-1")
+            self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
             self.assertIn("Sote Phwar Total Expense", pdf_text)
             self.assertIn("Total Expense", pdf_text)
             self.assertIn("Paid", pdf_text)
             self.assertIn("Outstanding", pdf_text)
+            self.assertIn("Monthly Expense Trend", pdf_text)
             self.assertIn("Paid vs Outstanding", pdf_text)
-            self.assertIn("Data Table", pdf_text)
+            self.assertIn("Collection Status Bar", pdf_text)
+            self.assertIn("Necessary Table", pdf_text)
+            self.assertIn("Management Note", pdf_text)
             self.assertIn("1,200,000", pdf_text)
             self.assertIn("900,000", pdf_text)
             self.assertIn("300,000", pdf_text)
+
+    def test_total_income_pdf_trend_uses_same_business_filter(self):
+        original_sales_total = chart_pdf.sales_total
+        calls = []
+
+        def fake_sales_total(period, filters=None):
+            calls.append((period, filters))
+            return {
+                "formula": "sales_total",
+                "total_sales": 1000 + len(calls),
+                "amount_received": 800,
+                "outstanding_amount": 200,
+            }
+
+        chart_pdf.sales_total = fake_sales_total
+        try:
+            spec = chart_pdf._financial_total_spec(
+                {
+                    "formula": "sales_total",
+                    "total_sales": 1200,
+                    "amount_received": 900,
+                    "outstanding_amount": 300,
+                },
+                {"business": "farm", "module": "income", "report": "total_income"},
+                "income",
+            )
+        finally:
+            chart_pdf.sales_total = original_sales_total
+
+        self.assertEqual(6, len(spec["trend_values"]))
+        self.assertTrue(all(filters == {"sector": "Farm", "income_expense": "Income"} for _, filters in calls))
 
     def test_sotephwar_expense_summary_pdf_separates_chart_and_table_pages(self):
         result = {

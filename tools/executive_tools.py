@@ -107,6 +107,23 @@ def build_default_plan(question):
     business = business_from_question(question)
     period = normalize_period(question)
 
+    if (
+        "kpi management report" in text
+        or "management report" in text
+        or ("kpi" in text and "report" in text)
+    ):
+        report_business = business or "sote_phwar"
+        return [
+            {"name": "kpi", "args": {"business": report_business, "period": period}},
+            {"name": "revenue", "args": {"business": report_business, "period": period}},
+            {"name": "expense", "args": {"business": report_business, "period": period}},
+            {"name": "cash_flow", "args": {"business": report_business, "period": period}},
+            {"name": "top_customers", "args": {"business": report_business, "period": period}},
+            {"name": "top_expenses", "args": {"business": report_business, "period": period}},
+            {"name": "inventory", "args": {"business": report_business, "period": period}},
+            {"name": "comparison", "args": {"business": report_business, "period": period, "metric": "revenue"}},
+        ]
+
     if "forecast" in text:
         return [{"name": "forecast", "args": {"business": business, "period": period}}]
     if "inventory" in text or "stock" in text or "product" in text:
@@ -137,7 +154,7 @@ def validate_plan(plan):
     if not isinstance(plan, list):
         return []
     valid = []
-    for step in plan[:6]:
+    for step in plan[:8]:
         if not isinstance(step, dict):
             continue
         name = step.get("name")

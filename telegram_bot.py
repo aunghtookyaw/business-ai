@@ -38,7 +38,11 @@ from tools.bi_periods import (
 )
 from tools.bi_reports import format_text_report, temp_report_path, write_excel_report
 from tools.bi_search import search_categories, search_customers
-from tools.chart_pdf import create_chart_pdf_report, create_chart_pdf_report_from_result
+from tools.chart_pdf import (
+    create_ceo_management_pdf_report,
+    create_chart_pdf_report,
+    create_chart_pdf_report_from_result,
+)
 from tools.comparison_reports import (
     BUSINESS_CONFIG,
     comparison_business,
@@ -969,7 +973,16 @@ def _send_executive_answer(message, context, question):
     output = _executive_output_format(question)
     if output == "pdf":
         path = temp_report_path(".pdf")
-        _write_pdf_export(answer, path, title="BigShot Business Intelligence Report")
+        try:
+            created = create_ceo_management_pdf_report(
+                question,
+                path,
+                title=CEO_PDF_EXPORT_TITLE,
+            )
+        except Exception:
+            created = False
+        if not created:
+            _write_pdf_export(answer, path, title="BigShot Business Intelligence Report")
         with path.open("rb") as document:
             _reply_document(
                 message,
