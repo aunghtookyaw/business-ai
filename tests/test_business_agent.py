@@ -177,6 +177,18 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             business_agent.choose_formula("Use this format: add financial obligation creditor A amount 100 next due 2026-07-01"),
         )
 
+    def test_payment_receive_insert_routes_to_append_only_table(self):
+        self.assertEqual(
+            "payment_receive_insert",
+            business_agent.choose_formula("receive payment sector Farm voucher 123 amount 50000 method Cash"),
+        )
+
+    def test_payment_receivable_kpis_route_to_summary_before_analysis(self):
+        self.assertEqual(
+            "payment_receive_summary",
+            business_agent.choose_formula("outstanding receivables aging analysis"),
+        )
+
     def test_partial_sotephwar_customer_name_is_detected(self):
         original_fetch_all = formula_engine._fetch_all
         formula_engine._fetch_all = lambda sql, params=None: [
@@ -601,6 +613,102 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertIn("Voucher: 12", answer)
         self.assertIn("Received now: 500,000", answer)
         self.assertIn("Note: Received 2026-06-06: 400,000 kyats", answer)
+
+    def test_payment_receive_parser_extracts_required_fields(self):
+        values = formula_engine._parse_payment_receive(
+            "receive payment sector Sote Phwar voucher INV-12 amount 400,000 method Cash ref R1 notes partial recorded by Admin"
+        )
+
+        self.assertEqual("Sote Phwar", values["sector"])
+        self.assertEqual("INV-12", values["voucher_number"])
+        self.assertEqual(400000, values["receive_amount"])
+        self.assertEqual("Cash", values["payment_method"])
+        self.assertEqual("R1", values["reference_number"])
+        self.assertEqual("partial", values["notes"])
+        self.assertEqual("Admin", values["recorded_by"])
+
+    def test_payment_receive_insert_inserts_history_without_sales_update(self):
+        captured = {"sql": []}
+        original_execute = formula_engine._execute
+        original_fetch_one = formula_engine._fetch_one
+
+        def fake_execute(sql, params=None):
+            captured["sql"].append(sql)
+
+        def fake_fetch_one(sql, params=None):
+            captured["sql"].append(sql)
+            captured["params"] = params
+            if "FROM" in sql and "farm_transection" in sql:
+                return {
+                    "sector": "Farm",
+                    "voucher_number": "123",
+                    "invoice_date": "2026-06-01",
+                    "customer": "Aye Aye",
+                    "invoice_amount": 1000000,
+                }
+            if "SUM(\"Receive_Amount\")" in sql:
+                return {"previous_paid": 200000}
+            if "INSERT INTO" in sql:
+                return {
+                    "id": 1,
+                    "receive_date": "2026-06-20",
+                    "sector": params["sector"],
+                    "voucher_number": params["voucher_number"],
+                    "customer": params["customer"],
+                    "invoice_amount": params["invoice_amount"],
+                    "previous_paid": params["previous_paid"],
+                    "receive_amount": params["receive_amount"],
+                    "outstanding_balance": params["outstanding_balance"],
+                    "payment_method": params["payment_method"],
+                    "reference_number": params["reference_number"],
+                    "notes": params["notes"],
+                    "recorded_by": params["recorded_by"],
+                }
+            return {}
+
+        formula_engine._execute = fake_execute
+        formula_engine._fetch_one = fake_fetch_one
+        try:
+            result = formula_engine.run_formula(
+                "payment_receive_insert",
+                "receive payment sector Farm voucher 123 amount 300000 method Cash",
+            )
+        finally:
+            formula_engine._execute = original_execute
+            formula_engine._fetch_one = original_fetch_one
+
+        self.assertTrue(result["inserted"])
+        self.assertEqual(200000, result["payment"]["previous_paid"])
+        self.assertEqual(300000, result["payment"]["receive_amount"])
+        self.assertEqual(500000, result["payment"]["outstanding_balance"])
+        sql_text = "\n".join(captured["sql"])
+        self.assertIn("INSERT INTO", sql_text)
+        self.assertIn("Payment_Receive", sql_text)
+        self.assertNotIn("UPDATE", sql_text)
+        self.assertNotIn('"Paid" =', sql_text)
+        self.assertNotIn('"Amount_Received" =', sql_text)
+
+    def test_payment_receive_summary_answer_shows_kpis(self):
+        answer = business_agent._fast_answer({
+            "formula": "payment_receive_summary",
+            "period": "all_time",
+            "sector": None,
+            "total_invoice_amount": 1000000,
+            "total_received": 300000,
+            "outstanding_receivables": 700000,
+            "collection_rate_percent": 30.0,
+            "aging": {"0-30": 500000, "31-60": 200000, "61-90": 0, "90+": 0},
+            "sector_totals": [
+                {"sector": "Farm", "invoice_amount": 1000000, "received_amount": 300000, "outstanding_balance": 700000},
+            ],
+            "customer_balances": [
+                {"customer": "Aye Aye", "outstanding_balance": 700000},
+            ],
+        })
+
+        self.assertIn("Outstanding receivables: 700,000", answer)
+        self.assertIn("Collection rate: 30.0%", answer)
+        self.assertIn("Aye Aye: 700,000", answer)
 
     def test_sotephwar_transection_4l_item_filter(self):
         self.assertEqual(

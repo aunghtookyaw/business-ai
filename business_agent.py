@@ -5,6 +5,7 @@ from datetime import date
 from tools.formula_engine import (
     FORMULAS,
     choose_formula_by_keywords,
+    is_payment_receive_question,
     is_sotephwar_transection_question,
     normalize_period,
     run_formula,
@@ -37,6 +38,8 @@ FAST_FORMULAS = {
     "financial_obligation_due",
     "financial_obligation_list",
     "financial_obligation_insert",
+    "payment_receive_insert",
+    "payment_receive_summary",
 }
 
 ANALYSIS_KEYWORDS = (
@@ -97,12 +100,19 @@ Available formulas:
 - financial_obligation_due: Financial_Obligations upcoming or overdue rows
 - financial_obligation_list: Financial_Obligations detail rows
 - financial_obligation_insert: insert one Financial_Obligations row from an explicit add/create prompt
+- payment_receive_insert: insert one append-only Payment_Receive row for Farm or Sote Phwar voucher collection
+- payment_receive_summary: outstanding receivables, collection rate, customer balance, aging analysis
 
 Financial_Obligations is for reminders only. Do not route KPI, profit,
 income, expense, cash-flow, statistics, sector, category, top income, or top
 expense questions to Financial_Obligations unless the user clearly asks about
 obligations, due dates, reminders, creditors, loans, settlements, or fixed
 payments.
+
+Payment_Receive is append-only collection history. Route receive/payment
+collection messages with sector and voucher to payment_receive_insert. Route
+outstanding receivables, collection rate, customer balance, or aging analysis
+questions to payment_receive_summary.
 
 Reply only valid JSON:
 {"formula": "formula_name"}
@@ -122,6 +132,9 @@ def _extract_json(text):
 
 def choose_formula(question):
     if is_sotephwar_transection_question(question):
+        return choose_formula_by_keywords(question)
+
+    if is_payment_receive_question(question):
         return choose_formula_by_keywords(question)
 
     if needs_comparison(question):
@@ -741,6 +754,59 @@ def _fast_answer(result):
             f"Next due: {row['next_due_date']}\n"
             f"Status: {row['status']}"
         )
+
+    if formula == "payment_receive_insert":
+        if not result.get("inserted"):
+            missing = ", ".join(result.get("missing") or [])
+            return (
+                "Payment receive record was not inserted.\n"
+                f"Missing: {missing}\n"
+                "Use: receive payment sector Farm voucher 123 amount 50000 method Cash "
+                "ref optional notes optional recorded by NAME"
+            )
+        row = result["payment"]
+        lines = [
+            "Payment receive record inserted",
+            f"ID: {row['id']}",
+            f"Sector: {row['sector']}",
+            f"Voucher: {row['voucher_number']}",
+            f"Customer: {row['customer'] or '-'}",
+            f"Invoice amount: {row['invoice_amount']:,}",
+            f"Previous paid: {row['previous_paid']:,}",
+            f"Receive amount: {row['receive_amount']:,}",
+            f"Outstanding balance: {row['outstanding_balance']:,}",
+            f"Payment method: {row['payment_method'] or '-'}",
+        ]
+        if result.get("overpaid"):
+            lines.append("Warning: this receipt is higher than the invoice balance.")
+        return "\n".join(lines)
+
+    if formula == "payment_receive_summary":
+        lines = [
+            f"Payment receivables summary for {period}",
+            f"Invoice amount: {result['total_invoice_amount']:,}",
+            f"Received: {result['total_received']:,}",
+            f"Outstanding receivables: {result['outstanding_receivables']:,}",
+            f"Collection rate: {result['collection_rate_percent']}%",
+            "",
+            "Aging Analysis",
+        ]
+        for bucket, amount in (result.get("aging") or {}).items():
+            lines.append(f"{bucket} days: {amount:,}")
+        sector_totals = result.get("sector_totals") or []
+        if sector_totals:
+            lines.extend(["", "Sector Balances"])
+            for row in sector_totals:
+                lines.append(
+                    f"{row['sector']}: invoice {row['invoice_amount']:,}, "
+                    f"received {row['received_amount']:,}, outstanding {row['outstanding_balance']:,}"
+                )
+        customer_balances = result.get("customer_balances") or []
+        if customer_balances:
+            lines.extend(["", "Top Customer Balances"])
+            for row in customer_balances[:10]:
+                lines.append(f"{row['customer']}: {row['outstanding_balance']:,}")
+        return "\n".join(lines)
 
     return None
 

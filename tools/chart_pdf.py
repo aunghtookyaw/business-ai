@@ -1,4 +1,5 @@
 import math
+import json
 import re
 import subprocess
 import tempfile
@@ -7,16 +8,19 @@ from datetime import date, datetime
 from pathlib import Path
 
 from business_agent import FAST_FORMULAS, choose_formula
+from tools.openclaw_client import ask_ai
 from tools.formula_engine import (
     cash_flow,
     category_summary,
     expense_total,
     kpi_overview,
+    normalize_period,
     sales_total,
     sector_summary,
     sotephwar_inventory_movement_summary,
     sotephwar_inventory_stock,
     sotephwar_transection_summary,
+    top_income,
     run_formula,
 )
 
@@ -1386,14 +1390,26 @@ def _draw_line_chart(pdf, values, x=70, y=455, width=420, height=220):
     if not points:
         pdf.text(x, y + height / 2, "No numeric values to chart.", size=11)
         return
-    max_value = max(value for _, value in points) or 1
-    pdf.line(x, y, x + width, y, color=(190, 190, 190))
+    min_value = min(value for _, value in points)
+    max_value = max(value for _, value in points)
+    if min_value == max_value:
+        padding = max(abs(max_value) * 0.1, 1)
+        min_value -= padding
+        max_value += padding
+    value_range = max_value - min_value or 1
+
+    def py_for(value):
+        return y + ((value - min_value) / value_range) * height
+
+    zero_y = py_for(0) if min_value <= 0 <= max_value else y
+    pdf.line(x, zero_y, x + width, zero_y, color=(190, 190, 190))
     pdf.line(x, y, x, y + height, color=(190, 190, 190))
+    pdf.line(x, y + height, x + width, y + height, color=(229, 231, 235))
     step = width / max(1, len(points) - 1)
     coordinates = []
     for index, (label, value) in enumerate(points):
         px = x + index * step
-        py = y + (value / max_value) * height
+        py = py_for(value)
         coordinates.append((px, py, label, value))
     for index in range(1, len(coordinates)):
         previous = coordinates[index - 1]
@@ -1402,7 +1418,10 @@ def _draw_line_chart(pdf, values, x=70, y=455, width=420, height=220):
     for px, py, label, value in coordinates:
         pdf.rect(px - 3, py - 3, 6, 6, fill=(47, 128, 237))
         pdf.text(px - 38, y - 18, label, size=8.2, bold=True, max_width=78)
-        pdf.text(px - 38, py + 18, _money(value), size=8.2, bold=True, max_width=85)
+        value_label_y = min(y + height - 10, max(y + 12, py + 18))
+        pdf.text(px - 38, value_label_y, _money(value), size=8.2, bold=True, max_width=85)
+    pdf.text(x + width - 78, y + height + 12, _money(max_value), size=7.4, color=(75, 85, 99))
+    pdf.text(x + width - 78, y - 12, _money(min_value), size=7.4, color=(75, 85, 99))
 
 
 def _draw_table(pdf, table, start_y=365, column_widths=None, font_size=8.1, line_gap=11, min_row_height=22):
@@ -2165,6 +2184,331 @@ def _safe_call(func, *args, default=None, **kwargs):
         return default if default is not None else {}
 
 
+def _ceo_report_period(question, fallback_period):
+    period = normalize_period(question)
+    return fallback_period if period == "all_time" else period
+
+
+def _ceo_period_label(period, fallback_label):
+    year_match = re.fullmatch(r"year:(\d{4})", period)
+    if year_match:
+        return year_match.group(1)
+    month_match = re.fullmatch(r"month:(\d{4})-(\d{2})", period)
+    if month_match:
+        return date(int(month_match.group(1)), int(month_match.group(2)), 1).strftime("%B %Y")
+    date_match = re.fullmatch(r"date:(\d{4})-(\d{2})-(\d{2})", period)
+    if date_match:
+        return date(
+            int(date_match.group(1)),
+            int(date_match.group(2)),
+            int(date_match.group(3)),
+        ).strftime("%d %B %Y").lstrip("0")
+    labels = {
+        "today": "today",
+        "yesterday": "yesterday",
+        "this_week": "this week",
+        "last_week": "last week",
+        "this_month": "this month",
+        "last_month": "last month",
+        "this_year": str(date.today().year),
+        "last_year": str(date.today().year - 1),
+    }
+    return labels.get(period, fallback_label)
+
+
+def _ceo_previous_period(period):
+    year_match = re.fullmatch(r"year:(\d{4})", period)
+    if year_match:
+        return f"year:{int(year_match.group(1)) - 1}"
+    month_match = re.fullmatch(r"month:(\d{4})-(\d{2})", period)
+    if month_match:
+        year = int(month_match.group(1))
+        month = int(month_match.group(2))
+        if month == 1:
+            return f"month:{year - 1}-12"
+        return f"month:{year}-{month - 1:02d}"
+    return {
+        "this_year": "last_year",
+        "this_month": "last_month",
+        "this_week": "last_week",
+    }.get(period)
+
+
+def _business_unit_for_sector(sector):
+    if sector in {"Sote Phwar", "SP Extension", "SP Production"}:
+        return "Sote Phwar"
+    if sector == "Farm":
+        return "Farm"
+    return None
+
+
+def _expense_category_label(sector, category):
+    group = _business_unit_for_sector(sector)
+    if group == "Sote Phwar" and sector == "SP Extension":
+        return f"Sote Phwar / Extension / {category or '-'}"
+    if group == "Sote Phwar" and sector == "SP Production":
+        return f"Sote Phwar / Production / {category or '-'}"
+    if group:
+        return f"{group} / {category or '-'}"
+    return category or "-"
+
+
+def _ceo_business_units(sectors):
+    units = {
+        "Sote Phwar": {"revenue": 0, "profit": 0},
+        "Farm": {"revenue": 0, "profit": 0},
+    }
+    for row in sectors:
+        key = _business_unit_for_sector(row.get("sector") or "")
+        if not key:
+            continue
+        units[key]["revenue"] += int(row.get("income") or 0)
+        units[key]["profit"] += int(row.get("profit") or 0)
+    return units
+
+
+def _ceo_expense_categories(categories):
+    grouped = {}
+    for row in categories:
+        expense = int(row.get("expense") or 0)
+        if expense <= 0:
+            continue
+        label = _expense_category_label(row.get("sector") or "", row.get("category") or "")
+        item = grouped.setdefault(label, {
+            "category": label,
+            "expense": 0,
+            "transaction_count": 0,
+        })
+        item["expense"] += expense
+        item["transaction_count"] += int(row.get("transaction_count") or 0)
+    return sorted(grouped.values(), key=lambda row: row["expense"], reverse=True)
+
+
+def _top_income_rows(result):
+    rows = (result or {}).get("income") or []
+    output = []
+    for row in rows[:10]:
+        output.append({
+            "name": row.get("customer_name") or row.get("item") or row.get("category") or "-",
+            "sector": row.get("sector") or "-",
+            "category": row.get("category") or "-",
+            "amount": int(row.get("amount") or row.get("total_amount") or 0),
+            "received": int(row.get("amount_received") or 0),
+            "outstanding": int(row.get("outstanding_amount") or 0),
+        })
+    return output
+
+
+def _management_ai_payload(report):
+    scopes = {}
+    for scope in ("Overall", "Farm", "Sote Phwar"):
+        data = _scope_financials(report, scope)
+        scopes[scope] = {
+            "revenue": data.get("revenue", 0),
+            "expense": data.get("expense", 0),
+            "profit": data.get("profit", 0),
+            "margin": data.get("margin", 0),
+            "top_income": (data.get("top_income") or [])[:5],
+            "top_expense_categories": (data.get("expense_categories") or [])[:5],
+            "source_note": data.get("source_note") or "",
+        }
+    return {
+        "period": report.get("reporting_period"),
+        "changes": report.get("changes") or {},
+        "scopes": scopes,
+        "receivables": report.get("receivables", 0),
+        "collected": report.get("collected", 0),
+        "inventory_qty": (report.get("kpi") or {}).get("inventory_qty", 0),
+        "production_volume": report.get("production_volume", 0),
+    }
+
+
+def _extract_json_object(text):
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(text[start:end + 1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_ai_commentary(raw):
+    if not isinstance(raw, dict):
+        return {}
+    output = {}
+    aliases = {
+        "overall": ("overall", "overall_analysis", "overall analysis"),
+        "farm": ("farm", "farm_analysis", "farm_sector", "farm sector", "farm sector analysis"),
+        "sotephwar": (
+            "sotephwar",
+            "sote_phwar",
+            "sote phwar",
+            "sotephwar_analysis",
+            "sote_phwar_analysis",
+            "sote phwar analysis",
+            "sotephwar_sector",
+            "sote phwar sector",
+            "sote phwar sector analysis",
+        ),
+        "risks": ("risks", "risk", "risk_analysis", "risk analysis"),
+        "recommendations": ("recommendations", "recommendation", "actions", "recommended_actions"),
+        "management_conclusion": (
+            "management_conclusion",
+            "management conclusion",
+            "conclusion",
+            "management_summary",
+        ),
+    }
+    lowered_raw = {str(key).lower().strip(): value for key, value in raw.items()}
+    for key, names in aliases.items():
+        value = None
+        for name in names:
+            if name in lowered_raw:
+                value = lowered_raw[name]
+                break
+        if isinstance(value, list):
+            output[key] = [str(item).strip() for item in value if str(item).strip()][:4]
+        elif isinstance(value, str) and value.strip():
+            output[key] = [line.strip(" -") for line in value.splitlines() if line.strip()][:4]
+    return output
+
+
+def _fallback_ai_commentary_from_text(text):
+    lines = [line.strip(" -") for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return {}
+    return {"overall": lines[:4]}
+
+
+def _ai_commentary_lines(commentary, key):
+    return (commentary or {}).get(key) or []
+
+
+def _ceo_ai_commentary(question, report):
+    payload = _management_ai_payload(report)
+    prompt = f"""
+You are BigShot CFO advisor using Qwen 3 14B.
+
+Use only the calculated data below. Do not invent numbers. Do not recalculate totals.
+Write short business analysis and management recommendations for a KPI management PDF.
+Return only valid JSON with these keys:
+overall, farm, sotephwar, risks, recommendations, management_conclusion.
+Each value must be an array of 2 to 4 short bullet strings.
+
+Question:
+{question}
+
+Calculated data:
+{json.dumps(payload, indent=2, ensure_ascii=False, default=str)}
+"""
+    try:
+        response = ask_ai(prompt, timeout=120).strip()
+    except Exception as exc:
+        return {
+            "overall": [
+                f"AI commentary unavailable: {exc.__class__.__name__}. "
+                "Report uses calculated data and rule-based commentary."
+            ],
+            "risks": [
+                "AI risk commentary unavailable; use the calculated KPI, expense, cash, and receivable tables for review."
+            ],
+            "recommendations": [
+                "Retry after confirming local Qwen/Ollama is running, then regenerate the KPI PDF."
+            ],
+            "management_conclusion": [
+                "AI management conclusion was not generated for this run."
+            ],
+        }
+    parsed = _extract_json_object(response)
+    if parsed is None:
+        return _fallback_ai_commentary_from_text(response)
+    normalized = _normalize_ai_commentary(parsed)
+    if not normalized:
+        return _fallback_ai_commentary_from_text(response)
+    return normalized
+
+
+def _sector_expense_label(sector, category):
+    if sector == "SP Extension":
+        return f"Extension / {category or '-'}"
+    if sector == "SP Production":
+        return f"Production / {category or '-'}"
+    return category or "-"
+
+
+def _ceo_sector_analysis(sectors, categories):
+    analysis = {
+        "Sote Phwar": {
+            "revenue": 0,
+            "expense": 0,
+            "profit": 0,
+            "margin": 0,
+            "expense_categories": [],
+            "top_income": [],
+            "source_note": (
+                "Includes Sotephwar_Transection income and Transection sectors "
+                "Sote Phwar, SP Extension, and SP Production. Extension is treated "
+                "inside Sote Phwar expense control."
+            ),
+        },
+        "Farm": {
+            "revenue": 0,
+            "expense": 0,
+            "profit": 0,
+            "margin": 0,
+            "expense_categories": [],
+            "top_income": [],
+            "source_note": (
+                "Includes Farm_Transection income and Transection sector Farm."
+            ),
+        },
+    }
+
+    for row in sectors:
+        key = _business_unit_for_sector(row.get("sector") or "")
+        if not key:
+            continue
+        analysis[key]["revenue"] += int(row.get("income") or 0)
+        analysis[key]["expense"] += int(row.get("expense") or 0)
+        analysis[key]["profit"] += int(row.get("profit") or 0)
+
+    grouped_categories = {
+        "Sote Phwar": {},
+        "Farm": {},
+    }
+    for row in categories:
+        sector = row.get("sector") or ""
+        key = _business_unit_for_sector(sector)
+        if not key:
+            continue
+        expense = int(row.get("expense") or 0)
+        if expense <= 0:
+            continue
+        label = _sector_expense_label(sector, row.get("category") or "")
+        item = grouped_categories[key].setdefault(label, {
+            "category": label,
+            "expense": 0,
+            "transaction_count": 0,
+        })
+        item["expense"] += expense
+        item["transaction_count"] += int(row.get("transaction_count") or 0)
+
+    for key, data in analysis.items():
+        revenue = data["revenue"]
+        data["margin"] = round((data["profit"] / revenue) * 100, 2) if revenue else 0
+        data["expense_categories"] = sorted(
+            grouped_categories[key].values(),
+            key=lambda row: row["expense"],
+            reverse=True,
+        )[:8]
+
+    return analysis
+
+
 def _ceo_report_data(question):
     months = _period_months(12)
     monthly = []
@@ -2182,19 +2526,20 @@ def _ceo_report_data(question):
             "sectors": sector.get("sectors") or [],
         })
 
-    current = monthly[-1] if monthly else {}
-    previous = monthly[-2] if len(monthly) > 1 else {}
-    current_period = current.get("period") or "this_month"
+    trend_current = monthly[-1] if monthly else {}
+    trend_previous = monthly[-2] if len(monthly) > 1 else {}
+    current_period = _ceo_report_period(question, trend_current.get("period") or "this_month")
     kpi = _safe_call(kpi_overview, current_period, default={})
+    previous_period = _ceo_previous_period(current_period)
+    previous_kpi = _safe_call(kpi_overview, previous_period, default={}) if previous_period else {}
     sectors = (_safe_call(sector_summary, current_period, default={}) or {}).get("sectors") or []
     categories = (_safe_call(category_summary, current_period, default={}) or {}).get("categories") or []
-    expense_categories = sorted(
-        [row for row in categories if int(row.get("expense") or 0) > 0],
-        key=lambda row: int(row.get("expense") or 0),
-        reverse=True,
-    )
+    expense_categories = _ceo_expense_categories(categories)
     cash = _safe_call(cash_flow, current_period, default={})
     sotephwar_sales = _safe_call(sotephwar_transection_summary, current_period, default={})
+    overall_top_income = _top_income_rows(_safe_call(top_income, current_period, None, 10, default={}))
+    farm_top_income = _top_income_rows(_safe_call(top_income, current_period, {"sector": "Farm"}, 10, default={}))
+    sotephwar_top_income = _top_income_rows(_safe_call(top_income, current_period, {"sector": "Sote Phwar"}, 10, default={}))
     stock = (_safe_call(sotephwar_inventory_stock, default={}) or {}).get("stock") or []
     movements = (_safe_call(sotephwar_inventory_movement_summary, current_period, default={}) or {}).get("movements") or []
     customers = sorted(
@@ -2211,44 +2556,36 @@ def _ceo_report_data(question):
     if not production_volume:
         production_volume = sum(int(row.get("quantity") or 0) for row in movements)
 
-    business_units = {
-        "Sote Phwar": {"revenue": 0, "profit": 0},
-        "Farm Vegetables": {"revenue": 0, "profit": 0},
-        "Extension Service": {"revenue": 0, "profit": 0},
-    }
-    for row in sectors:
-        sector = row.get("sector") or ""
-        key = None
-        if sector == "Sote Phwar":
-            key = "Sote Phwar"
-        elif sector == "Farm":
-            key = "Farm Vegetables"
-        elif sector == "SP Extension":
-            key = "Extension Service"
-        if key:
-            business_units[key]["revenue"] += int(row.get("income") or 0)
-            business_units[key]["profit"] += int(row.get("profit") or 0)
+    business_units = _ceo_business_units(sectors)
+    sector_analysis = _ceo_sector_analysis(sectors, categories)
+    sector_analysis["Farm"]["top_income"] = farm_top_income
+    sector_analysis["Sote Phwar"]["top_income"] = sotephwar_top_income
 
-    revenue_change = _change_percent(current.get("revenue", 0), previous.get("revenue", 0))
-    profit_change = _change_percent(current.get("net_profit", 0), previous.get("net_profit", 0))
+    previous_revenue = previous_kpi.get("total_income", trend_previous.get("revenue", 0))
+    previous_profit = previous_kpi.get("net_profit", trend_previous.get("net_profit", 0))
+    revenue_change = _change_percent(kpi.get("total_income", 0), previous_revenue)
+    profit_change = _change_percent(kpi.get("net_profit", 0), previous_profit)
     expense_total = int(kpi.get("total_expense") or 0)
-    return {
+    report = {
         "question": question,
-        "reporting_period": current.get("label") or datetime.now().strftime("%B %Y"),
+        "reporting_period": _ceo_period_label(current_period, trend_current.get("label") or datetime.now().strftime("%B %Y")),
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "monthly": monthly,
+        "period": current_period,
         "kpi": {
-            "revenue": int(kpi.get("total_income") or current.get("revenue") or 0),
-            "gross_profit": int(kpi.get("net_profit") or current.get("gross_profit") or 0),
-            "net_profit": int(kpi.get("net_profit") or current.get("net_profit") or 0),
+            "revenue": int(kpi.get("total_income") or trend_current.get("revenue") or 0),
+            "gross_profit": int(kpi.get("net_profit") or trend_current.get("gross_profit") or 0),
+            "net_profit": int(kpi.get("net_profit") or trend_current.get("net_profit") or 0),
             "cash": int(cash.get("net_cash_flow") or 0),
             "inventory_value": 0,
             "inventory_qty": total_stock_qty,
-            "margin": float(kpi.get("profit_margin_percent") or current.get("margin") or 0),
+            "margin": float(kpi.get("profit_margin_percent") or trend_current.get("margin") or 0),
             "expense": expense_total,
         },
         "changes": {"revenue": revenue_change, "net_profit": profit_change},
         "business_units": business_units,
+        "sector_analysis": sector_analysis,
+        "top_income": overall_top_income,
         "expense_categories": expense_categories[:10],
         "customers": customers[:10],
         "receivables": int(sotephwar_sales.get("outstanding_amount") or 0),
@@ -2257,6 +2594,8 @@ def _ceo_report_data(question):
         "movements": movements,
         "production_volume": production_volume,
     }
+    report["ai_commentary"] = _ceo_ai_commentary(question, report)
+    return report
 
 
 def _ceo_page(pdf, page_no, title, report):
@@ -2279,13 +2618,13 @@ def _trend_color(value):
     return (22, 163, 74) if value > 0 else (220, 38, 38)
 
 
-def _draw_ceo_kpi_card(pdf, x, y, label, value, change=None, width=96, height=58):
+def _draw_ceo_kpi_card(pdf, x, y, label, value, change=None, width=96, height=74):
     pdf.rect(x, y - height, width, height, fill=(249, 250, 251), stroke=(209, 213, 219))
     pdf.text(x + 8, y - 17, label, size=7.8, bold=True, color=(75, 85, 99))
-    pdf.text(x + 8, y - 38, value, size=9.7, bold=True, max_width=width - 12)
+    pdf.text(x + 8, y - 38, value, size=9.1, bold=True, max_width=width - 12)
     if change is not None:
         sign = "+" if change > 0 else ""
-        pdf.text(x + 8, y - 52, f"{sign}{change}% MoM", size=7.4, bold=True, color=_trend_color(change))
+        pdf.text(x + 8, y - 62, f"Change: {sign}{change}%", size=7.1, bold=True, color=_trend_color(change))
 
 
 def _draw_ceo_table(pdf, headers, rows, x=42, y=610, widths=None, font_size=7.8):
@@ -2334,6 +2673,265 @@ def _draw_ceo_paragraph(pdf, title, lines, x=42, y=220):
     return yy
 
 
+def _scope_financials(report, scope):
+    if scope == "Overall":
+        kpi = report["kpi"]
+        return {
+            "revenue": int(kpi.get("revenue") or 0),
+            "expense": int(kpi.get("expense") or 0),
+            "profit": int(kpi.get("net_profit") or 0),
+            "margin": kpi.get("margin", 0),
+            "expense_categories": report.get("expense_categories") or [],
+            "top_income": report.get("top_income") or [],
+            "source_note": (
+                "Overall combines Sote Phwar and Farm. Sote Phwar uses Sotephwar_Transection "
+                "and Transection Sote Phwar/SP Extension/SP Production; Farm uses "
+                "Farm_Transection and Transection Farm."
+            ),
+        }
+    return (report.get("sector_analysis") or {}).get(scope) or {}
+
+
+def _scope_monthly_rows(report, scope):
+    if scope == "Overall":
+        return report.get("monthly") or []
+    rows = []
+    for month in report.get("monthly") or []:
+        revenue = 0
+        expense = 0
+        profit = 0
+        for sector in month.get("sectors") or []:
+            if _business_unit_for_sector(sector.get("sector") or "") != scope:
+                continue
+            revenue += int(sector.get("income") or 0)
+            expense += int(sector.get("expense") or 0)
+            profit += int(sector.get("profit") or 0)
+        rows.append({
+            "label": month.get("label"),
+            "revenue": revenue,
+            "expense": expense,
+            "net_profit": profit,
+            "margin": round((profit / revenue) * 100, 2) if revenue else 0,
+        })
+    return rows
+
+
+def _scope_customer_rows(report, scope):
+    if scope == "Sote Phwar":
+        rows = []
+        for row in report.get("customers") or []:
+            rows.append({
+                "name": row.get("customer_name") or row.get("item") or "-",
+                "amount": int(row.get("total_amount") or row.get("amount") or 0),
+                "received": int(row.get("amount_received") or 0),
+                "outstanding": int(row.get("outstanding_amount") or 0),
+            })
+        return rows
+    return _scope_financials(report, scope).get("top_income") or []
+
+
+def _scope_ai_key(scope):
+    return {
+        "Overall": "overall",
+        "Farm": "farm",
+        "Sote Phwar": "sotephwar",
+    }.get(scope, "overall")
+
+
+def _scope_ai_lines(report, scope):
+    commentary = report.get("ai_commentary") or {}
+    key = _scope_ai_key(scope)
+    lines = _ai_commentary_lines(commentary, key)
+    if lines:
+        return lines
+    if scope != "Overall" and _ai_commentary_lines(commentary, "overall"):
+        return [f"Qwen did not return dedicated {scope} commentary for this run."]
+    return ["AI commentary was not generated for this run."]
+
+
+def _draw_scope_kpi_page(pdf, page_no, report, scope):
+    data = _scope_financials(report, scope)
+    title = "BigShot Company Limited\nKPI Management Report" if scope == "Overall" else f"{scope} KPI Dashboard"
+    _ceo_page(pdf, page_no, title, report)
+    pdf.text(42, 710, f"Reporting period: {report['reporting_period']}", size=9.2, bold=True, color=(75, 85, 99))
+    if scope == "Overall":
+        pdf.text(42, 688, "Overall KPI Dashboard", size=10.5, bold=True)
+    cards = [
+        ("Revenue", _mmk(data.get("revenue", 0)), report["changes"].get("revenue") if scope == "Overall" else None),
+        ("Expense", _mmk(data.get("expense", 0)), None),
+        ("Profit", _mmk(data.get("profit", 0)), report["changes"].get("net_profit") if scope == "Overall" else None),
+        ("Margin", f"{data.get('margin', 0)}%", None),
+    ]
+    for index, card in enumerate(cards):
+        _draw_ceo_kpi_card(pdf, 42 + index * 122, 660, *card, width=112)
+    heading = "Executive Summary" if scope == "Overall" else "Scope Definition"
+    _draw_ceo_paragraph(pdf, heading, [
+        data.get("source_note") or "",
+        f"{scope} revenue is {_mmk(data.get('revenue', 0))}; expense is {_mmk(data.get('expense', 0))}; profit is {_mmk(data.get('profit', 0))}.",
+    ], y=540)
+    _draw_ceo_table(pdf, ("Metric", "Amount"), [
+        ("Revenue", _mmk(data.get("revenue", 0))),
+        ("Expense", _mmk(data.get("expense", 0))),
+        ("Profit", _mmk(data.get("profit", 0))),
+        ("Profit Margin", f"{data.get('margin', 0)}%"),
+    ], y=430, widths=[220, 220])
+    _draw_ceo_paragraph(pdf, "AI Commentary", _scope_ai_lines(report, scope), y=250)
+
+
+def _draw_scope_revenue_page(pdf, page_no, report, scope):
+    data = _scope_financials(report, scope)
+    monthly = _scope_monthly_rows(report, scope)
+    title = "Revenue Analysis" if scope == "Overall" else f"{scope} Revenue Analysis"
+    _ceo_page(pdf, page_no, title, report)
+    _draw_ceo_line_chart(pdf, "Revenue Trend Line Chart - Last 12 Months", monthly, "revenue", y=505)
+    top_rows = data.get("top_income") or []
+    table_rows = [
+        (row.get("name") or "-", row.get("sector") or scope, _mmk(row.get("amount", 0)), _mmk(row.get("outstanding", 0)))
+        for row in top_rows[:8]
+    ]
+    pdf.text(42, 375, "Top Income", size=10.5, bold=True)
+    _draw_ceo_table(pdf, ("Customer / Item", "Sector", "Income", "Outstanding"), table_rows, y=345, widths=[210, 95, 105, 105], font_size=7.2)
+    top_name = top_rows[0]["name"] if top_rows else "no income row"
+    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
+        f"{scope} top income source is {top_name}. This table is included so revenue concentration is visible before margin decisions.",
+        "Revenue should be reviewed together with outstanding amounts because billed income and collected cash can move differently.",
+    ], y=115)
+
+
+def _draw_scope_profitability_page(pdf, page_no, report, scope):
+    data = _scope_financials(report, scope)
+    monthly = _scope_monthly_rows(report, scope)
+    title = "Profitability Analysis" if scope == "Overall" else f"{scope} Profitability Analysis"
+    _ceo_page(pdf, page_no, title, report)
+    _draw_ceo_line_chart(pdf, "Profit Trend Line Chart", monthly, "net_profit", y=520)
+    _draw_ceo_line_chart(pdf, "Profit Margin Trend Line Chart", monthly, "margin", y=300, height=125)
+    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
+        f"{scope} profit is {_mmk(data.get('profit', 0))} with {data.get('margin', 0)}% margin.",
+        "Margin pressure appears when expenses grow faster than revenue or when revenue is high but collection is weak.",
+    ], y=120)
+
+
+def _draw_scope_expense_page(pdf, page_no, report, scope, detail=False):
+    data = _scope_financials(report, scope)
+    expense_rows = data.get("expense_categories") or []
+    title_prefix = "Expense Detail Analysis" if detail else "Expense Analysis"
+    title = title_prefix if scope == "Overall" else f"{scope} {title_prefix}"
+    _ceo_page(pdf, page_no, title, report)
+    if detail:
+        table_rows = [
+            (row.get("category") or "-", _mmk(row.get("expense", 0)), row.get("transaction_count", 0))
+            for row in expense_rows[:12]
+        ]
+        _draw_ceo_table(pdf, ("Category", "Expense", "Rows"), table_rows, y=705, widths=[285, 145, 80], font_size=7.4)
+        _draw_ceo_paragraph(pdf, "Control Focus", [
+            "This page expands the expense category list for budget review and approval control.",
+            "Use repeated high-value categories as candidates for owner-level limits.",
+        ], y=220)
+        return
+    pie_rows = [(row.get("category") or "-", row.get("expense", 0)) for row in expense_rows[:6]]
+    _draw_ceo_pie(pdf, "Expense Breakdown by Category", pie_rows, x=42, y=480)
+    table_rows = [
+        (row.get("category") or "-", _mmk(row.get("expense", 0)), row.get("transaction_count", 0))
+        for row in expense_rows[:8]
+    ]
+    _draw_ceo_table(pdf, ("Category", "Expense", "Rows"), table_rows, y=410, widths=[260, 140, 95])
+    top_category = expense_rows[0]["category"] if expense_rows else "no expense category"
+    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
+        f"The largest visible {scope} expense category is {top_category}.",
+        "Expense movement should be compared with revenue before reducing or increasing operating budgets.",
+    ], y=170)
+
+
+def _draw_scope_customer_page(pdf, page_no, report, scope):
+    title = "Customer Analysis" if scope == "Overall" else f"{scope} Customer Analysis"
+    _ceo_page(pdf, page_no, title, report)
+    rows = _scope_customer_rows(report, scope)
+    table_rows = [
+        (
+            row.get("name") or "-",
+            _mmk(row.get("amount", 0)),
+            _mmk(row.get("received", 0)),
+            _mmk(row.get("outstanding", 0)),
+        )
+        for row in rows[:12]
+    ]
+    _draw_ceo_table(pdf, ("Customer / Item", "Revenue", "Paid", "Outstanding"), table_rows, y=705, widths=[210, 105, 95, 105], font_size=7.2)
+    _draw_ceo_paragraph(pdf, "Collection Commentary", [
+        "High-value customers or items should be checked for repeatability and collection timing.",
+        "Outstanding balances should be reviewed before treating revenue growth as usable cash.",
+    ], y=170)
+
+
+def _draw_ai_commentary_page(pdf, page_no, report):
+    _ceo_page(pdf, page_no, "AI Commentary", report)
+    commentary = report.get("ai_commentary") or {}
+    sections = [
+        ("Overall Analysis", _scope_ai_lines(report, "Overall")),
+        ("Farm Sector Analysis", _scope_ai_lines(report, "Farm")),
+        ("Sote Phwar Sector Analysis", _scope_ai_lines(report, "Sote Phwar")),
+        ("Risks", _ai_commentary_lines(commentary, "risks") or _risk_lines_for_report(report)),
+        ("Recommendations", _ai_commentary_lines(commentary, "recommendations") or [
+            "Review the largest expense category first and confirm the next action owner.",
+            "Use top income and outstanding balance tables together before making growth decisions.",
+        ]),
+        ("Management Conclusion", _ai_commentary_lines(commentary, "management_conclusion") or [
+            "AI management conclusion was not generated for this run.",
+        ]),
+    ]
+    y = 710
+    for title, lines in sections:
+        y = _draw_ceo_paragraph(pdf, title, lines, y=y)
+        y -= 12
+        if y < 90:
+            pdf.new_page()
+            y = 760
+
+
+def _draw_sector_analysis_page(pdf, page_no, title, report, sector_name):
+    sector = (report.get("sector_analysis") or {}).get(sector_name) or {}
+    revenue = int(sector.get("revenue") or 0)
+    expense = int(sector.get("expense") or 0)
+    profit = int(sector.get("profit") or 0)
+    margin = sector.get("margin", 0)
+    expense_rows = sector.get("expense_categories") or []
+
+    _ceo_page(pdf, page_no, title, report)
+    pdf.text(42, 710, f"Reporting period: {report['reporting_period']}", size=9.2, bold=True, color=(75, 85, 99))
+    cards = [
+        ("Revenue", _mmk(revenue), None),
+        ("Expense", _mmk(expense), None),
+        ("Profit", _mmk(profit), None),
+        ("Margin", f"{margin}%", None),
+    ]
+    for index, card in enumerate(cards):
+        _draw_ceo_kpi_card(pdf, 42 + index * 122, 665, *card, width=112)
+
+    pdf.text(42, 560, "Sector KPI Summary", size=10.5, bold=True)
+    summary_rows = [
+        ("Revenue", _mmk(revenue)),
+        ("Expense", _mmk(expense)),
+        ("Profit", _mmk(profit)),
+        ("Profit Margin", f"{margin}%"),
+    ]
+    _draw_ceo_table(pdf, ("Metric", "Amount"), summary_rows, y=530, widths=[220, 220])
+
+    chart_rows = [(row.get("category") or "-", row.get("expense", 0)) for row in expense_rows[:6]]
+    if chart_rows:
+        _draw_ceo_bar_chart(pdf, "Top Expense Categories", chart_rows, y=255, height=115)
+    table_rows = [
+        (row.get("category") or "-", _mmk(row.get("expense", 0)), row.get("transaction_count", 0))
+        for row in expense_rows[:6]
+    ]
+    _draw_ceo_table(pdf, ("Category", "Expense", "Rows"), table_rows, y=210, widths=[260, 140, 95], font_size=7.4)
+
+    top_category = expense_rows[0]["category"] if expense_rows else "no expense category"
+    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
+        sector.get("source_note") or "",
+        f"{sector_name} profit is {_mmk(profit)} on revenue of {_mmk(revenue)}. The largest visible cost driver is {top_category}.",
+        "Management should compare this sector page with the overall KPI page before changing budgets, because shared cash pressure can come from either sector.",
+    ], y=110)
+
+
 def _change_label(value):
     if value is None:
         return "-"
@@ -2372,99 +2970,43 @@ def _risk_lines_for_report(report):
 def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO Management Report"):
     report = _ceo_report_data(question)
     kpi = report["kpi"]
-    monthly = report["monthly"]
     units = report["business_units"]
-    expense_rows = report["expense_categories"]
     pdf = PdfCanvas(title)
 
-    _ceo_page(pdf, 1, "BigShot Company Limited\nKPI Management Report", report)
-    pdf.text(42, 710, f"Reporting period: {report['reporting_period']}", size=9.5, bold=True, color=(75, 85, 99))
-    cards = [
-        ("Revenue", _mmk(kpi["revenue"]), report["changes"]["revenue"]),
-        ("Gross Profit", _mmk(kpi["gross_profit"]), None),
-        ("Net Profit", _mmk(kpi["net_profit"]), report["changes"]["net_profit"]),
-        ("Cash", _mmk(kpi["cash"]), None),
-        ("Inventory", _mmk(kpi["inventory_value"]), None),
-    ]
-    for index, card in enumerate(cards):
-        _draw_ceo_kpi_card(pdf, 42 + index * 102, 665, *card)
-    _draw_ceo_paragraph(pdf, "Executive Summary", [
-        f"Revenue for {report['reporting_period']} was {_mmk(kpi['revenue'])}. Net profit closed at {_mmk(kpi['net_profit'])}, with a gross margin of {kpi['margin']}%.",
-        "Sote Phwar, Farm Vegetables, and Extension Service are shown separately to make concentration risk and business-unit contribution visible.",
-        "What does this mean for BigShot? Management should protect cash and profit first, then scale the revenue drivers that are supported by repeatable demand.",
-    ], y=555)
-    _draw_ceo_kpi_dashboard(pdf, report, y=415)
+    page = 1
+    for scope in ("Overall", "Farm", "Sote Phwar"):
+        _draw_scope_kpi_page(pdf, page, report, scope)
+        page += 1
+        _draw_scope_revenue_page(pdf, page, report, scope)
+        page += 1
+        _draw_scope_profitability_page(pdf, page, report, scope)
+        page += 1
+        _draw_scope_expense_page(pdf, page, report, scope)
+        page += 1
+        _draw_scope_expense_page(pdf, page, report, scope, detail=True)
+        page += 1
+        _draw_scope_customer_page(pdf, page, report, scope)
+        page += 1
+        if scope == "Sote Phwar":
+            _ceo_page(pdf, page, "Sote Phwar Inventory & Operations", report)
+            stock_rows = [
+                (row.get("store") or "-", row.get("product") or "-", row.get("stock_qty", 0))
+                for row in report["stock"][:12]
+            ]
+            pdf.text(42, 705, f"Inventory valuation: {_mmk(kpi['inventory_value'])} (unit cost data required)", size=9.2, bold=True)
+            pdf.text(42, 685, f"Total stock quantity: {kpi['inventory_qty']:,}", size=9.2, bold=True)
+            pdf.text(42, 665, f"Production volume: {report['production_volume']:,}", size=9.2, bold=True)
+            _draw_ceo_table(pdf, ("Store", "Product", "Qty"), stock_rows, y=625, widths=[170, 230, 95])
+            _draw_ceo_paragraph(pdf, "Operational Observations", [
+                "Inventory turnover cannot be calculated reliably until cost of goods and sales quantity are linked to inventory movement data.",
+                "Slow-moving inventory should be identified by aging movement rows; current data supports stock position and production volume, not aging valuation.",
+            ], y=150)
+            page += 1
 
-    _ceo_page(pdf, 2, "Revenue Analysis", report)
-    _draw_ceo_line_chart(pdf, "Revenue Trend Line Chart - Last 12 Months", monthly, "revenue", y=505)
-    unit_rows = [(name, value["revenue"]) for name, value in units.items()]
-    _draw_ceo_bar_chart(pdf, "Revenue by Business Unit", unit_rows, y=265, height=135)
-    revenue_table_rows = [
-        (name, _mmk(value["revenue"]), _mmk(value["profit"]))
-        for name, value in units.items()
-    ]
-    _draw_ceo_table(pdf, ("Business Unit", "Revenue", "Profit"), revenue_table_rows, y=195, widths=[210, 145, 145])
-    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
-        "Revenue growth should be read together with business-unit concentration. A high Sote Phwar share indicates product traction but also dependence on one operating line.",
-        "Farm Vegetables and Extension Service provide diversification; low contribution from either unit should be treated as an opportunity pipeline rather than a reporting error.",
-    ], y=88)
+    _draw_ai_commentary_page(pdf, page, report)
+    page += 1
 
-    _ceo_page(pdf, 3, "Profitability Analysis", report)
-    _draw_ceo_line_chart(pdf, "Profit Trend Line Chart", monthly, "net_profit", y=520)
-    _draw_ceo_line_chart(pdf, "Profit Margin Trend Line Chart", monthly, "margin", y=300, height=125)
-    profit_rows = [(name, value["profit"]) for name, value in units.items()]
-    _draw_ceo_bar_chart(pdf, "Profit by Business Unit", profit_rows, y=110, height=115)
-    _draw_ceo_paragraph(pdf, "Analyst Commentary", [
-        f"Net profit is {_mmk(kpi['net_profit'])}. Margin movement should be monitored against labor, logistics, and production categories.",
-        "Efficiency is improving when revenue grows faster than expenses; margin pressure appears when top expense categories expand faster than sales.",
-    ], y=88)
-
-    _ceo_page(pdf, 4, "Expense Analysis", report)
-    pie_rows = [(row.get("category") or "-", row.get("expense", 0)) for row in expense_rows[:6]]
-    _draw_ceo_pie(pdf, "Expense Breakdown by Category", pie_rows, x=42, y=480)
-    table_rows = [
-        (row.get("category") or "-", _mmk(row.get("expense", 0)), row.get("transaction_count", 0))
-        for row in expense_rows[:8]
-    ]
-    _draw_ceo_table(pdf, ("Category", "Expense", "Rows"), table_rows, y=410, widths=[260, 140, 95])
-    _draw_ceo_paragraph(pdf, "Month-over-Month Commentary", [
-        "Labor, marketing, logistics, and production costs should be reviewed against the top expense table above; categories with repeated monthly increases need owner-level budget limits.",
-        "The most material expense categories are the first candidates for negotiation, approval control, or operational redesign.",
-    ], y=170)
-
-    _ceo_page(pdf, 5, "Customer Analysis", report)
-    customer_rows = [
-        (
-            row.get("customer_name") or row.get("item") or "-",
-            _mmk(row.get("total_amount") or row.get("amount") or 0),
-            _mmk(row.get("amount_received") or 0),
-            _mmk(row.get("outstanding_amount") or 0),
-        )
-        for row in report["customers"][:10]
-    ]
-    pdf.text(42, 712, f"Collected: {_mmk(report.get('collected', 0))}", size=9.2, bold=True)
-    pdf.text(250, 712, f"Outstanding receivables: {_mmk(report.get('receivables', 0))}", size=9.2, bold=True)
-    _draw_ceo_table(pdf, ("Customer", "Revenue", "Paid", "Outstanding"), customer_rows, y=675, widths=[205, 105, 95, 105], font_size=7.2)
-    _draw_ceo_paragraph(pdf, "Collection Commentary", [
-        "High-value customers should be protected through service quality and reliable supply.",
-        "Customers with high outstanding balances should be reviewed first because receivables convert accounting revenue into usable cash.",
-    ], y=170)
-
-    _ceo_page(pdf, 6, "Inventory & Operations", report)
-    stock_rows = [
-        (row.get("store") or "-", row.get("product") or "-", row.get("stock_qty", 0))
-        for row in report["stock"][:12]
-    ]
-    pdf.text(42, 705, f"Inventory valuation: {_mmk(kpi['inventory_value'])} (unit cost data required)", size=9.2, bold=True)
-    pdf.text(42, 685, f"Total stock quantity: {kpi['inventory_qty']:,}", size=9.2, bold=True)
-    pdf.text(42, 665, f"Production volume: {report['production_volume']:,}", size=9.2, bold=True)
-    _draw_ceo_table(pdf, ("Store", "Product", "Qty"), stock_rows, y=625, widths=[170, 230, 95])
-    _draw_ceo_paragraph(pdf, "Operational Observations", [
-        "Inventory turnover cannot be calculated reliably until cost of goods and sales quantity are linked to inventory movement data.",
-        "Slow-moving inventory should be identified by aging movement rows; current data supports stock position and production volume, not aging valuation.",
-    ], y=150)
-
-    _ceo_page(pdf, 7, "Business Growth, Risks & Opportunities", report)
+    _ceo_page(pdf, page, "Business Growth, Risks & Opportunities", report)
     growth_rows = [
         ("Revenue Growth", _change_label(report["changes"].get("revenue")), _trend_label(report["changes"].get("revenue"))),
         ("Profit Growth", _change_label(report["changes"].get("net_profit")), _trend_label(report["changes"].get("net_profit"))),
@@ -2472,24 +3014,28 @@ def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO M
         ("Inventory Growth", "-", "Data needed"),
     ]
     _draw_ceo_table(pdf, ("Growth KPI", "Change %", "Classification"), growth_rows, y=705, widths=[205, 145, 165])
-    y = _draw_ceo_paragraph(pdf, "Risk Analysis", _risk_lines_for_report(report), y=500)
+    risk_lines = _ai_commentary_lines(report.get("ai_commentary"), "risks") or _risk_lines_for_report(report)
+    y = _draw_ceo_paragraph(pdf, "Risk Analysis", risk_lines, y=500)
     total_profit = sum(abs(value["profit"]) for value in units.values()) or 1
     sote_profit_share = round((units["Sote Phwar"]["profit"] / total_profit) * 100, 1) if total_profit else 0
     _draw_ceo_paragraph(pdf, "Opportunities", [
         f"Sote Phwar contributes {sote_profit_share}% of absolute business-unit profit, so positive demand signals should be converted into disciplined growth targets.",
-        "Farm Vegetables and Extension Service can reduce concentration risk if revenue contribution improves.",
+        "Farm can reduce concentration risk if revenue contribution improves.",
         "Inventory optimization requires unit cost and movement aging so management can separate fast-moving products from slow-moving stock.",
     ], y=y - 15)
+    page += 1
 
-    _ceo_page(pdf, 8, "Recommendations & Management Conclusion", report)
+    _ceo_page(pdf, page, "Recommendations & Management Conclusion", report)
+    ai_recommendations = _ai_commentary_lines(report.get("ai_commentary"), "recommendations")
+    ai_conclusion = _ai_commentary_lines(report.get("ai_commentary"), "management_conclusion")
     sections = [
         ("Immediate Actions (30 Days)", [
-            f"Review the top expense category and confirm necessity before the next payment cycle; current total expense is {_mmk(kpi['expense'])}.",
-            "Add unit cost fields to inventory records so future CEO reports can show inventory value, turnover, and margin by product.",
+            ai_recommendations[0] if len(ai_recommendations) > 0 else f"Review the top expense category and confirm necessity before the next payment cycle; current total expense is {_mmk(kpi['expense'])}.",
+            ai_recommendations[1] if len(ai_recommendations) > 1 else "Add unit cost fields to inventory records so future CEO reports can show inventory value, turnover, and margin by product.",
         ]),
         ("Medium-Term Actions (90 Days)", [
-            "Set monthly budget thresholds for labor, logistics, marketing, and production cost categories using the expense breakdown page.",
-            "Track business-unit revenue and profit targets separately for Sote Phwar, Farm Vegetables, and Extension Service.",
+            ai_recommendations[2] if len(ai_recommendations) > 2 else "Set monthly budget thresholds for labor, logistics, marketing, and production cost categories using the expense breakdown page.",
+            ai_recommendations[3] if len(ai_recommendations) > 3 else "Track revenue and profit targets separately for Sote Phwar and Farm, with Extension treated inside Sote Phwar expense control.",
         ]),
         ("Strategic Actions (12 Months)", [
             "Reduce profit concentration by scaling the business unit with the lowest revenue contribution and positive operating signals.",
@@ -2503,12 +3049,13 @@ def create_ceo_management_pdf_report(question, output_path, title="BigShot CEO M
         for item in items:
             y -= pdf.text(58, y, f"- {item}", size=8.9, max_width=485)
         y -= 16
-    _draw_ceo_paragraph(pdf, "Management Conclusion", [
+    conclusion_lines = ai_conclusion or [
         f"Business strength versus previous period: {_trend_label(report['changes'].get('revenue'))} on revenue and {_trend_label(report['changes'].get('net_profit'))} on profit.",
         "Top 3 management priorities: cash collection, profit margin protection, and inventory costing discipline.",
         "CEO focus next: convert the highest-confidence revenue driver into a target while controlling the largest expense category.",
         "What should management do next? Use this report as the monthly decision pack and assign owners to cash, margin, revenue, inventory, and debt actions.",
-    ], y=max(245, y))
+    ]
+    _draw_ceo_paragraph(pdf, "Management Conclusion", conclusion_lines, y=max(245, y))
 
     pdf.finish(output_path)
     return True

@@ -68,6 +68,8 @@ SOTEPHWAR_INVENTORY_TABLE = os.getenv("SOTEPHWAR_INVENTORY_TABLE", "Sotephwar_In
 
 FINANCIAL_OBLIGATIONS_TABLE = os.getenv("FINANCIAL_OBLIGATIONS_TABLE", "Financial_Obligations")
 
+PAYMENT_RECEIVE_TABLE = os.getenv("PAYMENT_RECEIVE_TABLE", "Payment_Receive")
+
 GOOGLE_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "bigshotagribusiness@gmail.com")
 
 GOOGLE_CALENDAR_CREDENTIALS_FILE = os.getenv("GOOGLE_CALENDAR_CREDENTIALS_FILE", "google_calendar_credentials.json")

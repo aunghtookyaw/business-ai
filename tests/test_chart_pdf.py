@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 from tools import chart_pdf
@@ -36,6 +37,22 @@ class ChartPdfTest(unittest.TestCase):
             chart_pdf.choose_formula = original_choose_formula
             chart_pdf.run_formula = original_run_formula
 
+    def test_line_chart_scales_negative_values_inside_graph(self):
+        pdf = chart_pdf.PdfCanvas("Negative Chart")
+
+        chart_pdf._draw_line_chart(
+            pdf,
+            [("Jan", 100), ("Feb", -300), ("Mar", 50)],
+            x=70,
+            y=300,
+            width=420,
+            height=220,
+        )
+        commands = "\n".join(pdf._content)
+
+        self.assertIn("-300", commands)
+        self.assertNotIn("-165.00", commands)
+
     def test_ceo_management_pdf_uses_professional_multi_page_report(self):
         original_kpi = chart_pdf.kpi_overview
         original_sector = chart_pdf.sector_summary
@@ -43,6 +60,7 @@ class ChartPdfTest(unittest.TestCase):
         original_cash = chart_pdf.cash_flow
         original_stock = chart_pdf.sotephwar_inventory_stock
         original_movement = chart_pdf.sotephwar_inventory_movement_summary
+        original_ask_ai = chart_pdf.ask_ai
 
         def fake_kpi(period, filters=None):
             index = int(period[-2:]) if period.startswith("month:") else 6
@@ -79,6 +97,14 @@ class ChartPdfTest(unittest.TestCase):
         chart_pdf.sector_summary = fake_sector
         chart_pdf.category_summary = fake_category
         chart_pdf.cash_flow = lambda period, filters=None: {"net_cash_flow": 250000}
+        chart_pdf.ask_ai = lambda prompt, timeout=60: (
+            '{"overall":["AI overall comment"],'
+            '"farm":["AI farm comment"],'
+            '"sotephwar":["AI sotephwar comment"],'
+            '"risks":["AI risk comment"],'
+            '"recommendations":["AI recommendation one","AI recommendation two"],'
+            '"management_conclusion":["AI conclusion comment"]}'
+        )
         chart_pdf.sotephwar_inventory_stock = lambda *args, **kwargs: {
             "stock": [
                 {"store": "Factory", "product": "Sote Phwar 4L", "stock_qty": 120},
@@ -103,20 +129,40 @@ class ChartPdfTest(unittest.TestCase):
                 pdf_bytes = output_path.read_bytes()
                 pdf_text = pdf_bytes.decode("latin-1")
                 self.assertTrue(pdf_bytes.startswith(b"%PDF"))
-                self.assertEqual(8, pdf_bytes.count(b"/Type /Page "))
+                self.assertEqual(22, pdf_bytes.count(b"/Type /Page "))
                 self.assertIn("BigShot Company Limited", pdf_text)
                 self.assertIn("KPI Management Report", pdf_text)
+                self.assertIn("Overall KPI Dashboard", pdf_text)
                 self.assertIn("Executive Summary", pdf_text)
                 self.assertIn("KPI Dashboard", pdf_text)
                 self.assertIn("Revenue Analysis", pdf_text)
                 self.assertIn("Revenue Trend Line Chart", pdf_text)
+                self.assertIn("Top Income", pdf_text)
+                self.assertIn("AI Commentary", pdf_text)
+                self.assertIn("Overall Analysis", pdf_text)
+                self.assertIn("AI overall comment", pdf_text)
+                self.assertIn("AI farm comment", pdf_text)
+                self.assertIn("AI sotephwar comment", pdf_text)
+                self.assertIn("AI risk comment", pdf_text)
+                self.assertIn("AI recommendation one", pdf_text)
+                self.assertIn("AI conclusion comment", pdf_text)
                 self.assertIn("Profitability Analysis", pdf_text)
+                self.assertIn("Farm KPI Dashboard", pdf_text)
+                self.assertIn("Farm Revenue Analysis", pdf_text)
+                self.assertIn("Farm Profitability Analysis", pdf_text)
+                self.assertIn("Farm Expense Analysis", pdf_text)
+                self.assertIn("Farm Customer Analysis", pdf_text)
+                self.assertIn("Sote Phwar KPI Dashboard", pdf_text)
+                self.assertIn("Sote Phwar Revenue Analysis", pdf_text)
+                self.assertIn("Sote Phwar Profitability Analysis", pdf_text)
+                self.assertIn("Sote Phwar Expense Analysis", pdf_text)
+                self.assertIn("Sote Phwar Customer Analysis", pdf_text)
                 self.assertIn("Expense Analysis", pdf_text)
                 self.assertIn("Customer Analysis", pdf_text)
                 self.assertIn("Inventory & Operations", pdf_text)
                 self.assertIn("Business Growth, Risks & Opportunities", pdf_text)
                 self.assertIn("Recommendations & Management Conclusion", pdf_text)
-                self.assertIn("Page 8", pdf_text)
+                self.assertIn("Page 22", pdf_text)
                 self.assertIn("MMK", pdf_text)
 
                 alias_output_path = Path(temp_dir) / "qwen-ceo-report.pdf"
@@ -129,7 +175,7 @@ class ChartPdfTest(unittest.TestCase):
                 alias_pdf_bytes = alias_output_path.read_bytes()
                 alias_pdf_text = alias_pdf_bytes.decode("latin-1")
                 self.assertTrue(alias_pdf_bytes.startswith(b"%PDF"))
-                self.assertEqual(8, alias_pdf_bytes.count(b"/Type /Page "))
+                self.assertEqual(22, alias_pdf_bytes.count(b"/Type /Page "))
                 self.assertIn("KPI Management Report", alias_pdf_text)
 
                 kpi_output_path = Path(temp_dir) / "kpi-management-report.pdf"
@@ -149,6 +195,191 @@ class ChartPdfTest(unittest.TestCase):
             chart_pdf.cash_flow = original_cash
             chart_pdf.sotephwar_inventory_stock = original_stock
             chart_pdf.sotephwar_inventory_movement_summary = original_movement
+            chart_pdf.ask_ai = original_ask_ai
+
+    def test_ceo_report_data_uses_requested_year_and_two_business_groups(self):
+        original_kpi = chart_pdf.kpi_overview
+        original_sector = chart_pdf.sector_summary
+        original_category = chart_pdf.category_summary
+        original_cash = chart_pdf.cash_flow
+        original_sote_sales = chart_pdf.sotephwar_transection_summary
+        original_stock = chart_pdf.sotephwar_inventory_stock
+        original_movement = chart_pdf.sotephwar_inventory_movement_summary
+        original_ask_ai = chart_pdf.ask_ai
+        calls = {
+            "kpi": [],
+            "sector": [],
+            "category": [],
+            "cash": [],
+            "sote_sales": [],
+            "movement": [],
+        }
+
+        def fake_kpi(period, filters=None):
+            calls["kpi"].append(period)
+            if period == "this_year":
+                return {
+                    "total_income": 120000000,
+                    "total_expense": 50000000,
+                    "net_profit": 70000000,
+                    "profit_margin_percent": 58.33,
+                }
+            return {
+                "total_income": 1000000,
+                "total_expense": 400000,
+                "net_profit": 600000,
+                "profit_margin_percent": 60,
+            }
+
+        def fake_sector(period, filters=None):
+            calls["sector"].append(period)
+            return {
+                "sectors": [
+                    {"sector": "Sote Phwar", "income": 70000000, "expense": 10000000, "profit": 60000000},
+                    {"sector": "SP Extension", "income": 0, "expense": 7000000, "profit": -7000000},
+                    {"sector": "Farm", "income": 50000000, "expense": 33000000, "profit": 17000000},
+                ],
+            }
+
+        def fake_category(period, filters=None):
+            calls["category"].append(period)
+            return {
+                "categories": [
+                    {"sector": "Farm", "category": "Seeds", "expense": 30000000, "transaction_count": 3},
+                    {"sector": "SP Extension", "category": "Demo plot", "expense": 7000000, "transaction_count": 2},
+                ],
+            }
+
+        def fake_cash(period, filters=None):
+            calls["cash"].append(period)
+            return {"net_cash_flow": 40000000}
+
+        def fake_sote_sales(period, include_customers=True):
+            calls["sote_sales"].append(period)
+            return {"amount_received": 65000000, "outstanding_amount": 5000000, "customers": []}
+
+        def fake_movement(period, *args, **kwargs):
+            calls["movement"].append(period)
+            return {"movements": []}
+
+        chart_pdf.kpi_overview = fake_kpi
+        chart_pdf.sector_summary = fake_sector
+        chart_pdf.category_summary = fake_category
+        chart_pdf.cash_flow = fake_cash
+        chart_pdf.sotephwar_transection_summary = fake_sote_sales
+        chart_pdf.sotephwar_inventory_stock = lambda *args, **kwargs: {"stock": []}
+        chart_pdf.sotephwar_inventory_movement_summary = fake_movement
+        chart_pdf.ask_ai = lambda prompt, timeout=60: '{"overall":["AI overall"]}'
+        try:
+            report = chart_pdf._ceo_report_data("this year KPI pdf")
+
+            self.assertEqual("this_year", report["period"])
+            self.assertEqual(str(date.today().year), report["reporting_period"])
+            self.assertEqual(120000000, report["kpi"]["revenue"])
+            self.assertIn("this_year", calls["kpi"])
+            self.assertIn("last_year", calls["kpi"])
+            self.assertIn("this_year", calls["sector"])
+            self.assertIn("this_year", calls["category"])
+            self.assertIn("this_year", calls["cash"])
+            self.assertIn("this_year", calls["sote_sales"])
+            self.assertIn("this_year", calls["movement"])
+            self.assertEqual(
+                {"Sote Phwar": {"revenue": 70000000, "profit": 53000000}, "Farm": {"revenue": 50000000, "profit": 17000000}},
+                report["business_units"],
+            )
+            self.assertEqual(17000000, report["sector_analysis"]["Sote Phwar"]["expense"])
+            self.assertEqual(33000000, report["sector_analysis"]["Farm"]["expense"])
+            self.assertEqual("Extension / Demo plot", report["sector_analysis"]["Sote Phwar"]["expense_categories"][0]["category"])
+            self.assertEqual("Seeds", report["sector_analysis"]["Farm"]["expense_categories"][0]["category"])
+            self.assertEqual(["AI overall"], report["ai_commentary"]["overall"])
+            self.assertEqual("Farm / Seeds", report["expense_categories"][0]["category"])
+            self.assertEqual("Sote Phwar / Extension / Demo plot", report["expense_categories"][1]["category"])
+        finally:
+            chart_pdf.kpi_overview = original_kpi
+            chart_pdf.sector_summary = original_sector
+            chart_pdf.category_summary = original_category
+            chart_pdf.cash_flow = original_cash
+            chart_pdf.sotephwar_transection_summary = original_sote_sales
+            chart_pdf.sotephwar_inventory_stock = original_stock
+            chart_pdf.sotephwar_inventory_movement_summary = original_movement
+            chart_pdf.ask_ai = original_ask_ai
+
+    def test_ai_commentary_accepts_qwen_key_aliases(self):
+        parsed = chart_pdf._normalize_ai_commentary({
+            "overall_analysis": ["Overall line"],
+            "farm_sector": ["Farm line"],
+            "sote_phwar": ["Sote line"],
+            "risk_analysis": ["Risk line"],
+            "recommended_actions": ["Action line"],
+            "management conclusion": ["Conclusion line"],
+        })
+
+        self.assertEqual(["Overall line"], parsed["overall"])
+        self.assertEqual(["Farm line"], parsed["farm"])
+        self.assertEqual(["Sote line"], parsed["sotephwar"])
+        self.assertEqual(["Risk line"], parsed["risks"])
+        self.assertEqual(["Action line"], parsed["recommendations"])
+        self.assertEqual(["Conclusion line"], parsed["management_conclusion"])
+
+    def test_ai_commentary_failure_is_visible_in_pdf(self):
+        original_report_data = chart_pdf._ceo_report_data
+        report = {
+            "reporting_period": "2026",
+            "generated": "2026-06-20 15:00",
+            "monthly": [],
+            "kpi": {
+                "revenue": 1000000,
+                "expense": 300000,
+                "net_profit": 700000,
+                "margin": 70,
+                "cash": 0,
+                "inventory_value": 0,
+                "inventory_qty": 0,
+            },
+            "changes": {"revenue": None, "net_profit": None},
+            "business_units": {
+                "Sote Phwar": {"revenue": 0, "profit": 0},
+                "Farm": {"revenue": 1000000, "profit": 700000},
+            },
+            "top_income": [],
+            "expense_categories": [],
+            "sector_analysis": {
+                "Farm": {
+                    "revenue": 1000000,
+                    "expense": 300000,
+                    "profit": 700000,
+                    "margin": 70,
+                    "top_income": [],
+                    "expense_categories": [],
+                    "source_note": "Farm source.",
+                },
+                "Sote Phwar": {
+                    "revenue": 0,
+                    "expense": 0,
+                    "profit": 0,
+                    "margin": 0,
+                    "top_income": [],
+                    "expense_categories": [],
+                    "source_note": "Sote source.",
+                },
+            },
+            "customers": [],
+            "receivables": 0,
+            "stock": [],
+            "production_volume": 0,
+            "ai_commentary": {},
+        }
+        chart_pdf._ceo_report_data = lambda question: report
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                output_path = Path(temp_dir) / "management-ai-visible.pdf"
+
+                self.assertTrue(chart_pdf.create_ceo_management_pdf_report("this year KPI pdf", output_path))
+                pdf_text = output_path.read_bytes().decode("latin-1")
+                self.assertIn("AI Commentary", pdf_text)
+                self.assertIn("AI commentary was not generated", pdf_text)
+        finally:
+            chart_pdf._ceo_report_data = original_report_data
 
     def test_sotephwar_voucher_pdf_uses_two_column_card_layout(self):
         original_choose_formula = chart_pdf.choose_formula

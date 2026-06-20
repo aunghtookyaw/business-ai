@@ -128,6 +128,16 @@ def _financial_obligations_table_ref():
     return f'"{schema}"."{table}"'
 
 
+def _payment_receive_table_ref():
+    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    table = getattr(
+        config,
+        "PAYMENT_RECEIVE_TABLE",
+        "Payment_Receive",
+    ).replace('"', '""')
+    return f'"{schema}"."{table}"'
+
+
 def _schema_ref(table):
     schema = config.TRANSACTION_SCHEMA.replace('"', '""')
     table = table.replace('"', '""')
@@ -241,6 +251,12 @@ def _fetch_all(sql, params=None):
 def _fetch_one(sql, params=None):
     rows = _fetch_all(sql, params)
     return rows[0] if rows else {}
+
+
+def _execute(sql, params=None):
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params or {})
 
 
 def _table_columns(schema, table):
@@ -1536,6 +1552,128 @@ def _parse_financial_obligation_insert(question):
         "next_due_date": next_due_date,
         "status": _extract_field_value(question, ("status",)) or "Active",
         "notes": _extract_field_value(question, ("notes", "note")) or "",
+    }
+
+
+def is_payment_receive_question(question):
+    text = _normalized_text(question)
+    return any(
+        phrase in text
+        for phrase in (
+            "payment receive",
+            "receive payment",
+            "received payment",
+            "payment received",
+            "collection rate",
+            "receivable summary",
+            "receivables summary",
+            "outstanding receivable",
+            "outstanding receivables",
+            "customer balance",
+            "customer balances",
+            "aging analysis",
+            "ageing analysis",
+            "receivable aging",
+            "receivable ageing",
+        )
+    )
+
+
+def _payment_receive_insert_requested(question):
+    text = _normalized_text(question)
+    words = set(text.split())
+    return is_payment_receive_question(question) and (
+        ("voucher" in words or "invoice" in words)
+        and bool(words & {"amount", "receive", "received", "payment", "paid", "got"})
+    )
+
+
+def _normalize_payment_sector(value):
+    text = _normalized_text(value or "")
+    if _contains_phrase(text, "farm"):
+        return "Farm"
+    if (
+        _contains_phrase(text, "sotephwar")
+        or _contains_phrase(text, "sote phwar")
+        or _contains_phrase(text, "sp extension")
+        or _contains_phrase(text, "extension")
+        or _contains_phrase(text, "sp production")
+        or _contains_phrase(text, "production")
+    ):
+        return "Sote Phwar"
+    return None
+
+
+def _payment_field_value(question, labels):
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    all_labels = (
+        "sector", "voucher", "voucher number", "voucher no", "invoice",
+        "invoice number", "invoice no", "amount", "receive amount",
+        "received amount", "payment amount", "method", "payment method",
+        "ref", "reference", "reference number", "notes", "note",
+        "recorded by", "user", "date", "receive date",
+    )
+    stop_pattern = "|".join(re.escape(label) for label in all_labels)
+    match = re.search(
+        rf"\b(?:{label_pattern})\s*[:=]?\s*(.+?)(?=\s+\b(?:{stop_pattern})\b\s*[:=]?|$)",
+        question,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return " ".join(match.group(1).strip(" .,").split()) or None
+
+
+def _parse_payment_receive(question):
+    sector = _normalize_payment_sector(_payment_field_value(question, ("sector",)) or question)
+
+    voucher = _payment_field_value(
+        question,
+        ("voucher number", "voucher no", "voucher", "invoice number", "invoice no", "invoice"),
+    )
+    if voucher:
+        voucher = re.split(
+            r"\b(?:amount|receive|received|payment|method|ref|reference|notes?|recorded by|date)\b",
+            voucher,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip(" .,")
+    if not voucher:
+        match = re.search(
+            r"\b(?:voucher|invoice)(?:\s+(?:number|no))?\s*[:=]?\s*([A-Za-z0-9._/-]+)",
+            question,
+            re.IGNORECASE,
+        )
+        voucher = match.group(1).strip(" .,") if match else None
+
+    amount_text = _payment_field_value(
+        question,
+        ("receive amount", "received amount", "payment amount", "amount"),
+    )
+    amount_match = re.search(r"\d[\d,]*", amount_text or "")
+    amount = int(amount_match.group(0).replace(",", "")) if amount_match else None
+    if amount is None:
+        raw_numbers = re.findall(r"\b\d[\d,]*\b", question)
+        voucher_digits = re.sub(r"\D", "", voucher or "")
+        amount_candidates = [
+            number for number in raw_numbers
+            if number.replace(",", "") != voucher_digits
+        ]
+        if amount_candidates:
+            amount = int(amount_candidates[-1].replace(",", ""))
+
+    period = normalize_period(question)
+    receive_date = _parse_date_value(period.replace("date:", "")) if period.startswith("date:") else None
+
+    return {
+        "receive_date": receive_date or date.today(),
+        "sector": sector,
+        "voucher_number": voucher,
+        "receive_amount": amount,
+        "payment_method": _payment_field_value(question, ("payment method", "method")) or "",
+        "reference_number": _payment_field_value(question, ("reference number", "reference", "ref")) or "",
+        "notes": _payment_field_value(question, ("notes", "note")) or "",
+        "recorded_by": _payment_field_value(question, ("recorded by", "user")) or "",
     }
 
 
@@ -2891,6 +3029,285 @@ def financial_obligation_insert(question):
     }
 
 
+def ensure_payment_receive_table():
+    _execute(
+        f'''
+        CREATE TABLE IF NOT EXISTS {_payment_receive_table_ref()} (
+          id BIGSERIAL PRIMARY KEY,
+          "Receive_Date" date NOT NULL,
+          "Sector" text NOT NULL,
+          "Voucher_Number" text NOT NULL,
+          "Customer" text,
+          "Invoice_Amount" numeric DEFAULT 0,
+          "Previous_Paid" numeric DEFAULT 0,
+          "Receive_Amount" numeric NOT NULL,
+          "Outstanding_Balance" numeric DEFAULT 0,
+          "Payment_Method" text,
+          "Reference_Number" text,
+          "Notes" text,
+          "Recorded_By" text,
+          "Created_At" timestamptz DEFAULT now(),
+          "Updated_At" timestamptz DEFAULT now()
+        )
+        '''
+    )
+
+
+def _payment_voucher_lookup(sector, voucher_number):
+    if sector == "Farm":
+        return _fetch_one(
+            f'''
+            SELECT
+              'Farm' AS sector,
+              COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
+              f."Date" AS invoice_date,
+              COALESCE({_linked_farm_customer_expr("f")}, '') AS customer,
+              COALESCE(f."Total_Due", 0) AS invoice_amount
+            FROM {_farm_transection_table_ref()} f
+            {_farm_customer_link_join("f")}
+            WHERE COALESCE(f.__nc_deleted, false) = false
+              AND f."Invoice_Number"::text = %(voucher_number)s
+            ORDER BY f."Date" DESC NULLS LAST, f.id DESC
+            LIMIT 1
+            ''',
+            {"voucher_number": voucher_number},
+        )
+
+    if sector == "Sote Phwar":
+        return _fetch_one(
+            f'''
+            SELECT
+              'Sote Phwar' AS sector,
+              COALESCE(s."Invoice_Number"::text, '') AS voucher_number,
+              s."Invoice_Date" AS invoice_date,
+              COALESCE({_linked_customer_expr("s")}, '') AS customer,
+              COALESCE(s."Total_Amount", 0) AS invoice_amount
+            FROM {_sotephwar_transection_table_ref()} s
+            {_sotephwar_customer_link_join("s")}
+            WHERE COALESCE(s.__nc_deleted, false) = false
+              AND s."Invoice_Number"::text = %(voucher_number)s
+            ORDER BY s."Invoice_Date" DESC NULLS LAST, s.id DESC
+            LIMIT 1
+            ''',
+            {"voucher_number": voucher_number},
+        )
+
+    return {}
+
+
+def _payment_previous_paid(sector, voucher_number):
+    row = _fetch_one(
+        f'''
+        SELECT COALESCE(SUM("Receive_Amount"), 0) AS previous_paid
+        FROM {_payment_receive_table_ref()}
+        WHERE "Sector" = %(sector)s
+          AND "Voucher_Number" = %(voucher_number)s
+        ''',
+        {"sector": sector, "voucher_number": voucher_number},
+    )
+    return int(row.get("previous_paid") or 0)
+
+
+def payment_receive_insert(question):
+    values = _parse_payment_receive(question)
+    missing = []
+    if not values.get("sector"):
+        missing.append("sector Farm or Sote Phwar")
+    if not values.get("voucher_number"):
+        missing.append("voucher number")
+    if not values.get("receive_amount"):
+        missing.append("receive amount")
+    if missing:
+        return {
+            "formula": "payment_receive_insert",
+            "period": "all_time",
+            "inserted": False,
+            "missing": missing,
+            "values": values,
+        }
+
+    ensure_payment_receive_table()
+    invoice = _payment_voucher_lookup(values["sector"], values["voucher_number"])
+    if not invoice:
+        return {
+            "formula": "payment_receive_insert",
+            "period": "all_time",
+            "inserted": False,
+            "missing": ["matching voucher"],
+            "values": values,
+        }
+
+    invoice_amount = int(invoice.get("invoice_amount") or 0)
+    previous_paid = _payment_previous_paid(values["sector"], values["voucher_number"])
+    receive_amount = int(values["receive_amount"] or 0)
+    outstanding_balance = invoice_amount - previous_paid - receive_amount
+
+    row = _fetch_one(
+        f'''
+        INSERT INTO {_payment_receive_table_ref()}
+          ("Receive_Date", "Sector", "Voucher_Number", "Customer", "Invoice_Amount",
+           "Previous_Paid", "Receive_Amount", "Outstanding_Balance", "Payment_Method",
+           "Reference_Number", "Notes", "Recorded_By")
+        VALUES
+          (%(receive_date)s, %(sector)s, %(voucher_number)s, %(customer)s, %(invoice_amount)s,
+           %(previous_paid)s, %(receive_amount)s, %(outstanding_balance)s, %(payment_method)s,
+           %(reference_number)s, %(notes)s, %(recorded_by)s)
+        RETURNING
+          id,
+          "Receive_Date" AS receive_date,
+          "Sector" AS sector,
+          "Voucher_Number" AS voucher_number,
+          "Customer" AS customer,
+          "Invoice_Amount" AS invoice_amount,
+          "Previous_Paid" AS previous_paid,
+          "Receive_Amount" AS receive_amount,
+          "Outstanding_Balance" AS outstanding_balance,
+          "Payment_Method" AS payment_method,
+          "Reference_Number" AS reference_number,
+          "Notes" AS notes,
+          "Recorded_By" AS recorded_by
+        ''',
+        {
+            **values,
+            "customer": invoice.get("customer") or "",
+            "invoice_amount": invoice_amount,
+            "previous_paid": previous_paid,
+            "receive_amount": receive_amount,
+            "outstanding_balance": outstanding_balance,
+        },
+    )
+    for field in ("invoice_amount", "previous_paid", "receive_amount", "outstanding_balance"):
+        row[field] = int(row.get(field) or 0)
+    return {
+        "formula": "payment_receive_insert",
+        "period": "all_time",
+        "inserted": True,
+        "payment": row,
+        "overpaid": outstanding_balance < 0,
+    }
+
+
+def payment_receive_summary(period="all_time", sector=None, limit=10):
+    ensure_payment_receive_table()
+    date_sql, params = _date_filter_for_column(period, "invoices.invoice_date")
+    sector_sql = ""
+    if sector:
+        sector_sql = "AND invoices.sector = %(sector)s"
+        params["sector"] = sector
+
+    rows = _fetch_all(
+        f'''
+        WITH invoices AS (
+          SELECT
+            'Farm' AS sector,
+            COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
+            f."Date" AS invoice_date,
+            COALESCE({_linked_farm_customer_expr("f")}, '') AS customer,
+            COALESCE(f."Total_Due", 0) AS invoice_amount
+          FROM {_farm_transection_table_ref()} f
+          {_farm_customer_link_join("f")}
+          WHERE COALESCE(f.__nc_deleted, false) = false
+            AND f."Invoice_Number" IS NOT NULL
+            AND f."Total_Due" IS NOT NULL
+          UNION ALL
+          SELECT
+            'Sote Phwar' AS sector,
+            COALESCE(s."Invoice_Number"::text, '') AS voucher_number,
+            s."Invoice_Date" AS invoice_date,
+            COALESCE({_linked_customer_expr("s")}, '') AS customer,
+            COALESCE(s."Total_Amount", 0) AS invoice_amount
+          FROM {_sotephwar_transection_table_ref()} s
+          {_sotephwar_customer_link_join("s")}
+          WHERE COALESCE(s.__nc_deleted, false) = false
+            AND s."Invoice_Number" IS NOT NULL
+            AND s."Total_Amount" IS NOT NULL
+        ),
+        payments AS (
+          SELECT
+            "Sector" AS sector,
+            "Voucher_Number" AS voucher_number,
+            COALESCE(SUM("Receive_Amount"), 0) AS received_amount,
+            MAX("Receive_Date") AS last_receive_date
+          FROM {_payment_receive_table_ref()}
+          GROUP BY "Sector", "Voucher_Number"
+        )
+        SELECT
+          invoices.sector,
+          invoices.voucher_number,
+          invoices.invoice_date,
+          invoices.customer,
+          COALESCE(invoices.invoice_amount, 0) AS invoice_amount,
+          COALESCE(payments.received_amount, 0) AS received_amount,
+          COALESCE(invoices.invoice_amount, 0) - COALESCE(payments.received_amount, 0) AS outstanding_balance,
+          payments.last_receive_date,
+          GREATEST(CURRENT_DATE - COALESCE(invoices.invoice_date::date, CURRENT_DATE), 0) AS age_days
+        FROM invoices
+        LEFT JOIN payments
+          ON payments.sector = invoices.sector
+         AND payments.voucher_number = invoices.voucher_number
+        WHERE COALESCE(invoices.invoice_amount, 0) > 0
+          {date_sql}
+          {sector_sql}
+        ORDER BY outstanding_balance DESC NULLS LAST, invoices.invoice_date NULLS LAST
+        ''',
+        params,
+    )
+
+    total_invoice_amount = 0
+    total_received = 0
+    outstanding_receivables = 0
+    aging = {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
+    customer_balances = {}
+    sector_totals = {}
+    invoices = []
+    for row in rows:
+        invoice_amount = int(row.get("invoice_amount") or 0)
+        received_amount = int(row.get("received_amount") or 0)
+        outstanding = int(row.get("outstanding_balance") or 0)
+        age_days = int(row.get("age_days") or 0)
+        total_invoice_amount += invoice_amount
+        total_received += received_amount
+        outstanding_receivables += outstanding
+        bucket = "0-30" if age_days <= 30 else "31-60" if age_days <= 60 else "61-90" if age_days <= 90 else "90+"
+        aging[bucket] += max(outstanding, 0)
+        customer = row.get("customer") or "-"
+        customer_balances[customer] = customer_balances.get(customer, 0) + outstanding
+        sector_name = row.get("sector") or "-"
+        sector_row = sector_totals.setdefault(
+            sector_name,
+            {"sector": sector_name, "invoice_amount": 0, "received_amount": 0, "outstanding_balance": 0},
+        )
+        sector_row["invoice_amount"] += invoice_amount
+        sector_row["received_amount"] += received_amount
+        sector_row["outstanding_balance"] += outstanding
+        row["invoice_amount"] = invoice_amount
+        row["received_amount"] = received_amount
+        row["outstanding_balance"] = outstanding
+        row["age_days"] = age_days
+        row["aging_bucket"] = bucket
+        invoices.append(row)
+
+    top_customer_balances = [
+        {"customer": customer, "outstanding_balance": balance}
+        for customer, balance in sorted(customer_balances.items(), key=lambda item: item[1], reverse=True)
+        if balance != 0
+    ][:limit]
+
+    return {
+        "formula": "payment_receive_summary",
+        "period": period,
+        "sector": sector,
+        "total_invoice_amount": total_invoice_amount,
+        "total_received": total_received,
+        "outstanding_receivables": outstanding_receivables,
+        "collection_rate_percent": round((total_received / total_invoice_amount) * 100, 2) if total_invoice_amount else 0,
+        "aging": aging,
+        "customer_balances": top_customer_balances,
+        "sector_totals": list(sector_totals.values()),
+        "invoices": invoices[:limit],
+    }
+
+
 FORMULAS = {
     "sales_total": sales_total,
     "expense_total": expense_total,
@@ -2917,6 +3334,8 @@ FORMULAS = {
     "financial_obligation_due": financial_obligation_due,
     "financial_obligation_list": financial_obligation_list,
     "financial_obligation_insert": financial_obligation_insert,
+    "payment_receive_insert": payment_receive_insert,
+    "payment_receive_summary": payment_receive_summary,
 }
 
 
@@ -2935,6 +3354,11 @@ def choose_formula_by_keywords(question):
         if "list" in normalized or "show" in normalized or "detail" in normalized or "creditor" in normalized:
             return "financial_obligation_list"
         return "financial_obligation_summary"
+
+    if is_payment_receive_question(question):
+        if _payment_receive_insert_requested(question):
+            return "payment_receive_insert"
+        return "payment_receive_summary"
 
     if is_sotephwar_inventory_question(question):
         normalized = _normalized_text(question)
@@ -3185,5 +3609,13 @@ def run_formula(formula_name, question):
             category=_financial_obligation_category_filter(question),
             creditor=_financial_obligation_creditor_filter(question),
             limit=extract_top_limit(question, default=20),
+        )
+    if formula_name == "payment_receive_insert":
+        return formula(question)
+    if formula_name == "payment_receive_summary":
+        return formula(
+            period,
+            sector=_normalize_payment_sector(question),
+            limit=extract_top_limit(question, default=10),
         )
     return formula(period, filters)

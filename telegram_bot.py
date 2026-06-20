@@ -679,7 +679,8 @@ def _send_bi_message(message, context, text, rows, include_back=True):
 
 def _show_bi_home(message, context):
     _reset_bi_state(context)
-    rows = _button_rows(BUSINESS_MENU, "bi:business")
+    rows = [[InlineKeyboardButton("Overall KPI", callback_data="bi:overall_kpi")]]
+    rows.extend(_button_rows(BUSINESS_MENU, "bi:business"))
     return _send_bi_message(
         message,
         context,
@@ -1036,6 +1037,9 @@ def handle_bi_callback(update: Update, context: CallbackContext):
 
     if data == "bi:home":
         _show_bi_home(message, context)
+        return
+    if data == "bi:overall_kpi":
+        _send_export(message, f"{PDF_EXPORT_COMMAND}:this year KPI pdf", context=context)
         return
     if data == "bi:cancel":
         _reset_bi_state(context)

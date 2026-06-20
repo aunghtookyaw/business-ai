@@ -123,6 +123,42 @@ class FinanceBotFilterTest(unittest.TestCase):
         self.assertIn("reply_markup", message.replies[0]["kwargs"])
         self.assertEqual("Business Intelligence", message.replies[1]["text"])
         self.assertIn("reply_markup", message.replies[1]["kwargs"])
+        markup = message.replies[1]["kwargs"]["reply_markup"]
+        first_button = markup.inline_keyboard[0][0]
+        self.assertEqual("Overall KPI", first_button.text)
+        self.assertEqual("bi:overall_kpi", first_button.callback_data)
+
+    def test_bi_overall_kpi_button_sends_yearly_kpi_pdf(self):
+        original_create_chart_pdf_report = telegram_bot.create_chart_pdf_report
+        original_answer_question = telegram_bot.answer_question
+        seen = []
+
+        def fake_create_chart_pdf_report(question, output_path, title=telegram_bot.PDF_EXPORT_TITLE):
+            seen.append({"question": question, "title": title})
+            with open(output_path, "wb") as pdf_file:
+                pdf_file.write(b"%PDF-1.4\noverall kpi\n%%EOF\n")
+            return True
+
+        def fail_answer_question(question):
+            raise AssertionError("Overall KPI should use chart PDF export directly")
+
+        telegram_bot.create_chart_pdf_report = fake_create_chart_pdf_report
+        telegram_bot.answer_question = fail_answer_question
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:overall_kpi")),
+                context,
+            )
+
+            self.assertEqual("document", message.replies[0]["type"])
+            self.assertEqual("this year KPI pdf", seen[0]["question"])
+            self.assertEqual(telegram_bot.CEO_PDF_EXPORT_TITLE, seen[0]["title"])
+        finally:
+            telegram_bot.create_chart_pdf_report = original_create_chart_pdf_report
+            telegram_bot.answer_question = original_answer_question
 
     def test_prompts_shows_prebuilt_prompt_enquiry_with_overall_kpi_first(self):
         message = FakeMessage(-1003850232296, 5)
