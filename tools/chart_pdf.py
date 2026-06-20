@@ -357,13 +357,13 @@ def _financial_total_spec(result, intent, amount_key):
         "total": total,
         "paid": paid,
         "outstanding": outstanding,
-        "values": [("Paid", paid), ("Outstanding", outstanding)],
+        "values": [("Received", paid), ("Outstanding", outstanding)],
         "trend_title": f"Monthly {module_title} Trend",
         "trend_values": _financial_total_trend(intent, amount_key),
         "table": [
             ("Metric", "Amount"),
             (f"Total {module_title}", total),
-            ("Paid", paid),
+            ("Received", paid),
             ("Outstanding", outstanding),
             ("Rows", result.get("expense_count", result.get("invoice_count", result.get("transaction_count", 0)))),
         ],
@@ -409,7 +409,7 @@ def _financial_category_spec(result, intent, report, amount_key):
         "paid": paid,
         "outstanding": outstanding,
         "values": [(row.get("category") or "-", row.get(amount_key) or abs(row.get("net", 0))) for row in rows],
-        "table": [("Category", module_title, "Paid", "Outstanding", "Rows")] + [
+        "table": [("Category", module_title, "Received", "Outstanding", "Rows")] + [
             (
                 row.get("category") or "-",
                 row.get(amount_key) or abs(row.get("net", 0)),
@@ -470,7 +470,7 @@ def _chart_spec(result, question):
             "categories": categories,
             "ai_comment": result.get("ai_comment") or "",
             "values": [(row.get("label") or row.get("period") or "-", row.get("total_expense", 0)) for row in periods],
-            "summary_table": [("Period", "Total Expense", "Paid", "Outstanding", "Rows")] + [
+            "summary_table": [("Period", "Total Expense", "Received", "Outstanding", "Rows")] + [
                 (
                     row.get("label") or row.get("period") or "-",
                     row.get("total_expense", 0),
@@ -572,7 +572,7 @@ def _chart_spec(result, question):
         total_sales = int(result.get("total_sales") or 0)
         paid = int(result.get("amount_received") or 0)
         outstanding = int(result.get("outstanding_amount") or 0)
-        values = [("Paid", paid), ("Outstanding", outstanding)]
+        values = [("Received", paid), ("Outstanding", outstanding)]
         if not any(value for _, value in values) and total_sales:
             values = [("Total Income", total_sales)]
         return {
@@ -603,7 +603,7 @@ def _chart_spec(result, question):
             "title": "Sote Phwar Vouchers",
             "reason": "Best method: two-column voucher cards keep customer, voucher number, paid amount, outstanding amount, and notes readable.",
             "vouchers": rows,
-            "table": [("Voucher", "Customer", "Total", "Paid", "Outstanding")] + [
+            "table": [("Voucher", "Customer", "Total", "Received", "Outstanding")] + [
                 (
                     row.get("invoice_number"),
                     row.get("customer_name"),
@@ -696,7 +696,7 @@ def _chart_spec(result, question):
             "paid": result.get("amount_received", 0),
             "outstanding": result.get("outstanding_amount", 0),
             "values": [(row.get("customer_name") or row.get("item") or "-", row.get("total_amount", row.get("amount", 0))) for row in customer_rows],
-            "table": [("Customer", "Income", "Paid", "Outstanding", "Rows")] + [
+            "table": [("Customer", "Income", "Received", "Outstanding", "Rows")] + [
                 (
                     row.get("customer_name") or row.get("item") or "-",
                     row.get("total_amount", row.get("amount", 0)),
@@ -801,7 +801,7 @@ def _customer_revenue_spec(title, total_sales, total_paid, total_outstanding, cu
             (row.get("customer_name") or row.get("item") or "-", row.get("total_amount", row.get("amount", 0)))
             for row in customer_rows[:12]
         ],
-        "table": [("Customer Name", "Total Sales", "Paid Amount", "Outstanding Amount")] + [
+        "table": [("Customer Name", "Total Sales", "Received Amount", "Outstanding Amount")] + [
             (
                 row.get("customer_name") or row.get("item") or "-",
                 row.get("total_amount", row.get("amount", 0)),
@@ -867,7 +867,7 @@ def _voucher_table_spec(title, vouchers):
         "paid": paid,
         "outstanding": outstanding,
         "vouchers": normalized,
-        "table": [("Voucher Number", "Date", "Customer", "Total", "Paid", "Outstanding")] + [
+        "table": [("Voucher Number", "Date", "Customer", "Total", "Received", "Outstanding")] + [
             (
                 row["invoice_number"],
                 row["invoice_date"],
@@ -1008,7 +1008,7 @@ def _unicode_voucher_lines(title, question, spec):
 
     lines.extend([
         f"Total: {_money(sum(int(row.get('total_amount') or 0) for row in vouchers))}",
-        f"Paid: {_money(sum(int(row.get('amount_received') or 0) for row in vouchers))}",
+        f"Received: {_money(sum(int(row.get('amount_received') or 0) for row in vouchers))}",
         f"Outstanding: {_money(sum(int(row.get('outstanding_amount') or 0) for row in vouchers))}",
         "",
     ])
@@ -1036,9 +1036,9 @@ def _unicode_voucher_table_lines(title, question, spec):
         "",
         spec.get("title") or "Income Detail",
         "",
-        f"Total: {_money(spec.get('total') or 0)} | Paid: {_money(spec.get('paid') or 0)} | Outstanding: {_money(spec.get('outstanding') or 0)}",
+        f"Total: {_money(spec.get('total') or 0)} | Received: {_money(spec.get('paid') or 0)} | Outstanding: {_money(spec.get('outstanding') or 0)}",
         "",
-        "Voucher Number | Date | Customer | Total | Paid | Outstanding",
+        "Voucher Number | Date | Customer | Total | Received | Outstanding",
     ]
     vouchers = spec.get("vouchers") or []
     if not vouchers:
@@ -1114,7 +1114,7 @@ def _unicode_customer_revenue_lines(title, question, spec):
         "",
         "KPI Summary",
         f"Total Sales: {_money(spec.get('total_sales') or 0)}",
-        f"Total Paid: {_money(spec.get('total_paid') or 0)}",
+        f"Total Received: {_money(spec.get('total_paid') or 0)}",
         f"Total Outstanding: {_money(spec.get('total_outstanding') or 0)}",
         "",
         "Top Customers by Revenue",
@@ -1134,7 +1134,7 @@ def _unicode_customer_revenue_lines(title, question, spec):
     lines.extend([
         "",
         "Customer Collection Status",
-        "Customer Name | Total Sales | Paid Amount | Outstanding Amount",
+        "Customer Name | Total Sales | Received Amount | Outstanding Amount",
     ])
     for row in customers:
         lines.append(
@@ -1495,7 +1495,7 @@ def _draw_financial_total_report(pdf, spec):
         pdf,
         [
             (spec.get("amount_label") or "Total", spec.get("total", 0)),
-            ("Paid", spec.get("paid", 0)),
+            ("Received", spec.get("paid", 0)),
             ("Outstanding", spec.get("outstanding", 0)),
         ],
         y=692,
@@ -1503,7 +1503,7 @@ def _draw_financial_total_report(pdf, spec):
     pdf.text(50, 610, spec.get("trend_title") or "Monthly Trend", size=11.5, bold=True)
     _draw_line_chart(pdf, spec.get("trend_values") or [], x=70, y=410, width=430, height=145)
 
-    pdf.text(50, 360, "Paid vs Outstanding", size=11.5, bold=True)
+    pdf.text(50, 360, "Received vs Outstanding", size=11.5, bold=True)
     _draw_pie(pdf, spec, cx=185, cy=235, radius=68)
 
     pdf.text(320, 360, "Collection Status Bar", size=11.5, bold=True)
@@ -1540,7 +1540,7 @@ def _draw_financial_category_report(pdf, spec):
         pdf,
         [
             (spec.get("amount_label") or "Total", spec.get("total", 0)),
-            ("Paid", spec.get("paid", 0)),
+            ("Received", spec.get("paid", 0)),
             ("Outstanding", spec.get("outstanding", 0)),
         ],
         y=692,
@@ -1563,7 +1563,7 @@ def _draw_financial_detail_report(pdf, spec):
         pdf,
         [
             (spec.get("amount_label") or "Total", spec.get("total", 0)),
-            ("Paid", spec.get("paid", 0)),
+            ("Received", spec.get("paid", 0)),
             ("Outstanding", spec.get("outstanding", 0)),
         ],
         y=692,
@@ -1720,7 +1720,7 @@ def _draw_voucher_cards(pdf, vouchers, start_y=620):
 def _draw_voucher_summary(pdf, vouchers, x=50, y=698):
     totals = [
         ("Total", sum(int(row.get("total_amount") or 0) for row in vouchers)),
-        ("Paid", sum(int(row.get("amount_received") or 0) for row in vouchers)),
+        ("Received", sum(int(row.get("amount_received") or 0) for row in vouchers)),
         ("Outstanding", sum(int(row.get("outstanding_amount") or 0) for row in vouchers)),
     ]
     cell_width = 165
@@ -1733,7 +1733,7 @@ def _draw_voucher_summary(pdf, vouchers, x=50, y=698):
 
 
 def _draw_voucher_table(pdf, vouchers, start_y=620):
-    headers = ("Voucher Number", "Date", "Customer", "Total", "Paid", "Outstanding")
+    headers = ("Voucher Number", "Date", "Customer", "Total", "Received", "Outstanding")
     column_width = 495 / len(headers)
     widths = [column_width] * len(headers)
     x_positions = [54 + (index * column_width) for index in range(len(headers))]
@@ -1999,7 +1999,7 @@ def _draw_customer_metric_card(pdf, x, y, label, value, fill):
 
 
 def _draw_customer_detail_table(pdf, rows, start_y=760):
-    headers = ("Customer Name", "Total Sales", "Paid Amount", "Outstanding Amount")
+    headers = ("Customer Name", "Total Sales", "Received Amount", "Outstanding Amount")
     widths = (205, 96, 96, 98)
     x_positions = (54, 259, 355, 451)
     y = start_y
@@ -2059,7 +2059,7 @@ def _draw_customer_collection_grouped_bars(pdf, rows, x=60, y=278, width=475, he
     group_height = max(16, min(28, (height - group_gap * (len(rows) - 1)) / len(rows)))
     series = [
         ("Sales", "total_amount", (47, 128, 237)),
-        ("Paid", "amount_received", (39, 174, 96)),
+        ("Received", "amount_received", (39, 174, 96)),
         ("Outstanding", "outstanding_amount", (235, 87, 87)),
     ]
 
@@ -2111,7 +2111,7 @@ def _draw_customer_revenue_report(pdf, spec, start_y=720):
     pdf.text(50, start_y - 28, "KPI Summary", size=11.2, bold=True)
     metric_y = start_y - 48
     _draw_customer_metric_card(pdf, 50, metric_y, "Total Sales", spec.get("total_sales", 0), (230, 239, 251))
-    _draw_customer_metric_card(pdf, 220, metric_y, "Total Paid", spec.get("total_paid", 0), (226, 242, 233))
+    _draw_customer_metric_card(pdf, 220, metric_y, "Total Received", spec.get("total_paid", 0), (226, 242, 233))
     _draw_customer_metric_card(pdf, 390, metric_y, "Total Outstanding", spec.get("total_outstanding", 0), (249, 233, 233))
 
     pdf.text(50, start_y - 120, "Top Customers by Revenue", size=11.2, bold=True)
@@ -2855,7 +2855,7 @@ def _draw_scope_customer_page(pdf, page_no, report, scope):
         )
         for row in rows[:12]
     ]
-    _draw_ceo_table(pdf, ("Customer / Item", "Revenue", "Paid", "Outstanding"), table_rows, y=705, widths=[210, 105, 95, 105], font_size=7.2)
+    _draw_ceo_table(pdf, ("Customer / Item", "Revenue", "Received", "Outstanding"), table_rows, y=705, widths=[210, 105, 95, 105], font_size=7.2)
     _draw_ceo_paragraph(pdf, "Collection Commentary", [
         "High-value customers or items should be checked for repeatability and collection timing.",
         "Outstanding balances should be reviewed before treating revenue growth as usable cash.",

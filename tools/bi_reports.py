@@ -104,7 +104,7 @@ def _customer_revenue_lines(result, customers, total_sales_key, total_paid_key=N
     lines = [
         "KPI Summary",
         f"Total Sales: {_money(total_sales)}",
-        f"Total Paid: {_money(total_paid)}",
+        f"Total Received: {_money(total_paid)}",
         f"Total Outstanding: {_money(total_outstanding)}",
         "",
         "Top Customers by Revenue",
@@ -116,7 +116,7 @@ def _customer_revenue_lines(result, customers, total_sales_key, total_paid_key=N
         paid = int(row.get("amount_received", sales) or 0)
         outstanding = int(row.get("outstanding_amount") or 0)
         lines.append(
-            "{index}. {customer} | Total Sales: {sales} | Paid: {paid} | Outstanding: {outstanding}".format(
+            "{index}. {customer} | Total Sales: {sales} | Received: {paid} | Outstanding: {outstanding}".format(
                 index=index,
                 customer=row.get("customer_name") or row.get("item") or row.get("category") or "-",
                 sales=_money(sales),
@@ -127,7 +127,7 @@ def _customer_revenue_lines(result, customers, total_sales_key, total_paid_key=N
     lines.extend([
         "",
         "Customer Collection Status",
-        "Customer Name | Total Sales | Paid Amount | Outstanding Amount",
+        "Customer Name | Total Sales | Received Amount | Outstanding Amount",
     ])
     for row in sorted_customers[:20]:
         sales = int(row.get("total_amount") or row.get("amount") or row.get("income") or 0)
@@ -184,9 +184,9 @@ def format_text_report(payload):
     elif formula == "sales_total":
         lines.append(f"Total income: {_money(result.get('total_sales', 0))}")
         if "amount_received" in result:
-            lines.append(f"Paid / received: {_money(result.get('amount_received', 0))}")
+            lines.append(f"Received: {_money(result.get('amount_received', 0))}")
         if "outstanding_amount" in result:
-            lines.append(f"Remained: {_money(result.get('outstanding_amount', 0))}")
+            lines.append(f"Outstanding: {_money(result.get('outstanding_amount', 0))}")
         income_rows = result.get("transection_income_rows") or []
         if income_rows:
             lines.extend(["", "Transection Income", "Date | Item | Amount | Payment"])
@@ -326,7 +326,7 @@ def _write_expense_comparison_excel(workbook, sheet, payload):
     periods = result.get("periods") or []
     categories = result.get("categories") or []
     sheet.append(["Expense Trend"])
-    sheet.append(["Period", "Total Expense", "Paid", "Outstanding", "Rows"])
+    sheet.append(["Period", "Total Expense", "Received", "Outstanding", "Rows"])
     for row in periods:
         sheet.append([
             row.get("label"),

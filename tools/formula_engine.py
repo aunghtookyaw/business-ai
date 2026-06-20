@@ -3053,6 +3053,17 @@ def ensure_payment_receive_table():
     )
 
 
+def ensure_voucher_summary_fields():
+    for table_ref in (_farm_transection_table_ref(), _sotephwar_transection_table_ref()):
+        _execute(
+            f'''
+            ALTER TABLE {table_ref}
+              ADD COLUMN IF NOT EXISTS "Total_Received" numeric DEFAULT 0,
+              ADD COLUMN IF NOT EXISTS "Outstanding_Balance" numeric DEFAULT 0
+            '''
+        )
+
+
 def _payment_voucher_lookup(sector, voucher_number):
     if sector == "Farm":
         return _fetch_one(
@@ -3060,15 +3071,14 @@ def _payment_voucher_lookup(sector, voucher_number):
             SELECT
               'Farm' AS sector,
               COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
-              f."Date" AS invoice_date,
-              COALESCE({_linked_farm_customer_expr("f")}, '') AS customer,
-              COALESCE(f."Total_Due", 0) AS invoice_amount
+              MIN(f."Date") AS invoice_date,
+              MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS customer,
+              COALESCE(SUM(f."Total_Due"), 0) AS invoice_amount
             FROM {_farm_transection_table_ref()} f
             {_farm_customer_link_join("f")}
             WHERE COALESCE(f.__nc_deleted, false) = false
               AND f."Invoice_Number"::text = %(voucher_number)s
-            ORDER BY f."Date" DESC NULLS LAST, f.id DESC
-            LIMIT 1
+            GROUP BY f."Invoice_Number"::text
             ''',
             {"voucher_number": voucher_number},
         )
@@ -3079,15 +3089,14 @@ def _payment_voucher_lookup(sector, voucher_number):
             SELECT
               'Sote Phwar' AS sector,
               COALESCE(s."Invoice_Number"::text, '') AS voucher_number,
-              s."Invoice_Date" AS invoice_date,
-              COALESCE({_linked_customer_expr("s")}, '') AS customer,
-              COALESCE(s."Total_Amount", 0) AS invoice_amount
+              MIN(s."Invoice_Date") AS invoice_date,
+              MIN(COALESCE({_linked_customer_expr("s")}, '')) AS customer,
+              COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount
             FROM {_sotephwar_transection_table_ref()} s
             {_sotephwar_customer_link_join("s")}
             WHERE COALESCE(s.__nc_deleted, false) = false
               AND s."Invoice_Number"::text = %(voucher_number)s
-            ORDER BY s."Invoice_Date" DESC NULLS LAST, s.id DESC
-            LIMIT 1
+            GROUP BY s."Invoice_Number"::text
             ''',
             {"voucher_number": voucher_number},
         )
@@ -3106,6 +3115,60 @@ def _payment_previous_paid(sector, voucher_number):
         {"sector": sector, "voucher_number": voucher_number},
     )
     return int(row.get("previous_paid") or 0)
+
+
+def _update_voucher_payment_summary(sector, voucher_number):
+    ensure_voucher_summary_fields()
+    total_row = _fetch_one(
+        f'''
+        SELECT COALESCE(SUM("Receive_Amount"), 0) AS total_received
+        FROM {_payment_receive_table_ref()}
+        WHERE "Sector" = %(sector)s
+          AND "Voucher_Number" = %(voucher_number)s
+        ''',
+        {"sector": sector, "voucher_number": voucher_number},
+    )
+    total_received = int(total_row.get("total_received") or 0)
+
+    voucher = _payment_voucher_lookup(sector, voucher_number)
+    voucher_total = int(voucher.get("invoice_amount") or 0)
+    outstanding_balance = voucher_total - total_received
+
+    params = {
+        "voucher_number": voucher_number,
+        "total_received": total_received,
+        "outstanding_balance": outstanding_balance,
+    }
+    if sector == "Farm":
+        _execute(
+            f'''
+            UPDATE {_farm_transection_table_ref()}
+            SET
+              "Total_Received" = %(total_received)s,
+              "Outstanding_Balance" = %(outstanding_balance)s
+            WHERE COALESCE(__nc_deleted, false) = false
+              AND "Invoice_Number"::text = %(voucher_number)s
+            ''',
+            params,
+        )
+    elif sector == "Sote Phwar":
+        _execute(
+            f'''
+            UPDATE {_sotephwar_transection_table_ref()}
+            SET
+              "Total_Received" = %(total_received)s,
+              "Outstanding_Balance" = %(outstanding_balance)s
+            WHERE COALESCE(__nc_deleted, false) = false
+              AND "Invoice_Number"::text = %(voucher_number)s
+            ''',
+            params,
+        )
+
+    return {
+        "voucher_total": voucher_total,
+        "total_received": total_received,
+        "outstanding_balance": outstanding_balance,
+    }
 
 
 def payment_receive_insert(question):
@@ -3127,6 +3190,7 @@ def payment_receive_insert(question):
         }
 
     ensure_payment_receive_table()
+    ensure_voucher_summary_fields()
     invoice = _payment_voucher_lookup(values["sector"], values["voucher_number"])
     if not invoice:
         return {
@@ -3178,12 +3242,14 @@ def payment_receive_insert(question):
     )
     for field in ("invoice_amount", "previous_paid", "receive_amount", "outstanding_balance"):
         row[field] = int(row.get(field) or 0)
+    summary = _update_voucher_payment_summary(values["sector"], values["voucher_number"])
     return {
         "formula": "payment_receive_insert",
         "period": "all_time",
         "inserted": True,
         "payment": row,
-        "overpaid": outstanding_balance < 0,
+        "summary": summary,
+        "overpaid": summary["outstanding_balance"] < 0,
     }
 
 

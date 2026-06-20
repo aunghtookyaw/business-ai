@@ -297,9 +297,9 @@ def _fast_answer(result):
             return f"Total sales for {period}: 0\nNo matching income data found."
         lines = [f"Total sales for {period}: {total:,}"]
         if "amount_received" in result:
-            lines.append(f"Paid / received: {result['amount_received']:,}")
+            lines.append(f"Received: {result['amount_received']:,}")
         if "outstanding_amount" in result:
-            lines.append(f"Remained: {result['outstanding_amount']:,}")
+            lines.append(f"Outstanding: {result['outstanding_amount']:,}")
         income_rows = result.get("transection_income_rows") or []
         if income_rows:
             lines.extend(["", "Transection Income"])
@@ -383,7 +383,7 @@ def _fast_answer(result):
                 "",
                 "KPI Summary",
                 f"Total Sales: {total_sales:,}",
-                f"Total Paid: {total_paid:,}",
+                f"Total Received: {total_paid:,}",
                 f"Total Outstanding: {total_outstanding:,}",
                 "",
                 "Top Customers by Revenue",
@@ -396,12 +396,12 @@ def _fast_answer(result):
                 outstanding = int(row.get("outstanding_amount") or 0)
                 lines.append(
                     f"{index}. {row.get('customer_name') or row.get('category') or row.get('item') or '-'} | "
-                    f"Total Sales: {sales:,} | Paid: {paid:,} | Outstanding: {outstanding:,}"
+                    f"Total Sales: {sales:,} | Received: {paid:,} | Outstanding: {outstanding:,}"
                 )
             lines.extend([
                 "",
                 "Customer Collection Status",
-                "Customer Name | Total Sales | Paid Amount | Outstanding Amount",
+                "Customer Name | Total Sales | Received Amount | Outstanding Amount",
             ])
             for row in customers[:20]:
                 sales = int(row.get("income") or row.get("total_amount") or row.get("amount") or 0)
@@ -426,9 +426,9 @@ def _fast_answer(result):
                 f"expense {row['expense']:,}, net {row['net']:,}, rows {row['transaction_count']:,}"
             )
             if "amount_received" in row:
-                line += f", paid {row['amount_received']:,}"
+                line += f", received {row['amount_received']:,}"
             if "outstanding_amount" in row:
-                line += f", remained {row['outstanding_amount']:,}"
+                line += f", outstanding {row['outstanding_amount']:,}"
             lines.append(line)
         return "\n".join(lines)
 
@@ -452,8 +452,8 @@ def _fast_answer(result):
                 lines.append(
                     f"{index}. {name} ({row['sector']} / {row['category']})\n"
                     f"Total sales: {row['total_amount']:,}\n"
-                    f"Paid / received: {row.get('amount_received', 0):,}\n"
-                    f"Remained: {row.get('outstanding_amount', 0):,}\n"
+                    f"Received: {row.get('amount_received', 0):,}\n"
+                    f"Outstanding: {row.get('outstanding_amount', 0):,}\n"
                     f"Invoices: {row.get('invoice_count', 0):,}"
                 )
                 continue
@@ -491,7 +491,7 @@ def _fast_answer(result):
             "",
             "KPI Summary",
             f"Total Sales: {result['total_amount']:,}",
-            f"Total Paid: {result['amount_received']:,}",
+            f"Total Received: {result['amount_received']:,}",
             f"Total Outstanding: {result['outstanding_amount']:,}",
             "",
             "Top Customers by Revenue",
@@ -502,13 +502,13 @@ def _fast_answer(result):
             lines.append(
                 f"{index}. {row.get('customer_name') or row.get('item') or '-'} | "
                 f"Total Sales: {int(row.get('total_amount') or row.get('amount') or 0):,} | "
-                f"Paid: {int(row.get('amount_received') or 0):,} | "
+                f"Received: {int(row.get('amount_received') or 0):,} | "
                 f"Outstanding: {int(row.get('outstanding_amount') or 0):,}"
             )
         lines.extend([
             "",
             "Customer Collection Status",
-            "Customer Name | Total Sales | Paid Amount | Outstanding Amount",
+            "Customer Name | Total Sales | Received Amount | Outstanding Amount",
         ])
         for row in customers[:20]:
             lines.append(

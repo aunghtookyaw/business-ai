@@ -627,13 +627,14 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual("partial", values["notes"])
         self.assertEqual("Admin", values["recorded_by"])
 
-    def test_payment_receive_insert_inserts_history_without_sales_update(self):
+    def test_payment_receive_insert_updates_voucher_summary_without_invoice_totals(self):
         captured = {"sql": []}
         original_execute = formula_engine._execute
         original_fetch_one = formula_engine._fetch_one
 
         def fake_execute(sql, params=None):
             captured["sql"].append(sql)
+            captured.setdefault("execute_params", []).append(params)
 
         def fake_fetch_one(sql, params=None):
             captured["sql"].append(sql)
@@ -646,8 +647,6 @@ class BusinessAgentRoutingTest(unittest.TestCase):
                     "customer": "Aye Aye",
                     "invoice_amount": 1000000,
                 }
-            if "SUM(\"Receive_Amount\")" in sql:
-                return {"previous_paid": 200000}
             if "INSERT INTO" in sql:
                 return {
                     "id": 1,
@@ -664,6 +663,10 @@ class BusinessAgentRoutingTest(unittest.TestCase):
                     "notes": params["notes"],
                     "recorded_by": params["recorded_by"],
                 }
+            if "AS previous_paid" in sql:
+                return {"previous_paid": 200000}
+            if "AS total_received" in sql:
+                return {"total_received": 500000}
             return {}
 
         formula_engine._execute = fake_execute
@@ -681,12 +684,19 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual(200000, result["payment"]["previous_paid"])
         self.assertEqual(300000, result["payment"]["receive_amount"])
         self.assertEqual(500000, result["payment"]["outstanding_balance"])
+        self.assertEqual(1000000, result["summary"]["voucher_total"])
+        self.assertEqual(500000, result["summary"]["total_received"])
+        self.assertEqual(500000, result["summary"]["outstanding_balance"])
         sql_text = "\n".join(captured["sql"])
         self.assertIn("INSERT INTO", sql_text)
         self.assertIn("Payment_Receive", sql_text)
-        self.assertNotIn("UPDATE", sql_text)
+        self.assertIn("UPDATE", sql_text)
+        self.assertIn('"Total_Received" = %(total_received)s', sql_text)
+        self.assertIn('"Outstanding_Balance" = %(outstanding_balance)s', sql_text)
         self.assertNotIn('"Paid" =', sql_text)
         self.assertNotIn('"Amount_Received" =', sql_text)
+        self.assertNotIn('"Total_Due" =', sql_text)
+        self.assertNotIn('"Total_Amount" =', sql_text)
 
     def test_payment_receive_summary_answer_shows_kpis(self):
         answer = business_agent._fast_answer({
@@ -1186,7 +1196,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         self.assertIn("KPI Summary", answer)
         self.assertIn("Total Sales: 4,200", answer)
-        self.assertIn("Total Paid: 3,500", answer)
+        self.assertIn("Total Received: 3,500", answer)
         self.assertIn("Total Outstanding: 700", answer)
         self.assertIn("Top Customers by Revenue", answer)
         self.assertIn("Customer Collection Status", answer)
@@ -1265,7 +1275,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         self.assertIn("KPI Summary", answer)
         self.assertIn("Total Sales: 4,600", answer)
-        self.assertIn("Total Paid: 2,900", answer)
+        self.assertIn("Total Received: 2,900", answer)
         self.assertIn("Top Customers by Revenue", answer)
         self.assertIn("Customer Collection Status", answer)
         self.assertLess(answer.find("Makro"), answer.find("Bala"))
