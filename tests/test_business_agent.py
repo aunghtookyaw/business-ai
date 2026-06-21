@@ -351,7 +351,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         self.assertTrue(result["unpaid_only"])
         self.assertIn(
-            'COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0) > 0',
+            'COALESCE("Outstanding_Balance", 0) > 0',
             captured["sql"],
         )
         self.assertIn('cust."customer_name"', captured["sql"])
@@ -728,8 +728,10 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertIn("Payment_Receive", sql_text)
         self.assertIn("UPDATE", sql_text)
         self.assertIn('"Total_Received" = allocated.row_received', sql_text)
-        self.assertIn('"Outstanding_Balance" = COALESCE(target."Total_Amount", 0) - allocated.row_received', sql_text)
-        self.assertIn('"Payment_Status" = %(payment_status)s', sql_text)
+        self.assertIn('"Outstanding_Balance" = GREATEST(COALESCE(target."Total_Amount", 0) - allocated.row_received, 0)', sql_text)
+        self.assertIn('"Payment_Status" = CASE', sql_text)
+        self.assertIn("WHEN GREATEST(COALESCE(target.\"Total_Amount\", 0) - allocated.row_received, 0) = 0", sql_text)
+        self.assertIn("WHEN allocated.row_received > 0 THEN 'Partial'", sql_text)
         self.assertNotIn('"Paid" =', sql_text)
         self.assertNotIn('"Amount_Received" =', sql_text)
         self.assertNotIn('"Total_Due" =', sql_text)

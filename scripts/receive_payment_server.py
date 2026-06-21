@@ -52,7 +52,12 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
         MIN(f."Date") AS "Invoice_Date",
         COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total",
         COALESCE(SUM(f."Total_Received"), 0) AS "Total_Received",
-        COALESCE(SUM(f."Outstanding_Balance"), 0) AS "Outstanding_Balance"
+        COALESCE(SUM(f."Outstanding_Balance"), 0) AS "Outstanding_Balance",
+        CASE
+          WHEN COALESCE(SUM(f."Outstanding_Balance"), 0) = 0 AND COALESCE(SUM(f."Total_Received"), 0) > 0 THEN 'Paid'
+          WHEN COALESCE(SUM(f."Total_Received"), 0) > 0 THEN 'Partial'
+          ELSE 'Outstanding'
+        END AS "Payment_Status"
       FROM "{schema}"."farm_transection" f
       WHERE COALESCE(f.__nc_deleted, false) = false
         AND f."Invoice_Number" IS NOT NULL
@@ -67,7 +72,12 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
         MIN(s."Invoice_Date") AS "Invoice_Date",
         COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total",
         COALESCE(SUM(s."Total_Received"), 0) AS "Total_Received",
-        COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Outstanding_Balance"
+        COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Outstanding_Balance",
+        CASE
+          WHEN COALESCE(SUM(s."Outstanding_Balance"), 0) = 0 AND COALESCE(SUM(s."Total_Received"), 0) > 0 THEN 'Paid'
+          WHEN COALESCE(SUM(s."Total_Received"), 0) > 0 THEN 'Partial'
+          ELSE 'Outstanding'
+        END AS "Payment_Status"
       FROM "{schema}"."Sotephwar_Transection" s
       WHERE COALESCE(s.__nc_deleted, false) = false
         AND s."Invoice_Number" IS NOT NULL
@@ -88,8 +98,34 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
       0 AS "Legacy_Received",
       vg."Total_Received" AS "New_Received",
       vg."Total_Received",
-      vg."Outstanding_Balance"
+      vg."Outstanding_Balance",
+      vg."Payment_Status"
     FROM voucher_groups vg
+    {where_sql}
+    {order_sql}
+    {limit_sql}
+    '''
+
+
+def _sotephwar_listing_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY s."Invoice_Date" DESC NULLS LAST, s."Invoice_Number" DESC, s.id DESC'):
+    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    return f'''
+    SELECT
+      'Sote Phwar' AS "Sector",
+      s."Invoice_Number"::text AS "Invoice_Number",
+      COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') AS "Customer",
+      COALESCE(NULLIF(TRIM(s."Item"), ''), '') AS "Sote_Type",
+      s."Invoice_Date" AS "Invoice_Date",
+      COALESCE(s."Total_Amount", 0) AS "Voucher_Total",
+      0 AS "Legacy_Received",
+      COALESCE(s."Total_Received", 0) AS "New_Received",
+      COALESCE(s."Total_Received", 0) AS "Total_Received",
+      COALESCE(s."Outstanding_Balance", 0) AS "Outstanding_Balance",
+      COALESCE(s."Payment_Status", '') AS "Payment_Status"
+    FROM "{schema}"."Sotephwar_Transection" s
+    WHERE COALESCE(s.__nc_deleted, false) = false
+      AND s."Invoice_Number" IS NOT NULL
+      AND s."Customer_Name" IS NOT NULL
     {where_sql}
     {order_sql}
     {limit_sql}
@@ -101,17 +137,39 @@ def _money_value(value):
 
 
 def _voucher_payload(row):
+    sector = row["Sector"]
+    customer = row.get("Customer") or row.get("Customer_Name") or ""
+    sote_type = row.get("Sote_Type") or row.get("Item") or ""
+    voucher_total = row.get("Voucher_Total")
+    total_received = row.get("Total_Received")
+    outstanding_balance = row.get("Outstanding_Balance")
+    payment_status = row.get("Payment_Status") or ""
+    if sector == "Sote Phwar" and "Customer_Name" in row:
+        return {
+            "sector": sector,
+            "invoice_number": row["Invoice_Number"],
+            "customer": customer,
+            "sote_type": sote_type,
+            "invoice_date": row["Invoice_Date"].isoformat() if row["Invoice_Date"] else "",
+            "voucher_total": _money_value(voucher_total),
+            "legacy_received": 0,
+            "new_received": _money_value(total_received),
+            "total_received": _money_value(total_received),
+            "outstanding_balance": _money_value(outstanding_balance),
+            "payment_status": payment_status,
+        }
     return {
-        "sector": row["Sector"],
+        "sector": sector,
         "invoice_number": row["Invoice_Number"],
-        "customer": row["Customer"] or "",
-        "sote_type": row.get("Sote_Type") or "",
+        "customer": customer,
+        "sote_type": sote_type,
         "invoice_date": row["Invoice_Date"].isoformat() if row["Invoice_Date"] else "",
-        "voucher_total": _money_value(row["Voucher_Total"]),
-        "legacy_received": _money_value(row["Legacy_Received"]),
-        "new_received": _money_value(row["New_Received"]),
-        "total_received": _money_value(row["Total_Received"]),
-        "outstanding_balance": _money_value(row["Outstanding_Balance"]),
+        "voucher_total": _money_value(voucher_total),
+        "legacy_received": _money_value(row.get("Legacy_Received")),
+        "new_received": _money_value(row.get("New_Received")),
+        "total_received": _money_value(total_received),
+        "outstanding_balance": _money_value(outstanding_balance),
+        "payment_status": payment_status,
     }
 
 
@@ -142,10 +200,39 @@ def _normalize_sector_filter(value):
 
 def _list_vouchers(search="", sector="", voucher_number="", invoice_date="", customer=""):
     formula_engine.ensure_payment_receive_table()
-    where_sql = ""
     params = {}
-    conditions = []
     sector = _normalize_sector_filter(sector)
+    if sector == "Sote Phwar":
+        conditions = ['COALESCE(s."Outstanding_Balance", 0) > 0']
+        if search:
+            conditions.append('''
+            (s."Invoice_Number"::text ILIKE %(search)s
+               OR COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') ILIKE %(search)s
+               OR COALESCE(NULLIF(TRIM(s."Item"), ''), '') ILIKE %(search)s)
+            ''')
+            params["search"] = f"%{search}%"
+        if voucher_number:
+            conditions.append('s."Invoice_Number"::text ILIKE %(voucher_number)s')
+            params["voucher_number"] = f"%{voucher_number}%"
+        if invoice_date:
+            conditions.append('s."Invoice_Date" = %(invoice_date)s')
+            params["invoice_date"] = invoice_date
+        if customer:
+            conditions.append('COALESCE(NULLIF(TRIM(s."Customer_Name"), \'\'), \'\') ILIKE %(customer)s')
+            params["customer"] = f"%{customer}%"
+        where_sql = " AND " + " AND ".join(conditions)
+        with _connect() as conn:
+            conn.set_session(readonly=True)
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    _sotephwar_listing_query(where_sql=where_sql, order_sql='ORDER BY s."Invoice_Date" DESC NULLS LAST, s."Invoice_Number" DESC, s.id DESC'),
+                    params,
+                )
+                rows = cur.fetchall()
+                conn.rollback()
+        return [_voucher_payload(row) for row in rows]
+
+    conditions = []
     if sector:
         conditions.append('vg."Sector" = %(sector)s')
         params["sector"] = sector
@@ -166,8 +253,13 @@ def _list_vouchers(search="", sector="", voucher_number="", invoice_date="", cus
     if customer:
         conditions.append('COALESCE(vg."Customer", \'\') ILIKE %(customer)s')
         params["customer"] = f"%{customer}%"
-    if conditions:
-        where_sql = "WHERE " + " AND ".join(conditions)
+    conditions.append('''
+    (
+      COALESCE(vg."Outstanding_Balance", 0) > 0
+      OR COALESCE(vg."Payment_Status", '') IN ('Outstanding', 'Partial')
+    )
+    ''')
+    where_sql = "WHERE " + " AND ".join(conditions)
 
     with _connect() as conn:
         conn.set_session(readonly=True)
@@ -586,21 +678,25 @@ def receive_payment_basic_page():
         return _basic_payment_page("Voucher not found.", error=True, **filter_values)
 
     previous_paid = voucher["total_received"]
-    outstanding_after_payment = voucher["voucher_total"] - previous_paid - receive_amount
-    _insert_payment_receive(
-        sector=sector,
-        voucher_number=invoice_number,
-        customer=voucher["customer"],
-        invoice_amount=voucher["voucher_total"],
-        previous_paid=previous_paid,
-        receive_amount=receive_amount,
-        outstanding_balance=outstanding_after_payment,
-        payment_method=payment_method,
-        reference_number=reference_number,
-        notes=notes,
-        recorded_by="Receive Payment Basic Page",
-    )
-    formula_engine._update_voucher_payment_summary(sector, invoice_number)
+    outstanding_after_payment = max(voucher["voucher_total"] - previous_paid - receive_amount, 0)
+    try:
+        _insert_payment_receive(
+            sector=sector,
+            voucher_number=invoice_number,
+            customer=voucher["customer"],
+            invoice_amount=voucher["voucher_total"],
+            previous_paid=previous_paid,
+            receive_amount=receive_amount,
+            outstanding_balance=outstanding_after_payment,
+            payment_method=payment_method,
+            reference_number=reference_number,
+            notes=notes,
+            recorded_by="Receive Payment Basic Page",
+        )
+    except LookupError:
+        return _basic_payment_page("Voucher not found.", error=True, **filter_values)
+    except ValueError as exc:
+        return _basic_payment_page(str(exc), error=True, **filter_values)
     return _basic_payment_page("Payment saved. Totals refreshed.", **filter_values)
 
 
@@ -658,22 +754,26 @@ def create_payment_receive():
         return jsonify({"ok": False, "error": "Voucher not found"}), 404
 
     previous_paid = voucher["total_received"]
-    outstanding_after_payment = voucher["voucher_total"] - previous_paid - receive_amount
-    row = _insert_payment_receive(
-        sector=sector,
-        voucher_number=invoice_number,
-        customer=voucher["customer"],
-        invoice_amount=voucher["voucher_total"],
-        previous_paid=previous_paid,
-        receive_amount=receive_amount,
-        outstanding_balance=outstanding_after_payment,
-        payment_method=payment_method,
-        reference_number=reference_number,
-        notes=notes,
-        recorded_by=recorded_by,
-    )
+    outstanding_after_payment = max(voucher["voucher_total"] - previous_paid - receive_amount, 0)
+    try:
+        row = _insert_payment_receive(
+            sector=sector,
+            voucher_number=invoice_number,
+            customer=voucher["customer"],
+            invoice_amount=voucher["voucher_total"],
+            previous_paid=previous_paid,
+            receive_amount=receive_amount,
+            outstanding_balance=outstanding_after_payment,
+            payment_method=payment_method,
+            reference_number=reference_number,
+            notes=notes,
+            recorded_by=recorded_by,
+        )
+    except LookupError:
+        return jsonify({"ok": False, "error": "Voucher not found"}), 404
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
-    formula_engine._update_voucher_payment_summary(sector, invoice_number)
     refreshed = _fetch_voucher(sector, invoice_number)
     return jsonify({"ok": True, "payment": row, "voucher": refreshed})
 
@@ -705,40 +805,16 @@ def _payment_total_received(sector, voucher_number):
 
 
 def _insert_payment_receive(**values):
-    formula_engine.ensure_payment_receive_table()
-    formula_engine.ensure_voucher_summary_fields()
-    with _connect() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                f'''
-                INSERT INTO {formula_engine._payment_receive_table_ref()}
-                  ("Receive_Date", "Sector", "Voucher_Number", "Customer", "Invoice_Amount",
-                   "Previous_Paid", "Receive_Amount", "Outstanding_Balance", "Payment_Method",
-                   "Reference_Number", "Notes", "Recorded_By")
-                VALUES
-                  (%(receive_date)s, %(sector)s, %(voucher_number)s, %(customer)s, %(invoice_amount)s,
-                   %(previous_paid)s, %(receive_amount)s, %(outstanding_balance)s, %(payment_method)s,
-                   %(reference_number)s, %(notes)s, %(recorded_by)s)
-                RETURNING
-                  id,
-                  "Receive_Date" AS receive_date,
-                  "Sector" AS sector,
-                  "Voucher_Number" AS voucher_number,
-                  "Customer" AS customer,
-                  "Invoice_Amount" AS invoice_amount,
-                  "Previous_Paid" AS previous_paid,
-                  "Receive_Amount" AS receive_amount,
-                  "Outstanding_Balance" AS outstanding_balance,
-                  "Payment_Method" AS payment_method,
-                  "Reference_Number" AS reference_number,
-                  "Notes" AS notes,
-                  "Recorded_By" AS recorded_by
-                ''',
-                {"receive_date": date.today(), **values},
-            )
-            row = dict(cur.fetchone())
-        conn.commit()
-
+    saved = formula_engine.save_payment_receive(
+        sector=values["sector"],
+        voucher_number=values["voucher_number"],
+        receive_amount=values["receive_amount"],
+        payment_method=values.get("payment_method") or "",
+        reference_number=values.get("reference_number") or "",
+        notes=values.get("notes") or "",
+        recorded_by=values.get("recorded_by") or "",
+    )
+    row = dict(saved["payment"])
     for key in ("invoice_amount", "previous_paid", "receive_amount", "outstanding_balance"):
         row[key] = _money_value(row.get(key))
     if row.get("receive_date"):

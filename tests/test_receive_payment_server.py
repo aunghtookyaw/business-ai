@@ -78,11 +78,25 @@ class ReceivePaymentServerTest(unittest.TestCase):
         self.assertIn("Could not load vouchers: database unavailable", html)
         self.assertIn("No vouchers are available.", html)
 
+    def test_sotephwar_listing_query_uses_raw_rows(self):
+        sql = receive_payment_server._sotephwar_listing_query(
+            where_sql='WHERE COALESCE(s."Outstanding_Balance", 0) > 0'
+        )
+
+        self.assertIn('FROM "', sql)
+        self.assertIn('"Sotephwar_Transection" s', sql)
+        self.assertIn('s."Customer_Name"', sql)
+        self.assertIn('s."Item"', sql)
+        self.assertIn('s."Invoice_Number"::text', sql)
+        self.assertIn('COALESCE(s."Outstanding_Balance", 0) > 0', sql)
+        self.assertNotIn('MIN(NULLIF(TRIM(s."Customer_Name")', sql)
+        self.assertNotIn('GROUP BY s."Invoice_Number"', sql)
+
     def test_create_payment_receive_inserts_history_and_returns_refreshed_voucher(self):
         calls = []
+        fetch_count = {"count": 0}
         original_fetch_voucher = receive_payment_server._fetch_voucher
         original_insert = receive_payment_server._insert_payment_receive
-        original_update = receive_payment_server.formula_engine._update_voucher_payment_summary
 
         vouchers = [
             {
@@ -113,7 +127,8 @@ class ReceivePaymentServerTest(unittest.TestCase):
 
         def fake_fetch_voucher(sector, invoice_number):
             calls.append(("fetch", sector, invoice_number))
-            return vouchers[1] if ("update", sector, invoice_number) in calls else vouchers[0]
+            fetch_count["count"] += 1
+            return vouchers[1] if fetch_count["count"] > 1 else vouchers[0]
 
         def fake_insert_payment_receive(**values):
             calls.append(("insert", values))
@@ -122,14 +137,13 @@ class ReceivePaymentServerTest(unittest.TestCase):
                 "sector": values["sector"],
                 "voucher_number": values["voucher_number"],
                 "receive_amount": values["receive_amount"],
+                "invoice_amount": values["invoice_amount"],
+                "previous_paid": values["previous_paid"],
+                "outstanding_balance": values["outstanding_balance"],
             }
-
-        def fake_update_summary(sector, invoice_number):
-            calls.append(("update", sector, invoice_number))
 
         receive_payment_server._fetch_voucher = fake_fetch_voucher
         receive_payment_server._insert_payment_receive = fake_insert_payment_receive
-        receive_payment_server.formula_engine._update_voucher_payment_summary = fake_update_summary
         try:
             client = receive_payment_server.app.test_client()
             response = client.post(
@@ -146,7 +160,6 @@ class ReceivePaymentServerTest(unittest.TestCase):
         finally:
             receive_payment_server._fetch_voucher = original_fetch_voucher
             receive_payment_server._insert_payment_receive = original_insert
-            receive_payment_server.formula_engine._update_voucher_payment_summary = original_update
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
@@ -155,11 +168,53 @@ class ReceivePaymentServerTest(unittest.TestCase):
         self.assertEqual(300000, payload["voucher"]["total_received"])
         self.assertEqual(2828000, payload["voucher"]["outstanding_balance"])
         self.assertEqual("insert", calls[1][0])
-        self.assertEqual("update", calls[2][0])
         inserted = calls[1][1]
         self.assertEqual(3128000, inserted["invoice_amount"])
         self.assertEqual(200000, inserted["previous_paid"])
         self.assertEqual(2828000, inserted["outstanding_balance"])
+
+    def test_api_payment_receive_rejects_negative_outstanding(self):
+        original_fetch_voucher = receive_payment_server._fetch_voucher
+        original_insert = receive_payment_server._insert_payment_receive
+
+        def fake_fetch_voucher(sector, invoice_number):
+            return {
+                "sector": sector,
+                "invoice_number": invoice_number,
+                "customer": "Makro",
+                "sote_type": "",
+                "invoice_date": "2026-06-11",
+                "voucher_total": 100000,
+                "legacy_received": 0,
+                "new_received": 0,
+                "total_received": 100000,
+                "outstanding_balance": 0,
+            }
+
+        def fake_insert_payment_receive(**values):
+            raise ValueError("Outstanding_Balance cannot be negative.")
+
+        receive_payment_server._fetch_voucher = fake_fetch_voucher
+        receive_payment_server._insert_payment_receive = fake_insert_payment_receive
+        try:
+            client = receive_payment_server.app.test_client()
+            response = client.post(
+                "/api/payment-receive",
+                json={
+                    "sector": "Farm",
+                    "invoice_number": "75",
+                    "receive_amount": "1",
+                    "payment_method": "Cash",
+                },
+            )
+        finally:
+            receive_payment_server._fetch_voucher = original_fetch_voucher
+            receive_payment_server._insert_payment_receive = original_insert
+
+        self.assertEqual(400, response.status_code)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("Outstanding_Balance cannot be negative", payload["error"])
 
 
 if __name__ == "__main__":

@@ -300,13 +300,21 @@ def _financial_totals(result, amount_key):
     if not total and rows:
         row_amount_key = "amount" if result.get("transactions") else ("total_amount" if result.get("invoices") else amount_key)
         total = sum(int(row.get(row_amount_key) or 0) for row in rows)
-    received = int(result.get("amount_received", result.get("received", 0)) or 0)
-    if not received:
+    if result.get("amount_received") is not None:
+        received = int(result.get("amount_received") or 0)
+    elif result.get("received") is not None:
+        received = int(result.get("received") or 0)
+    else:
+        received = 0
+    if received == 0 and "amount_received" not in result and "received" not in result:
         received = sum(int(row.get("amount_received") or 0) for row in rows)
-    if not received and total:
+    if received == 0 and "amount_received" not in result and "received" not in result and total:
         received = total
-    outstanding = int(result.get("outstanding_amount", 0) or 0)
-    if not outstanding:
+    if result.get("outstanding_amount") is not None:
+        outstanding = int(result.get("outstanding_amount") or 0)
+    else:
+        outstanding = 0
+    if outstanding == 0 and "outstanding_amount" not in result:
         outstanding = sum(int(row.get("outstanding_amount") or 0) for row in rows)
     return total, received, outstanding
 
@@ -862,7 +870,7 @@ def _farm_customer_revenue_spec(result, title="Farm Customer Revenue Report"):
         customers.append({
             "customer_name": row.get("customer_name") or row.get("category") or row.get("item") or "-",
             "total_amount": total_amount,
-            "amount_received": int(row.get("amount_received", total_amount) or 0),
+            "amount_received": int(row["amount_received"] if row.get("amount_received") is not None else total_amount),
             "outstanding_amount": int(row.get("outstanding_amount") or 0),
             "invoice_count": int(row.get("transaction_count") or row.get("invoice_count") or 0),
         })
@@ -885,8 +893,16 @@ def _voucher_table_spec(title, vouchers):
     normalized = []
     for row in vouchers or []:
         total = int(row.get("total_amount") or row.get("amount") or 0)
-        received = int(row.get("amount_received") or row.get("received") or total or 0)
-        outstanding = int(row.get("outstanding_amount") or max(total - received, 0) or 0)
+        if row.get("amount_received") is not None:
+            received = int(row.get("amount_received") or 0)
+        elif row.get("received") is not None:
+            received = int(row.get("received") or 0)
+        else:
+            received = total
+        if row.get("outstanding_amount") is not None:
+            outstanding = int(row.get("outstanding_amount") or 0)
+        else:
+            outstanding = max(total - received, 0)
         normalized.append({
             "invoice_number": row.get("invoice_number") or row.get("voucher_number") or "-",
             "invoice_date": row.get("invoice_date") or row.get("Date") or row.get("date") or "-",
@@ -940,7 +956,7 @@ def _farm_financial_spec(result, question, intent):
                     "item": f"{row.get('transaction_count', 0)} transactions",
                     "payment": "",
                     "amount": amount,
-                    "amount_received": row.get("amount_received", amount),
+                    "amount_received": row["amount_received"] if row.get("amount_received") is not None else amount,
                     "outstanding_amount": row.get("outstanding_amount", 0),
                 })
                 total += amount
@@ -956,7 +972,7 @@ def _farm_financial_spec(result, question, intent):
                 "item": row.get("item") or "",
                 "payment": row.get("payment_method") or "",
                 "amount": amount,
-                "amount_received": row.get("amount_received", amount if is_income else ""),
+                "amount_received": row["amount_received"] if row.get("amount_received") is not None else amount if is_income else "",
                 "outstanding_amount": row.get("outstanding_amount", 0 if is_income else ""),
             })
             total += amount
@@ -971,7 +987,7 @@ def _farm_financial_spec(result, question, intent):
                 "item": row.get("item") or "",
                 "payment": row.get("payment_method") or "",
                 "amount": amount,
-                "amount_received": row.get("amount_received", amount if is_income else ""),
+                "amount_received": row["amount_received"] if row.get("amount_received") is not None else amount if is_income else "",
                 "outstanding_amount": row.get("outstanding_amount", 0 if is_income else ""),
             })
             total += amount
