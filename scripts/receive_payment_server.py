@@ -17,6 +17,9 @@ from tools import formula_engine
 
 
 app = Flask(__name__)
+DEFAULT_HOST = os.environ.get("RECEIVE_PAYMENT_HOST", "127.0.0.1")
+# Chromium blocks 5060 as an unsafe SIP port, so default to a nearby browser-safe port.
+DEFAULT_PORT = int(os.environ.get("RECEIVE_PAYMENT_PORT", "5059"))
 
 
 @app.after_request
@@ -39,45 +42,64 @@ def _connect():
 
 def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Invoice_Date" DESC NULLS LAST, "Sector", "Invoice_Number"'):
     schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    payment_table = formula_engine._payment_receive_table_ref()
     return f'''
-    WITH voucher_groups AS (
+    WITH payment_totals AS (
+      SELECT
+        "Sector",
+        "Voucher_Number",
+        COALESCE(SUM("Receive_Amount"), 0) AS "New_Received"
+      FROM {payment_table}
+      GROUP BY "Sector", "Voucher_Number"
+    ),
+    farm_groups AS (
       SELECT
         'Farm' AS "Sector",
         f."Invoice_Number"::text AS "Invoice_Number",
         MIN(NULLIF(TRIM(f."Customer"), '')) AS "Customer",
+        '' AS "Sote_Type",
         MIN(f."Date") AS "Invoice_Date",
         COALESCE(SUM(f."Total_Due"), 0) AS "Voucher_Total",
-        COALESCE(MAX(f."Total_Received"), 0) AS "Total_Received",
-        COALESCE(MAX(f."Outstanding_Balance"), 0) AS "Outstanding_Balance"
+        COALESCE(SUM(f."Paid"), 0) AS "Legacy_Received"
       FROM "{schema}"."farm_transection" f
       WHERE COALESCE(f.__nc_deleted, false) = false
         AND f."Invoice_Number" IS NOT NULL
       GROUP BY f."Invoice_Number"::text
-
-      UNION ALL
-
+    ),
+    sote_groups AS (
       SELECT
         'Sote Phwar' AS "Sector",
         s."Invoice_Number"::text AS "Invoice_Number",
         MIN(NULLIF(TRIM(s."Customer_Name"), '')) AS "Customer",
+        COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(s."Item"), ''), ', ' ORDER BY NULLIF(TRIM(s."Item"), '')), '') AS "Sote_Type",
         MIN(s."Invoice_Date") AS "Invoice_Date",
         COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total",
-        COALESCE(MAX(s."Total_Received"), 0) AS "Total_Received",
-        COALESCE(MAX(s."Outstanding_Balance"), 0) AS "Outstanding_Balance"
+        COALESCE(SUM(s."Amount_Received"), 0) AS "Legacy_Received"
       FROM "{schema}"."Sotephwar_Transection" s
       WHERE COALESCE(s.__nc_deleted, false) = false
         AND s."Invoice_Number" IS NOT NULL
       GROUP BY s."Invoice_Number"::text
+    ),
+    voucher_groups AS (
+      SELECT * FROM farm_groups
+      UNION ALL
+      SELECT * FROM sote_groups
     )
     SELECT
-      "Sector",
-      "Invoice_Number",
-      COALESCE("Customer", '') AS "Customer",
-      "Invoice_Date",
-      "Voucher_Total",
-      "Total_Received",
-      "Outstanding_Balance"
-    FROM voucher_groups
+      vg."Sector",
+      vg."Invoice_Number",
+      COALESCE(vg."Customer", '') AS "Customer",
+      COALESCE(vg."Sote_Type", '') AS "Sote_Type",
+      vg."Invoice_Date",
+      vg."Voucher_Total",
+      vg."Legacy_Received",
+      COALESCE(pt."New_Received", 0) AS "New_Received",
+      vg."Legacy_Received" + COALESCE(pt."New_Received", 0) AS "Total_Received",
+      vg."Voucher_Total" - vg."Legacy_Received" - COALESCE(pt."New_Received", 0) AS "Outstanding_Balance"
+    FROM voucher_groups vg
+    LEFT JOIN payment_totals pt
+      ON pt."Sector" = vg."Sector"
+     AND pt."Voucher_Number" = vg."Invoice_Number"
     {where_sql}
     {order_sql}
     {limit_sql}
@@ -93,8 +115,11 @@ def _voucher_payload(row):
         "sector": row["Sector"],
         "invoice_number": row["Invoice_Number"],
         "customer": row["Customer"] or "",
+        "sote_type": row.get("Sote_Type") or "",
         "invoice_date": row["Invoice_Date"].isoformat() if row["Invoice_Date"] else "",
         "voucher_total": _money_value(row["Voucher_Total"]),
+        "legacy_received": _money_value(row["Legacy_Received"]),
+        "new_received": _money_value(row["New_Received"]),
         "total_received": _money_value(row["Total_Received"]),
         "outstanding_balance": _money_value(row["Outstanding_Balance"]),
     }
@@ -106,7 +131,7 @@ def _fetch_voucher(sector, invoice_number):
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 _voucher_query(
-                    where_sql='WHERE "Sector" = %(sector)s AND "Invoice_Number" = %(invoice_number)s',
+                    where_sql='WHERE vg."Sector" = %(sector)s AND vg."Invoice_Number" = %(invoice_number)s',
                     limit_sql="LIMIT 1",
                     order_sql="",
                 ),
@@ -117,16 +142,42 @@ def _fetch_voucher(sector, invoice_number):
     return _voucher_payload(row) if row else None
 
 
-def _list_vouchers(search=""):
+def _normalize_sector_filter(value):
+    if value == "Farm":
+        return "Farm"
+    if value in {"Sote Phwar", "Sotephwar"}:
+        return "Sote Phwar"
+    return ""
+
+
+def _list_vouchers(search="", sector="", voucher_number="", invoice_date="", customer=""):
+    formula_engine.ensure_payment_receive_table()
     where_sql = ""
     params = {}
+    conditions = []
+    sector = _normalize_sector_filter(sector)
+    if sector:
+        conditions.append('vg."Sector" = %(sector)s')
+        params["sector"] = sector
     if search:
-        where_sql = '''
-        WHERE "Sector" ILIKE %(search)s
-           OR "Invoice_Number" ILIKE %(search)s
-           OR COALESCE("Customer", '') ILIKE %(search)s
-        '''
+        conditions.append('''
+        (vg."Sector" ILIKE %(search)s
+           OR vg."Invoice_Number" ILIKE %(search)s
+           OR COALESCE(vg."Customer", '') ILIKE %(search)s
+           OR COALESCE(vg."Sote_Type", '') ILIKE %(search)s)
+        ''')
         params["search"] = f"%{search}%"
+    if voucher_number:
+        conditions.append('vg."Invoice_Number" ILIKE %(voucher_number)s')
+        params["voucher_number"] = f"%{voucher_number}%"
+    if invoice_date:
+        conditions.append('vg."Invoice_Date" = %(invoice_date)s')
+        params["invoice_date"] = invoice_date
+    if customer:
+        conditions.append('COALESCE(vg."Customer", \'\') ILIKE %(customer)s')
+        params["customer"] = f"%{customer}%"
+    if conditions:
+        where_sql = "WHERE " + " AND ".join(conditions)
 
     with _connect() as conn:
         conn.set_session(readonly=True)
@@ -137,6 +188,43 @@ def _list_vouchers(search=""):
     return [_voucher_payload(row) for row in rows]
 
 
+def _customer_suggestions(sector=""):
+    sector = _normalize_sector_filter(sector)
+    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    queries = []
+    if sector in {"", "Farm"}:
+        queries.append(f'''
+            SELECT DISTINCT NULLIF(TRIM("Customer"), '') AS customer
+            FROM "{schema}"."farm_transection"
+            WHERE COALESCE(__nc_deleted, false) = false
+              AND NULLIF(TRIM("Customer"), '') IS NOT NULL
+        ''')
+    if sector in {"", "Sote Phwar"}:
+        queries.append(f'''
+            SELECT DISTINCT NULLIF(TRIM("Customer_Name"), '') AS customer
+            FROM "{schema}"."Sotephwar_Transection"
+            WHERE COALESCE(__nc_deleted, false) = false
+              AND NULLIF(TRIM("Customer_Name"), '') IS NOT NULL
+        ''')
+    if not queries:
+        return []
+
+    with _connect() as conn:
+        conn.set_session(readonly=True)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f'''
+                SELECT customer
+                FROM ({" UNION ".join(queries)}) customers
+                ORDER BY customer
+                LIMIT 300
+                '''
+            )
+            rows = cur.fetchall()
+            conn.rollback()
+    return [row["customer"] for row in rows if row.get("customer")]
+
+
 def _server_render_rows(vouchers):
     rows = []
     for voucher in vouchers:
@@ -145,6 +233,7 @@ def _server_render_rows(vouchers):
             f"<td>{escape(voucher['sector'])}</td>"
             f"<td>{escape(voucher['invoice_number'])}</td>"
             f"<td>{escape(voucher['customer'])}</td>"
+            f"<td>{escape(voucher['sote_type'])}</td>"
             f"<td>{escape(voucher['invoice_date'])}</td>"
             f"<td>{voucher['voucher_total']:,}</td>"
             f"<td>{voucher['total_received']:,}</td>"
@@ -154,22 +243,68 @@ def _server_render_rows(vouchers):
     return "\n".join(rows)
 
 
-def _basic_payment_page(message="", error=False):
-    vouchers = _list_vouchers()
+def _sector_option(value, label, sector_filter):
+    selected = " selected" if value == sector_filter else ""
+    return f'<option value="{escape(value)}"{selected}>{escape(label)}</option>'
+
+
+def _basic_payment_page(
+    message="",
+    error=False,
+    sector_filter="Farm",
+    voucher_number_filter="",
+    invoice_date_filter="",
+    customer_filter="",
+):
+    sector_filter = _normalize_sector_filter(sector_filter) or ""
+    voucher_number_filter = (voucher_number_filter or "").strip()
+    invoice_date_filter = (invoice_date_filter or "").strip()
+    customer_filter = (customer_filter or "").strip()
+    try:
+        vouchers = _list_vouchers(
+            sector=sector_filter,
+            voucher_number=voucher_number_filter,
+            invoice_date=invoice_date_filter,
+            customer=customer_filter,
+        )
+    except Exception as exc:
+        vouchers = []
+        message = f"Could not load vouchers: {exc}"
+        error = True
+
+    try:
+        customer_options = "\n".join(
+            f'<option value="{escape(customer)}"></option>'
+            for customer in _customer_suggestions(sector_filter)
+        )
+    except Exception:
+        customer_options = ""
+
     rows = []
     for voucher in vouchers:
         key = f"{voucher['sector']}||{voucher['invoice_number']}"
+        summary = (
+            f"{voucher['sector']} / {voucher['invoice_number']} / "
+            f"{voucher['customer'] or '-'} / Outstanding {voucher['outstanding_balance']:,}"
+        )
         rows.append(
-            "<tr>"
-            f"<td><input type=\"radio\" name=\"voucher_key\" value=\"{escape(key)}\" required></td>"
+            f"<tr class=\"voucher-row\" data-voucher-summary=\"{escape(summary)}\" tabindex=\"0\">"
+            f"<td><input type=\"radio\" name=\"voucher_key\" value=\"{escape(key)}\" aria-label=\"Select voucher {escape(summary)}\" required></td>"
             f"<td>{escape(voucher['sector'])}</td>"
             f"<td>{escape(voucher['invoice_number'])}</td>"
             f"<td>{escape(voucher['customer'])}</td>"
+            f"<td>{escape(voucher['sote_type'])}</td>"
             f"<td>{escape(voucher['invoice_date'])}</td>"
             f"<td>{voucher['voucher_total']:,}</td>"
             f"<td>{voucher['total_received']:,}</td>"
             f"<td>{voucher['outstanding_balance']:,}</td>"
             "</tr>"
+        )
+    if not rows:
+        rows.append(
+            '<tr><td colspan="9" class="empty">'
+            "No vouchers are available. Check the database connection, then refresh this page."
+            "</td></tr>"
         )
     status_html = ""
     if message:
@@ -187,25 +322,69 @@ def _basic_payment_page(message="", error=False):
           header {{ padding: 18px 22px; background: #fff; border-bottom: 1px solid #ccc; }}
           main {{ padding: 16px; }}
           form {{ display: grid; grid-template-columns: 1fr 360px; gap: 16px; }}
+          .filters {{ display: flex; align-items: end; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #ddd; }}
+          .filters form {{ display: grid; grid-template-columns: 150px 160px 170px minmax(220px, 1fr) auto; gap: 10px; align-items: end; width: 100%; }}
           section {{ background: #fff; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }}
           .side {{ padding: 14px; }}
           .table-wrap {{ max-height: calc(100vh - 120px); overflow: auto; }}
-          table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+          table {{ width: 100%; min-width: 980px; border-collapse: collapse; table-layout: auto; }}
           th, td {{ padding: 8px; border-bottom: 1px solid #ddd; text-align: left; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
           th {{ background: #f1f3f5; }}
-          input, textarea, button {{ width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border-radius: 4px; border: 1px solid #bbb; }}
+          .voucher-row {{ cursor: pointer; }}
+          .voucher-row:hover {{ background: #f1faf7; }}
+          .voucher-row.selected {{ background: #dff3ee; outline: 2px solid #176b5d; outline-offset: -2px; }}
+          input, textarea, button, select {{ width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border-radius: 4px; border: 1px solid #bbb; }}
+          input[readonly] {{ background: #f8fafc; color: #374151; }}
           button {{ margin-top: 10px; background: #176b5d; color: white; border: 0; cursor: pointer; font-weight: bold; }}
+          .filters button {{ width: auto; min-width: 92px; margin-top: 0; }}
           label {{ display: block; margin: 10px 0 4px; font-size: 12px; font-weight: bold; color: #555; }}
           .ok {{ color: #176b5d; font-weight: bold; }}
           .error {{ color: #b00020; font-weight: bold; }}
-          @media (max-width: 900px) {{ form {{ grid-template-columns: 1fr; }} }}
+          .empty {{ color: #6b7280; white-space: normal; padding: 18px; }}
+          @media (max-width: 900px) {{
+            form {{ grid-template-columns: 1fr; }}
+            .filters form {{ grid-template-columns: 1fr 1fr; }}
+            .filters button {{ width: 100%; }}
+          }}
         </style>
       </head>
       <body>
         <header><h1>Receive Payment Basic</h1></header>
         <main>
           {status_html}
+          <section class="filters">
+            <form method="get" action="/receive-payment-basic">
+              <div>
+                <label>Sector</label>
+                <select name="sector">
+                  {_sector_option("Farm", "Farm", sector_filter)}
+                  {_sector_option("Sote Phwar", "Sote Phwar", sector_filter)}
+                  {_sector_option("", "All sectors", sector_filter)}
+                </select>
+              </div>
+              <div>
+                <label>Voucher Number</label>
+                <input name="voucher_number" value="{escape(voucher_number_filter)}" inputmode="numeric" placeholder="Type voucher no.">
+              </div>
+              <div>
+                <label>Date</label>
+                <input name="invoice_date" value="{escape(invoice_date_filter)}" type="date">
+              </div>
+              <div>
+                <label>Customer Name</label>
+                <input name="customer" value="{escape(customer_filter)}" list="customerSuggestions" autocomplete="off" placeholder="Type customer name">
+                <datalist id="customerSuggestions">
+                  {customer_options}
+                </datalist>
+              </div>
+              <button type="submit">View</button>
+            </form>
+          </section>
           <form method="post" action="/receive-payment-basic">
+            <input type="hidden" name="sector_filter" value="{escape(sector_filter)}">
+            <input type="hidden" name="voucher_number_filter" value="{escape(voucher_number_filter)}">
+            <input type="hidden" name="invoice_date_filter" value="{escape(invoice_date_filter)}">
+            <input type="hidden" name="customer_filter" value="{escape(customer_filter)}">
             <section>
               <div class="table-wrap">
                 <table>
@@ -215,6 +394,7 @@ def _basic_payment_page(message="", error=False):
                       <th>Sector</th>
                       <th>Invoice Number</th>
                       <th>Customer</th>
+                      <th>Sote Type / Item</th>
                       <th>Invoice Date</th>
                       <th>Voucher Total</th>
                       <th>Total Received</th>
@@ -226,8 +406,10 @@ def _basic_payment_page(message="", error=False):
               </div>
             </section>
             <section class="side">
+              <label>Selected Voucher</label>
+              <input id="selectedVoucher" value="Click a voucher row on the left" readonly>
               <label>Receive Amount</label>
-              <input name="receive_amount" inputmode="numeric" required>
+              <input name="receive_amount" inputmode="numeric" placeholder="Enter new receive amount only" required>
               <label>Payment Method</label>
               <input name="payment_method" placeholder="Cash, KPay, Bank...">
               <label>Reference Number</label>
@@ -238,9 +420,34 @@ def _basic_payment_page(message="", error=False):
             </section>
           </form>
         </main>
+        <script>
+          const rows = Array.from(document.querySelectorAll('.voucher-row'));
+          const selectedVoucher = document.getElementById('selectedVoucher');
+          const receiveAmount = document.querySelector('input[name="receive_amount"]');
+
+          function selectRow(row) {{
+            rows.forEach(item => item.classList.remove('selected'));
+            row.classList.add('selected');
+            const radio = row.querySelector('input[type="radio"]');
+            radio.checked = true;
+            selectedVoucher.value = row.dataset.voucherSummary || radio.value;
+            receiveAmount.focus();
+          }}
+
+          rows.forEach(row => {{
+            row.addEventListener('click', () => selectRow(row));
+            row.addEventListener('keydown', event => {{
+              if (event.key === 'Enter' || event.key === ' ') {{
+                event.preventDefault();
+                selectRow(row);
+              }}
+            }});
+            row.querySelector('input[type="radio"]').addEventListener('change', () => selectRow(row));
+          }});
+        </script>
       </body>
     </html>
-    ''', 200, {"Cache-Control": "no-store, max-age=0"}
+    ''', 200, {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
 
 @app.get("/")
@@ -302,6 +509,7 @@ def plain_page():
         f"<td>{escape(v['sector'])}</td>"
         f"<td>{escape(v['invoice_number'])}</td>"
         f"<td>{escape(v['customer'])}</td>"
+        f"<td>{escape(v['sote_type'])}</td>"
         f"<td>{escape(v['invoice_date'])}</td>"
         f"<td>{v['voucher_total']:,}</td>"
         f"<td>{v['total_received']:,}</td>"
@@ -331,6 +539,7 @@ def plain_page():
               <th>Sector</th>
               <th>Invoice Number</th>
               <th>Customer</th>
+              <th>Sote Type / Item</th>
               <th>Invoice Date</th>
               <th>Voucher Total</th>
               <th>Total Received</th>
@@ -346,12 +555,30 @@ def plain_page():
 
 @app.route("/receive-payment-basic", methods=["GET", "POST"])
 def receive_payment_basic_page():
+    sector_filter = _normalize_sector_filter(
+        request.values.get("sector") or request.values.get("sector_filter") or "Farm"
+    )
+    voucher_number_filter = (
+        request.values.get("voucher_number") or request.values.get("voucher_number_filter") or ""
+    ).strip()
+    invoice_date_filter = (
+        request.values.get("invoice_date") or request.values.get("invoice_date_filter") or ""
+    ).strip()
+    customer_filter = (
+        request.values.get("customer") or request.values.get("customer_filter") or ""
+    ).strip()
+    filter_values = {
+        "sector_filter": sector_filter,
+        "voucher_number_filter": voucher_number_filter,
+        "invoice_date_filter": invoice_date_filter,
+        "customer_filter": customer_filter,
+    }
     if request.method == "GET":
-        return _basic_payment_page()
+        return _basic_payment_page(**filter_values)
 
     voucher_key = request.form.get("voucher_key") or ""
     if "||" not in voucher_key:
-        return _basic_payment_page("Select a voucher before saving.", error=True)
+        return _basic_payment_page("Select a voucher before saving.", error=True, **filter_values)
     sector, invoice_number = voucher_key.split("||", 1)
     payment_method = (request.form.get("payment_method") or "").strip()
     reference_number = (request.form.get("reference_number") or "").strip()
@@ -362,13 +589,13 @@ def receive_payment_basic_page():
         receive_amount = 0
 
     if receive_amount <= 0:
-        return _basic_payment_page("Receive Amount must be greater than zero.", error=True)
+        return _basic_payment_page("Receive Amount must be greater than zero.", error=True, **filter_values)
 
     voucher = _fetch_voucher(sector, invoice_number)
     if not voucher:
-        return _basic_payment_page("Voucher not found.", error=True)
+        return _basic_payment_page("Voucher not found.", error=True, **filter_values)
 
-    previous_paid = _payment_total_received(sector, invoice_number)
+    previous_paid = voucher["total_received"]
     outstanding_after_payment = voucher["voucher_total"] - previous_paid - receive_amount
     _insert_payment_receive(
         sector=sector,
@@ -384,13 +611,20 @@ def receive_payment_basic_page():
         recorded_by="Receive Payment Basic Page",
     )
     formula_engine._update_voucher_payment_summary(sector, invoice_number)
-    return _basic_payment_page("Payment saved. Totals refreshed.")
+    return _basic_payment_page("Payment saved. Totals refreshed.", **filter_values)
 
 
 @app.get("/api/vouchers")
 def list_vouchers():
     search = (request.args.get("q") or "").strip()
-    return jsonify({"ok": True, "vouchers": _list_vouchers(search)})
+    sector = (request.args.get("sector") or "").strip()
+    voucher_number = (request.args.get("voucher_number") or "").strip()
+    invoice_date = (request.args.get("invoice_date") or "").strip()
+    customer = (request.args.get("customer") or "").strip()
+    return jsonify({
+        "ok": True,
+        "vouchers": _list_vouchers(search, sector, voucher_number, invoice_date, customer),
+    })
 
 
 @app.get("/api/voucher")
@@ -433,7 +667,7 @@ def create_payment_receive():
     if not voucher:
         return jsonify({"ok": False, "error": "Voucher not found"}), 404
 
-    previous_paid = _payment_total_received(sector, invoice_number)
+    previous_paid = voucher["total_received"]
     outstanding_after_payment = voucher["voucher_total"] - previous_paid - receive_amount
     row = _insert_payment_receive(
         sector=sector,
@@ -602,8 +836,9 @@ PAGE_HTML = r'''<!doctype html>
     button:disabled { opacity: .5; cursor: not-allowed; }
     table {
       width: 100%;
+      min-width: 980px;
       border-collapse: collapse;
-      table-layout: fixed;
+      table-layout: auto;
     }
     th, td {
       padding: 9px 10px;
@@ -662,6 +897,7 @@ PAGE_HTML = r'''<!doctype html>
               <th>Sector</th>
               <th>Invoice Number</th>
               <th>Customer</th>
+              <th>Sote Type / Item</th>
               <th>Invoice Date</th>
               <th>Voucher Total</th>
               <th>Total Received</th>
@@ -678,6 +914,7 @@ PAGE_HTML = r'''<!doctype html>
         <div class="field"><label>Sector</label><input id="sector" readonly></div>
         <div class="field"><label>Invoice Number</label><input id="invoiceNumber" readonly></div>
         <div class="field"><label>Customer</label><input id="customer" readonly></div>
+        <div class="field"><label>Sote Type / Item</label><input id="soteType" readonly></div>
         <div class="field"><label>Invoice Date</label><input id="invoiceDate" readonly></div>
         <div class="field"><label>Voucher Total</label><input id="voucherTotal" readonly></div>
         <div class="field"><label>Total Received</label><input id="totalReceived" readonly></div>
@@ -714,6 +951,7 @@ PAGE_HTML = r'''<!doctype html>
       document.getElementById('sector').value = voucher?.sector || '';
       document.getElementById('invoiceNumber').value = voucher?.invoice_number || '';
       document.getElementById('customer').value = voucher?.customer || '';
+      document.getElementById('soteType').value = voucher?.sote_type || '';
       document.getElementById('invoiceDate').value = voucher?.invoice_date || '';
       document.getElementById('voucherTotal').value = voucher ? money(voucher.voucher_total) : '';
       document.getElementById('totalReceived').value = voucher ? money(voucher.total_received) : '';
@@ -731,6 +969,7 @@ PAGE_HTML = r'''<!doctype html>
           <td>${v.sector}</td>
           <td>${v.invoice_number}</td>
           <td>${v.customer || ''}</td>
+          <td>${v.sote_type || ''}</td>
           <td>${v.invoice_date || ''}</td>
           <td>${money(v.voucher_total)}</td>
           <td>${money(v.total_received)}</td>
@@ -803,4 +1042,4 @@ PAGE_HTML = r'''<!doctype html>
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5060)
+    app.run(host=DEFAULT_HOST, port=DEFAULT_PORT)

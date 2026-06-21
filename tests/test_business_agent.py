@@ -646,6 +646,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
                     "invoice_date": "2026-06-01",
                     "customer": "Aye Aye",
                     "invoice_amount": 1000000,
+                    "legacy_received": 200000,
                 }
             if "INSERT INTO" in sql:
                 return {
@@ -663,10 +664,10 @@ class BusinessAgentRoutingTest(unittest.TestCase):
                     "notes": params["notes"],
                     "recorded_by": params["recorded_by"],
                 }
-            if "AS previous_paid" in sql:
-                return {"previous_paid": 200000}
-            if "AS total_received" in sql:
-                return {"total_received": 500000}
+            if "AS payment_received" in sql:
+                payment_calls = captured.setdefault("payment_calls", 0)
+                captured["payment_calls"] = payment_calls + 1
+                return {"payment_received": 0 if payment_calls == 0 else 300000}
             return {}
 
         formula_engine._execute = fake_execute
@@ -687,12 +688,14 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual(1000000, result["summary"]["voucher_total"])
         self.assertEqual(500000, result["summary"]["total_received"])
         self.assertEqual(500000, result["summary"]["outstanding_balance"])
+        self.assertEqual("Partial", result["summary"]["payment_status"])
         sql_text = "\n".join(captured["sql"])
         self.assertIn("INSERT INTO", sql_text)
         self.assertIn("Payment_Receive", sql_text)
         self.assertIn("UPDATE", sql_text)
         self.assertIn('"Total_Received" = %(total_received)s', sql_text)
         self.assertIn('"Outstanding_Balance" = %(outstanding_balance)s', sql_text)
+        self.assertIn('"Payment_Status" = %(payment_status)s', sql_text)
         self.assertNotIn('"Paid" =', sql_text)
         self.assertNotIn('"Amount_Received" =', sql_text)
         self.assertNotIn('"Total_Due" =', sql_text)

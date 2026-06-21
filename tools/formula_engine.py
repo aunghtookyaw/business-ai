@@ -3059,9 +3059,20 @@ def ensure_voucher_summary_fields():
             f'''
             ALTER TABLE {table_ref}
               ADD COLUMN IF NOT EXISTS "Total_Received" numeric DEFAULT 0,
-              ADD COLUMN IF NOT EXISTS "Outstanding_Balance" numeric DEFAULT 0
+              ADD COLUMN IF NOT EXISTS "Outstanding_Balance" numeric DEFAULT 0,
+              ADD COLUMN IF NOT EXISTS "Payment_Status" text DEFAULT 'Outstanding'
             '''
         )
+
+
+def _payment_status(voucher_total, total_received):
+    voucher_total = int(voucher_total or 0)
+    total_received = int(total_received or 0)
+    if voucher_total > 0 and total_received >= voucher_total:
+        return "Paid"
+    if total_received > 0:
+        return "Partial"
+    return "Outstanding"
 
 
 def _payment_voucher_lookup(sector, voucher_number):
@@ -3073,7 +3084,8 @@ def _payment_voucher_lookup(sector, voucher_number):
               COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
               MIN(f."Date") AS invoice_date,
               MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS customer,
-              COALESCE(SUM(f."Total_Due"), 0) AS invoice_amount
+              COALESCE(SUM(f."Total_Due"), 0) AS invoice_amount,
+              COALESCE(SUM(f."Paid"), 0) AS legacy_received
             FROM {_farm_transection_table_ref()} f
             {_farm_customer_link_join("f")}
             WHERE COALESCE(f.__nc_deleted, false) = false
@@ -3091,7 +3103,8 @@ def _payment_voucher_lookup(sector, voucher_number):
               COALESCE(s."Invoice_Number"::text, '') AS voucher_number,
               MIN(s."Invoice_Date") AS invoice_date,
               MIN(COALESCE({_linked_customer_expr("s")}, '')) AS customer,
-              COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount
+              COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount,
+              COALESCE(SUM(s."Amount_Received"), 0) AS legacy_received
             FROM {_sotephwar_transection_table_ref()} s
             {_sotephwar_customer_link_join("s")}
             WHERE COALESCE(s.__nc_deleted, false) = false
@@ -3104,40 +3117,39 @@ def _payment_voucher_lookup(sector, voucher_number):
     return {}
 
 
-def _payment_previous_paid(sector, voucher_number):
+def _payment_receive_total(sector, voucher_number):
     row = _fetch_one(
         f'''
-        SELECT COALESCE(SUM("Receive_Amount"), 0) AS previous_paid
+        SELECT COALESCE(SUM("Receive_Amount"), 0) AS payment_received
         FROM {_payment_receive_table_ref()}
         WHERE "Sector" = %(sector)s
           AND "Voucher_Number" = %(voucher_number)s
         ''',
         {"sector": sector, "voucher_number": voucher_number},
     )
-    return int(row.get("previous_paid") or 0)
+    return int(row.get("payment_received") or 0)
+
+
+def _payment_previous_paid(sector, voucher_number):
+    voucher = _payment_voucher_lookup(sector, voucher_number)
+    legacy_received = int(voucher.get("legacy_received") or 0)
+    return legacy_received + _payment_receive_total(sector, voucher_number)
 
 
 def _update_voucher_payment_summary(sector, voucher_number):
     ensure_voucher_summary_fields()
-    total_row = _fetch_one(
-        f'''
-        SELECT COALESCE(SUM("Receive_Amount"), 0) AS total_received
-        FROM {_payment_receive_table_ref()}
-        WHERE "Sector" = %(sector)s
-          AND "Voucher_Number" = %(voucher_number)s
-        ''',
-        {"sector": sector, "voucher_number": voucher_number},
-    )
-    total_received = int(total_row.get("total_received") or 0)
-
     voucher = _payment_voucher_lookup(sector, voucher_number)
     voucher_total = int(voucher.get("invoice_amount") or 0)
+    legacy_received = int(voucher.get("legacy_received") or 0)
+    total_received = legacy_received + _payment_receive_total(sector, voucher_number)
     outstanding_balance = voucher_total - total_received
+    payment_status = _payment_status(voucher_total, total_received)
 
     params = {
         "voucher_number": voucher_number,
         "total_received": total_received,
         "outstanding_balance": outstanding_balance,
+        "payment_status": payment_status,
     }
     if sector == "Farm":
         _execute(
@@ -3145,7 +3157,8 @@ def _update_voucher_payment_summary(sector, voucher_number):
             UPDATE {_farm_transection_table_ref()}
             SET
               "Total_Received" = %(total_received)s,
-              "Outstanding_Balance" = %(outstanding_balance)s
+              "Outstanding_Balance" = %(outstanding_balance)s,
+              "Payment_Status" = %(payment_status)s
             WHERE COALESCE(__nc_deleted, false) = false
               AND "Invoice_Number"::text = %(voucher_number)s
             ''',
@@ -3157,7 +3170,8 @@ def _update_voucher_payment_summary(sector, voucher_number):
             UPDATE {_sotephwar_transection_table_ref()}
             SET
               "Total_Received" = %(total_received)s,
-              "Outstanding_Balance" = %(outstanding_balance)s
+              "Outstanding_Balance" = %(outstanding_balance)s,
+              "Payment_Status" = %(payment_status)s
             WHERE COALESCE(__nc_deleted, false) = false
               AND "Invoice_Number"::text = %(voucher_number)s
             ''',
@@ -3168,7 +3182,34 @@ def _update_voucher_payment_summary(sector, voucher_number):
         "voucher_total": voucher_total,
         "total_received": total_received,
         "outstanding_balance": outstanding_balance,
+        "payment_status": payment_status,
     }
+
+
+def sync_voucher_payment_summaries():
+    ensure_payment_receive_table()
+    ensure_voucher_summary_fields()
+    vouchers = []
+    for sector, table_ref in (
+        ("Farm", _farm_transection_table_ref()),
+        ("Sote Phwar", _sotephwar_transection_table_ref()),
+    ):
+        rows = _fetch_all(
+            f'''
+            SELECT DISTINCT "Invoice_Number"::text AS voucher_number
+            FROM {table_ref}
+            WHERE COALESCE(__nc_deleted, false) = false
+              AND "Invoice_Number" IS NOT NULL
+            ORDER BY "Invoice_Number"::text
+            '''
+        )
+        vouchers.extend((sector, row["voucher_number"]) for row in rows)
+
+    updated = 0
+    for sector, voucher_number in vouchers:
+        _update_voucher_payment_summary(sector, voucher_number)
+        updated += 1
+    return {"updated": updated}
 
 
 def payment_receive_insert(question):
