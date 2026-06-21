@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta
 import logging
 import re
+import threading
 from time import monotonic
 
 import psycopg2
@@ -67,6 +68,9 @@ CATEGORY_ALIASES = {
     "bonus labour": "Bonus for Labour",
     "bonus for labour": "Bonus for Labour",
 }
+_PAYMENT_SCHEMA_LOCK = threading.Lock()
+_PAYMENT_RECEIVE_TABLE_READY = False
+_VOUCHER_SUMMARY_FIELDS_READY = False
 
 DIMENSION_VALUES_TTL_SECONDS = 300
 DIMENSION_COLUMNS = {
@@ -293,6 +297,22 @@ def _transaction_column_exists(column_name):
     schema, table = _transaction_table_parts()
     try:
         return column_name in _table_columns(schema, table)
+    except Exception:
+        return False
+
+
+def _payment_receive_column_exists(column_name):
+    schema = config.TRANSACTION_SCHEMA
+    table = getattr(config, "PAYMENT_RECEIVE_TABLE", "Payment_Receive")
+    try:
+        return column_name in _table_columns(schema, table)
+    except Exception:
+        return False
+
+
+def _schema_table_column_exists(table_name, column_name):
+    try:
+        return column_name in _table_columns(config.TRANSACTION_SCHEMA, table_name)
     except Exception:
         return False
 
@@ -3127,52 +3147,81 @@ def financial_obligation_insert(question):
 
 
 def ensure_payment_receive_table():
-    _execute(
-        f'''
-        CREATE TABLE IF NOT EXISTS {_payment_receive_table_ref()} (
-          id BIGSERIAL PRIMARY KEY,
-          "Receive_Date" date NOT NULL,
-          "Sector" text NOT NULL,
-          "Voucher_Number" text NOT NULL,
-          "Invoice_Date" date,
-          "Customer" text,
-          "Invoice_Amount" numeric DEFAULT 0,
-          "Previous_Paid" numeric DEFAULT 0,
-          "Receive_Amount" numeric NOT NULL,
-          "Outstanding_Balance" numeric DEFAULT 0,
-          "Payment_Method" text,
-          "Reference_Number" text,
-          "Notes" text,
-          "Recorded_By" text,
-          "Created_At" timestamptz DEFAULT now(),
-          "Updated_At" timestamptz DEFAULT now()
-        )
-        '''
-    )
-    _execute(
-        f'''
-        ALTER TABLE {_payment_receive_table_ref()}
-          ADD COLUMN IF NOT EXISTS "Invoice_Date" date
-        '''
-    )
+    global _PAYMENT_RECEIVE_TABLE_READY
+    if _PAYMENT_RECEIVE_TABLE_READY:
+        return
+    with _PAYMENT_SCHEMA_LOCK:
+        if _PAYMENT_RECEIVE_TABLE_READY:
+            return
+        if not _payment_receive_column_exists("Invoice_Date"):
+            _execute(
+                f'''
+                CREATE TABLE IF NOT EXISTS {_payment_receive_table_ref()} (
+                  id BIGSERIAL PRIMARY KEY,
+                  "Receive_Date" date NOT NULL,
+                  "Sector" text NOT NULL,
+                  "Voucher_Number" text NOT NULL,
+                  "Invoice_Date" date,
+                  "Customer" text,
+                  "Invoice_Amount" numeric DEFAULT 0,
+                  "Previous_Paid" numeric DEFAULT 0,
+                  "Receive_Amount" numeric NOT NULL,
+                  "Outstanding_Balance" numeric DEFAULT 0,
+                  "Payment_Method" text,
+                  "Reference_Number" text,
+                  "Notes" text,
+                  "Recorded_By" text,
+                  "Created_At" timestamptz DEFAULT now(),
+                  "Updated_At" timestamptz DEFAULT now()
+                )
+                '''
+            )
+            _execute(
+                f'''
+                ALTER TABLE {_payment_receive_table_ref()}
+                  ADD COLUMN IF NOT EXISTS "Invoice_Date" date
+                '''
+            )
+        _PAYMENT_RECEIVE_TABLE_READY = True
 
 
 def ensure_voucher_summary_fields():
-    _execute(
-        f'''
-        ALTER TABLE {_farm_transection_table_ref()}
-          ADD COLUMN IF NOT EXISTS "Total_Amount" numeric DEFAULT 0
-        '''
-    )
-    for table_ref in (_farm_transection_table_ref(), _sotephwar_transection_table_ref()):
-        _execute(
-            f'''
-            ALTER TABLE {table_ref}
-              ADD COLUMN IF NOT EXISTS "Total_Received" numeric DEFAULT 0,
-              ADD COLUMN IF NOT EXISTS "Outstanding_Balance" numeric DEFAULT 0,
-              ADD COLUMN IF NOT EXISTS "Payment_Status" text DEFAULT 'Outstanding'
-            '''
+    global _VOUCHER_SUMMARY_FIELDS_READY
+    if _VOUCHER_SUMMARY_FIELDS_READY:
+        return
+    with _PAYMENT_SCHEMA_LOCK:
+        if _VOUCHER_SUMMARY_FIELDS_READY:
+            return
+        farm_table = getattr(config, "FARM_TRANSECTION_TABLE", "farm_transection")
+        sote_table = getattr(config, "SOTEPHWAR_TRANSECTION_TABLE", "Sotephwar_Transection")
+        farm_ready = (
+            _schema_table_column_exists(farm_table, "Total_Amount")
+            and _schema_table_column_exists(farm_table, "Total_Received")
+            and _schema_table_column_exists(farm_table, "Outstanding_Balance")
+            and _schema_table_column_exists(farm_table, "Payment_Status")
         )
+        sote_ready = (
+            _schema_table_column_exists(sote_table, "Total_Received")
+            and _schema_table_column_exists(sote_table, "Outstanding_Balance")
+            and _schema_table_column_exists(sote_table, "Payment_Status")
+        )
+        if not (farm_ready and sote_ready):
+            _execute(
+                f'''
+                ALTER TABLE {_farm_transection_table_ref()}
+                  ADD COLUMN IF NOT EXISTS "Total_Amount" numeric DEFAULT 0
+                '''
+            )
+            for table_ref in (_farm_transection_table_ref(), _sotephwar_transection_table_ref()):
+                _execute(
+                    f'''
+                    ALTER TABLE {table_ref}
+                      ADD COLUMN IF NOT EXISTS "Total_Received" numeric DEFAULT 0,
+                      ADD COLUMN IF NOT EXISTS "Outstanding_Balance" numeric DEFAULT 0,
+                      ADD COLUMN IF NOT EXISTS "Payment_Status" text DEFAULT 'Outstanding'
+                    '''
+                )
+        _VOUCHER_SUMMARY_FIELDS_READY = True
 
 
 def _payment_status(voucher_total, total_received):
