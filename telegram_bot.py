@@ -690,7 +690,11 @@ def _show_bi_home(message, context):
     _reset_bi_state(context)
     rows = [[InlineKeyboardButton("Overall KPI", callback_data="bi:overall_kpi")]]
     rows.append([InlineKeyboardButton("Prompt Enquiry", callback_data="bi:prompt_enquiry")])
-    rows.extend(_button_rows(BUSINESS_MENU, "bi:business"))
+    home_business_menu = [
+        item for item in BUSINESS_MENU
+        if item[0] != "extension"
+    ]
+    rows.extend(_button_rows(home_business_menu, "bi:business"))
     return _send_bi_message(
         message,
         context,

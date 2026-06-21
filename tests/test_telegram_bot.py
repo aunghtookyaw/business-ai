@@ -129,6 +129,12 @@ class FinanceBotFilterTest(unittest.TestCase):
         self.assertEqual("bi:overall_kpi", first_button.callback_data)
         self.assertEqual("Prompt Enquiry", markup.inline_keyboard[1][0].text)
         self.assertEqual("bi:prompt_enquiry", markup.inline_keyboard[1][0].callback_data)
+        labels = [
+            button.text
+            for row in markup.inline_keyboard
+            for button in row
+        ]
+        self.assertNotIn("Extension", labels)
 
     def test_bi_overall_kpi_button_sends_yearly_kpi_pdf(self):
         original_create_chart_pdf_report = telegram_bot.create_chart_pdf_report
