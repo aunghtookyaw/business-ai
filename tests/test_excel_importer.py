@@ -16,8 +16,9 @@ class ExcelImporterTest(unittest.TestCase):
                 "Date",
                 "Customer",
                 "Invoice_Number",
-                "Total_Due",
-                "Paid",
+                "Total_Amount",
+                "Total_Received",
+                "Outstanding_Balance",
                 "Note",
                 "AI_Analysis",
             ],
@@ -31,8 +32,8 @@ class ExcelImporterTest(unittest.TestCase):
                 "Date": "2026-06-15",
                 "Customer": "Ma Shwe War",
                 "Invoice_Number": "12",
-                "Total_Due": "1,500,000",
-                "Paid": "500000",
+                "Total_Amount": "1,500,000",
+                "Total_Received": "500000",
                 "Note": "partial payment",
                 "AI_Analysis": "",
             },
@@ -41,8 +42,9 @@ class ExcelImporterTest(unittest.TestCase):
         self.assertEqual(date(2026, 6, 15), cleaned["Date"])
         self.assertEqual("Ma Shwe War", cleaned["Customer"])
         self.assertEqual(12, cleaned["Invoice_Number"])
-        self.assertEqual(1500000, cleaned["Total_Due"])
-        self.assertEqual(500000, cleaned["Paid"])
+        self.assertEqual(1500000, cleaned["Total_Amount"])
+        self.assertEqual(500000, cleaned["Total_Received"])
+        self.assertEqual(1000000, cleaned["Outstanding_Balance"])
         self.assertEqual("partial payment", cleaned["Note"])
         self.assertIsNone(cleaned["AI_Analysis"])
 

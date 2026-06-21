@@ -118,10 +118,10 @@ def _sotephwar_cash_flow(period):
         "net_cash_flow": inflow - outflow,
         "by_payment_method": methods,
         "sources": {
-            "sotephwar_transection_amount_received": inflow,
+            "sotephwar_transection_total_received": inflow,
             "sotephwar_sector_expense_outflow": outflow,
         },
-        "note": "Sote Phwar cash inflow uses Amount_Received from Sotephwar_Transection; outflow uses Transection sector Sote Phwar expenses.",
+        "note": "Sote Phwar cash inflow uses Total_Received from Sotephwar_Transection; outflow uses Transection sector Sote Phwar expenses.",
     }
 
 

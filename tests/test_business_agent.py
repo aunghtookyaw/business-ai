@@ -351,7 +351,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
 
         self.assertTrue(result["unpaid_only"])
         self.assertIn(
-            'COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) > 0',
+            'COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0) > 0',
             captured["sql"],
         )
         self.assertIn('cust."customer_name"', captured["sql"])
@@ -550,6 +550,11 @@ class BusinessAgentRoutingTest(unittest.TestCase):
     def test_sotephwar_payment_update_adds_received_amount_and_date_note(self):
         captured = {}
         original_fetch_all = formula_engine._fetch_all
+        original_fetch_one = formula_engine._fetch_one
+        original_execute = formula_engine._execute
+
+        def fake_execute(sql, params=None):
+            captured.setdefault("execute_sql", []).append(sql)
 
         def fake_fetch_all(sql, params=None):
             captured["sql"] = sql
@@ -570,6 +575,30 @@ class BusinessAgentRoutingTest(unittest.TestCase):
                 },
             ]
 
+        def fake_fetch_one(sql, params=None):
+            captured.setdefault("fetch_one_sql", []).append(sql)
+            captured["fetch_one_params"] = params
+            if "FROM" in sql and "Sotephwar_Transection" in sql:
+                return {
+                    "sector": "Sote Phwar",
+                    "voucher_number": "12",
+                    "invoice_date": "2026-06-01",
+                    "customer": "Aye Aye",
+                    "invoice_amount": 1000000,
+                    "current_received": 100000,
+                }
+            if "AS payment_received" in sql:
+                payment_calls = captured.setdefault("payment_calls", 0)
+                captured["payment_calls"] = payment_calls + 1
+                return {"payment_received": 100000 if payment_calls == 0 else 500000}
+            if "INSERT INTO" in sql:
+                captured["insert_sql"] = sql
+                captured["insert_params"] = params
+                return {"id": 10}
+            return {}
+
+        formula_engine._execute = fake_execute
+        formula_engine._fetch_one = fake_fetch_one
         formula_engine._fetch_all = fake_fetch_all
         try:
             result = formula_engine.run_formula(
@@ -578,15 +607,20 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             )
         finally:
             formula_engine._fetch_all = original_fetch_all
+            formula_engine._fetch_one = original_fetch_one
+            formula_engine._execute = original_execute
 
         self.assertTrue(result["updated"])
         self.assertEqual("12", result["invoice_number"])
         self.assertEqual(400000, result["payment_amount"])
         self.assertEqual("2026-06-06", result["received_date"])
-        self.assertEqual("12", captured["params"]["invoice_number"])
-        self.assertEqual(400000, captured["params"]["amount"])
-        self.assertIn('"Amount_Received" = matched.previous_amount_received + %(amount)s', captured["sql"])
-        self.assertIn('"Note" = TRIM', captured["sql"])
+        self.assertEqual("12", captured["insert_params"]["voucher_number"])
+        self.assertEqual(400000, captured["insert_params"]["receive_amount"])
+        self.assertEqual(100000, captured["insert_params"]["previous_received"])
+        self.assertIn("INSERT INTO", captured["insert_sql"])
+        self.assertIn("Payment_Receive", captured["insert_sql"])
+        all_sql = "\n".join(captured.get("execute_sql", []) + captured.get("fetch_one_sql", []))
+        self.assertNotIn('"Amount_Received" =', all_sql)
 
     def test_sotephwar_payment_update_answer_shows_received_table(self):
         answer = business_agent._fast_answer({
@@ -646,7 +680,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
                     "invoice_date": "2026-06-01",
                     "customer": "Aye Aye",
                     "invoice_amount": 1000000,
-                    "legacy_received": 200000,
+                    "current_received": 200000,
                 }
             if "INSERT INTO" in sql:
                 return {
@@ -682,19 +716,19 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             formula_engine._fetch_one = original_fetch_one
 
         self.assertTrue(result["inserted"])
-        self.assertEqual(200000, result["payment"]["previous_paid"])
+        self.assertEqual(0, result["payment"]["previous_paid"])
         self.assertEqual(300000, result["payment"]["receive_amount"])
-        self.assertEqual(500000, result["payment"]["outstanding_balance"])
+        self.assertEqual(700000, result["payment"]["outstanding_balance"])
         self.assertEqual(1000000, result["summary"]["voucher_total"])
-        self.assertEqual(500000, result["summary"]["total_received"])
-        self.assertEqual(500000, result["summary"]["outstanding_balance"])
+        self.assertEqual(300000, result["summary"]["total_received"])
+        self.assertEqual(700000, result["summary"]["outstanding_balance"])
         self.assertEqual("Partial", result["summary"]["payment_status"])
         sql_text = "\n".join(captured["sql"])
         self.assertIn("INSERT INTO", sql_text)
         self.assertIn("Payment_Receive", sql_text)
         self.assertIn("UPDATE", sql_text)
-        self.assertIn('"Total_Received" = %(total_received)s', sql_text)
-        self.assertIn('"Outstanding_Balance" = %(outstanding_balance)s', sql_text)
+        self.assertIn('"Total_Received" = allocated.row_received', sql_text)
+        self.assertIn('"Outstanding_Balance" = COALESCE(target."Total_Amount", 0) - allocated.row_received', sql_text)
         self.assertIn('"Payment_Status" = %(payment_status)s', sql_text)
         self.assertNotIn('"Paid" =', sql_text)
         self.assertNotIn('"Amount_Received" =', sql_text)
@@ -976,7 +1010,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual(500000, result["amount_received"])
         self.assertEqual(1000000, result["outstanding_amount"])
         self.assertEqual(0, result["sources"]["transection_income"])
-        self.assertEqual(1500000, result["sources"]["farm_transection_total_due"])
+        self.assertEqual(1500000, result["sources"]["farm_transection_total_amount"])
         self.assertEqual(1, len(seen))
 
     def test_sales_total_combines_sotephwar_and_farm_income_tables(self):
@@ -1024,7 +1058,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual(2300, result["amount_received"])
         self.assertEqual(800, result["outstanding_amount"])
         self.assertEqual(1000, result["sources"]["sotephwar_transection_total_amount"])
-        self.assertEqual(2000, result["sources"]["farm_transection_total_due"])
+        self.assertEqual(2000, result["sources"]["farm_transection_total_amount"])
         self.assertTrue(result["transection_income_rows"])
         self.assertEqual("Old item resell", result["transection_income_rows"][0]["item"])
 

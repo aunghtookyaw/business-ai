@@ -42,13 +42,14 @@ TABLES = {
             "Date",
             "Customer",
             "Invoice_Number",
-            "Total_Due",
-            "Paid",
+            "Total_Amount",
+            "Total_Received",
+            "Outstanding_Balance",
             "Note",
             "AI_Analysis",
         ],
-        "required": ["Date", "Customer", "Total_Due"],
-        "numeric": ["Invoice_Number", "Total_Due", "Paid"],
+        "required": ["Date", "Customer", "Total_Amount"],
+        "numeric": ["Invoice_Number", "Total_Amount", "Total_Received", "Outstanding_Balance"],
         "date": ["Date"],
     },
     "sotephwar_transection": {
@@ -59,7 +60,8 @@ TABLES = {
             "Item",
             "Quantity",
             "Total_Amount",
-            "Amount_Received",
+            "Total_Received",
+            "Outstanding_Balance",
             "Note",
             "AI_comment",
             "Invoice_Date",
@@ -67,7 +69,7 @@ TABLES = {
             "Attachment",
         ],
         "required": ["Invoice_Date", "Item", "Quantity"],
-        "numeric": ["Quantity", "Total_Amount", "Amount_Received"],
+        "numeric": ["Quantity", "Total_Amount", "Total_Received", "Outstanding_Balance"],
         "date": ["Invoice_Date"],
     },
     "financial_obligations": {
@@ -172,6 +174,15 @@ def _normalise_row(table_config, row):
     ]
     if missing:
         raise ValueError("Missing required field(s): " + ", ".join(missing))
+
+    if {"Total_Amount", "Total_Received", "Outstanding_Balance"}.issubset(table_config["columns"]):
+        total_amount = cleaned.get("Total_Amount") or 0
+        total_received = cleaned.get("Total_Received") or 0
+        expected_balance = total_amount - total_received
+        if cleaned.get("Outstanding_Balance") is None:
+            cleaned["Outstanding_Balance"] = expected_balance
+        elif cleaned["Outstanding_Balance"] != expected_balance:
+            raise ValueError("Outstanding_Balance must equal Total_Amount - Total_Received")
 
     return cleaned
 

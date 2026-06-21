@@ -57,6 +57,8 @@ rows, and skips rows already present in the workbook.
 ## Farm Transaction Upload
 
 Use the `Farm_Transection` sheet for the separate NocoDB table named
-`farm_transection`. Required fields are `Date`, `Customer`, and `Total_Due`.
-The upload command also accepts `Invoice_Number`, `Paid`, `Note`, and
-`AI_Analysis`.
+`farm_transection`. Required fields are `Date`, `Customer`, and `Total_Amount`.
+The upload command also accepts `Invoice_Number`, `Total_Received`,
+`Outstanding_Balance`, `Note`, and `AI_Analysis`. If `Outstanding_Balance` is
+blank, the importer calculates `Total_Amount - Total_Received`; if it is filled,
+it must match that formula.

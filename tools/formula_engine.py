@@ -978,9 +978,9 @@ def _farm_sales_summary(period, filters=None):
         f'''
         SELECT
           COUNT(*) AS invoice_count,
-          COALESCE(SUM(f."Total_Due"), 0) AS total_amount,
-          COALESCE(SUM(f."Paid"), 0) AS amount_received,
-          COALESCE(SUM(COALESCE(f."Total_Due", 0) - COALESCE(f."Paid", 0)), 0) AS outstanding_amount
+          COALESCE(SUM(f."Total_Amount"), 0) AS total_amount,
+          COALESCE(SUM(f."Total_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0)), 0) AS outstanding_amount
         FROM {_farm_transection_table_ref()} f
         {_farm_customer_link_join("f")}
         WHERE COALESCE(f.__nc_deleted, false) = false
@@ -1033,16 +1033,16 @@ def _farm_sales_rows(period, filters=None, limit=5):
           'Farm Sales' AS category,
           MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS item,
           MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS customer_name,
-          COALESCE(SUM(f."Total_Due"), 0) AS amount,
-          COALESCE(SUM(f."Total_Due"), 0) AS total_amount,
-          COALESCE(SUM(f."Paid"), 0) AS amount_received,
-          COALESCE(SUM(COALESCE(f."Total_Due", 0) - COALESCE(f."Paid", 0)), 0) AS outstanding_amount,
+          COALESCE(SUM(f."Total_Amount"), 0) AS amount,
+          COALESCE(SUM(f."Total_Amount"), 0) AS total_amount,
+          COALESCE(SUM(f."Total_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0)), 0) AS outstanding_amount,
           COUNT(*) AS invoice_count,
           'Farm_Transection' AS payment_method
         FROM {_farm_transection_table_ref()} f
         {_farm_customer_link_join("f")}
         WHERE COALESCE(f.__nc_deleted, false) = false
-          AND f."Total_Due" IS NOT NULL
+          AND f."Total_Amount" IS NOT NULL
           {farm_filter_sql}
           {date_sql}
         GROUP BY {_farm_customer_normalized_sql()}
@@ -1074,13 +1074,13 @@ def farm_transection_customer(period="all_time", customer=None, limit=50):
           COALESCE(f."Invoice_Number"::text, '') AS invoice_number,
           COALESCE({_linked_farm_customer_expr("f")}, '') AS customer_name,
           COALESCE(f."Note", '') AS note,
-          COALESCE(f."Total_Due", 0) AS total_amount,
-          COALESCE(f."Paid", 0) AS amount_received,
-          COALESCE(f."Total_Due", 0) - COALESCE(f."Paid", 0) AS outstanding_amount
+          COALESCE(f."Total_Amount", 0) AS total_amount,
+          COALESCE(f."Total_Received", 0) AS amount_received,
+          COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0) AS outstanding_amount
         FROM {_farm_transection_table_ref()} f
         {_farm_customer_link_join("f")}
         WHERE COALESCE(f.__nc_deleted, false) = false
-          AND f."Total_Due" IS NOT NULL
+          AND f."Total_Amount" IS NOT NULL
           {farm_filter_sql}
           {date_sql}
         ORDER BY f."Date" DESC NULLS LAST, f."Invoice_Number" DESC NULLS LAST, f.id DESC
@@ -1132,8 +1132,8 @@ def _sotephwar_income_rows(period, filters=None, limit=5):
           COALESCE({_linked_customer_expr("s")}, '') AS customer_name,
           COALESCE(SUM(s."Total_Amount"), 0) AS amount,
           COALESCE(SUM(s."Total_Amount"), 0) AS total_amount,
-          COALESCE(SUM(s."Amount_Received"), 0) AS amount_received,
-          COALESCE(SUM(COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0)), 0) AS outstanding_amount,
+          COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0)), 0) AS outstanding_amount,
           COUNT(*) AS invoice_count,
           'Sotephwar_Transection' AS payment_method
         FROM {_sotephwar_transection_table_ref()} s
@@ -1162,7 +1162,7 @@ def _farm_cash_flow(period, filters=None):
     farm_filter_sql, date_sql, params = _farm_filter(period, filters)
     row = _fetch_one(
         f'''
-        SELECT COALESCE(SUM(f."Paid"), 0) AS paid
+        SELECT COALESCE(SUM(f."Total_Received"), 0) AS total_received
         FROM {_farm_transection_table_ref()} f
         {_farm_customer_link_join("f")}
         WHERE COALESCE(f.__nc_deleted, false) = false
@@ -1171,7 +1171,7 @@ def _farm_cash_flow(period, filters=None):
         ''',
         params,
     )
-    return int(row.get("paid") or 0)
+    return int(row.get("total_received") or 0)
 
 
 def _with_filters(result, filters):
@@ -1906,11 +1906,11 @@ def sales_total(period="all_time", filters=None):
         "sources": {
             "transection_income": transection_total,
             "sotephwar_transection_total_amount": sotephwar_total,
-            "sotephwar_transection_amount_received": sotephwar_summary["amount_received"],
-            "sotephwar_transection_outstanding": sotephwar_summary["outstanding_amount"],
-            "farm_transection_total_due": farm_total,
-            "farm_transection_paid": farm_summary["amount_received"],
-            "farm_transection_remained": farm_summary["outstanding_amount"],
+            "sotephwar_transection_total_received": sotephwar_summary["amount_received"],
+            "sotephwar_transection_outstanding_balance": sotephwar_summary["outstanding_amount"],
+            "farm_transection_total_amount": farm_total,
+            "farm_transection_total_received": farm_summary["amount_received"],
+            "farm_transection_outstanding_balance": farm_summary["outstanding_amount"],
         },
     }, filters)
 
@@ -1978,7 +1978,7 @@ def gross_profit(period="all_time", filters=None):
         "gross_profit": income - expense,
         "sources": {
             "sotephwar_transection_total_amount": sotephwar_income,
-            "farm_transection_total_due": farm_income,
+            "farm_transection_total_amount": farm_income,
         },
     }, filters)
 
@@ -2049,14 +2049,14 @@ def cash_flow(period="all_time", filters=None):
             "net_cash_flow": sotephwar_received,
         })
 
-    farm_paid = _farm_cash_flow(period, filters)
-    if farm_paid:
-        total_inflow += farm_paid
+    farm_received = _farm_cash_flow(period, filters)
+    if farm_received:
+        total_inflow += farm_received
         methods.append({
-            "payment_method": "Farm_Transection paid",
-            "inflow": farm_paid,
+            "payment_method": "Farm_Transection received",
+            "inflow": farm_received,
             "outflow": 0,
-            "net_cash_flow": farm_paid,
+            "net_cash_flow": farm_received,
         })
 
     return _with_filters({
@@ -2408,8 +2408,8 @@ def sotephwar_transection_summary(period="all_time", include_customers=True):
         SELECT
           COUNT(*) AS invoice_count,
           COALESCE(SUM("Total_Amount"), 0) AS total_amount,
-          COALESCE(SUM("Amount_Received"), 0) AS amount_received,
-          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0)), 0) AS outstanding_amount
+          COALESCE(SUM("Total_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0)), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           {date_sql}
@@ -2438,8 +2438,8 @@ def sotephwar_transection_monthly_summary(period="this_year"):
           TO_CHAR(DATE_TRUNC('month', "Invoice_Date"), 'YYYY-MM') AS month,
           COUNT(*) AS invoice_count,
           COALESCE(SUM("Total_Amount"), 0) AS total_amount,
-          COALESCE(SUM("Amount_Received"), 0) AS amount_received,
-          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0)), 0) AS outstanding_amount
+          COALESCE(SUM("Total_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0)), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           AND "Invoice_Date" IS NOT NULL
@@ -2476,8 +2476,8 @@ def sotephwar_transection_top(period="all_time", limit=5):
           COALESCE(s."Note", '') AS note,
           s."Quantity" AS quantity,
           s."Total_Amount" AS total_amount,
-          s."Amount_Received" AS amount_received,
-          COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0) AS outstanding_amount
+          s."Total_Received" AS amount_received,
+          COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()} s
         {_sotephwar_customer_link_join("s")}
         WHERE COALESCE(s.__nc_deleted, false) = false
@@ -2507,7 +2507,7 @@ def sotephwar_transection_list(period="all_time", limit=20, unpaid_only=False):
     params["limit"] = limit
     unpaid_sql = ""
     if unpaid_only:
-        unpaid_sql = 'AND COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) > 0'
+        unpaid_sql = 'AND COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0) > 0'
 
     rows = _fetch_all(
         f'''
@@ -2519,8 +2519,8 @@ def sotephwar_transection_list(period="all_time", limit=20, unpaid_only=False):
           COALESCE(s."Note", '') AS note,
           s."Quantity" AS quantity,
           s."Total_Amount" AS total_amount,
-          s."Amount_Received" AS amount_received,
-          COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0) AS outstanding_amount
+          s."Total_Received" AS amount_received,
+          COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()} s
         {_sotephwar_customer_link_join("s")}
         WHERE COALESCE(s.__nc_deleted, false) = false
@@ -2560,8 +2560,8 @@ def sotephwar_transection_quantity(period="all_time", item=None):
           COUNT(*) AS invoice_count,
           COALESCE(SUM("Quantity"), 0) AS quantity,
           COALESCE(SUM("Total_Amount"), 0) AS total_amount,
-          COALESCE(SUM("Amount_Received"), 0) AS amount_received,
-          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0)), 0) AS outstanding_amount
+          COALESCE(SUM("Total_Received"), 0) AS amount_received,
+          COALESCE(SUM(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0)), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           {item_sql}
@@ -2601,7 +2601,7 @@ def sotephwar_transection_customer(
         params["customer_normalized"] = normalize_name(customer)
     unpaid_sql = ""
     if unpaid_only:
-        unpaid_sql = 'AND COALESCE("Total_Amount", 0) - COALESCE("Amount_Received", 0) > 0'
+        unpaid_sql = 'AND COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0) > 0'
     invoice_sql = ""
     if invoice_numbers:
         invoice_sql = 'AND "Invoice_Number"::text = ANY(%(invoice_numbers)s)'
@@ -2617,8 +2617,8 @@ def sotephwar_transection_customer(
           COALESCE(s."Note", '') AS note,
           s."Quantity" AS quantity,
           s."Total_Amount" AS total_amount,
-          s."Amount_Received" AS amount_received,
-          COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0) AS outstanding_amount
+          s."Total_Received" AS amount_received,
+          COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()} s
         {_sotephwar_customer_link_join("s")}
         WHERE COALESCE(s.__nc_deleted, false) = false
@@ -2665,55 +2665,67 @@ def sotephwar_payment_update(question):
             "values": values,
         }
 
+    ensure_payment_receive_table()
+    ensure_voucher_summary_fields()
+    invoice = _payment_voucher_lookup("Sote Phwar", values["invoice_number"])
+    if not invoice:
+        return {
+            "formula": "sotephwar_payment_update",
+            "period": "all_time",
+            "updated": False,
+            "missing": ["matching voucher"],
+            "invoice_number": values["invoice_number"],
+            "payment_amount": values["amount"],
+            "received_date": values["received_date"].isoformat(),
+            "invoices": [],
+        }
+
     note = "Received {date}: {amount:,} kyats".format(
         date=values["received_date"].isoformat(),
         amount=values["amount"],
     )
-    rows = _fetch_all(
+    invoice_amount = int(invoice.get("invoice_amount") or 0)
+    previous_received = _payment_receive_total("Sote Phwar", values["invoice_number"])
+    receive_amount = int(values["amount"] or 0)
+    outstanding_balance = invoice_amount - previous_received - receive_amount
+    _fetch_one(
         f'''
-        WITH matched AS (
-          SELECT
-            id,
-            COALESCE("Amount_Received", 0) AS previous_amount_received
-          FROM {_sotephwar_transection_table_ref()}
-          WHERE COALESCE("__nc_deleted", false) = false
-            AND "Invoice_Number"::text = %(invoice_number)s
-        ),
-        updated AS (
-          UPDATE {_sotephwar_transection_table_ref()} target
-          SET
-            "Amount_Received" = matched.previous_amount_received + %(amount)s,
-            "Note" = TRIM(CONCAT_WS(E'\n', NULLIF(target."Note", ''), %(note)s))
-          FROM matched
-          WHERE target.id = matched.id
-          RETURNING
-            target.id,
-            target."Invoice_Date" AS invoice_date,
-            COALESCE(target."Invoice_Number", '') AS invoice_number,
-            COALESCE(target."Customer_Name", '') AS customer_name,
-            COALESCE(target."Item", '') AS item,
-            COALESCE(target."Note", '') AS note,
-            COALESCE(target."Quantity", 0) AS quantity,
-            COALESCE(target."Total_Amount", 0) AS total_amount,
-            target."Amount_Received" AS amount_received,
-            matched.previous_amount_received AS previous_amount_received,
-            COALESCE(target."Total_Amount", 0) - COALESCE(target."Amount_Received", 0) AS outstanding_amount
-        )
-        SELECT *
-        FROM updated
-        ORDER BY invoice_date NULLS LAST, id
+        INSERT INTO {_payment_receive_table_ref()}
+          ("Receive_Date", "Sector", "Voucher_Number", "Customer", "Invoice_Amount",
+           "Previous_Paid", "Receive_Amount", "Outstanding_Balance", "Payment_Method",
+           "Reference_Number", "Notes", "Recorded_By")
+        VALUES
+          (%(receive_date)s, 'Sote Phwar', %(voucher_number)s, %(customer)s, %(invoice_amount)s,
+           %(previous_received)s, %(receive_amount)s, %(outstanding_balance)s, %(payment_method)s,
+           %(reference_number)s, %(notes)s, %(recorded_by)s)
+        RETURNING id
         ''',
         {
-            "invoice_number": values["invoice_number"],
-            "amount": values["amount"],
-            "note": note,
+            "receive_date": values["received_date"],
+            "voucher_number": values["invoice_number"],
+            "customer": invoice.get("customer") or "",
+            "invoice_amount": invoice_amount,
+            "previous_received": previous_received,
+            "receive_amount": receive_amount,
+            "outstanding_balance": outstanding_balance,
+            "payment_method": "Sote Phwar Receive",
+            "reference_number": "",
+            "notes": note,
+            "recorded_by": "Business AI",
         },
     )
+    _update_voucher_payment_summary("Sote Phwar", values["invoice_number"])
+    rows = sotephwar_transection_customer(
+        period="all_time",
+        invoice_numbers=[values["invoice_number"]],
+        limit=50,
+        include_note=True,
+    ).get("invoices") or []
 
     for row in rows:
         row["quantity"] = int(row["quantity"] or 0)
         row["total_amount"] = int(row["total_amount"] or 0)
-        row["previous_amount_received"] = int(row["previous_amount_received"] or 0)
+        row["previous_amount_received"] = previous_received
         row["amount_received"] = int(row["amount_received"] or 0)
         row["outstanding_amount"] = int(row["outstanding_amount"] or 0)
 
@@ -3104,6 +3116,12 @@ def ensure_payment_receive_table():
 
 
 def ensure_voucher_summary_fields():
+    _execute(
+        f'''
+        ALTER TABLE {_farm_transection_table_ref()}
+          ADD COLUMN IF NOT EXISTS "Total_Amount" numeric DEFAULT 0
+        '''
+    )
     for table_ref in (_farm_transection_table_ref(), _sotephwar_transection_table_ref()):
         _execute(
             f'''
@@ -3134,8 +3152,8 @@ def _payment_voucher_lookup(sector, voucher_number):
               COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
               MIN(f."Date") AS invoice_date,
               MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS customer,
-              COALESCE(SUM(f."Total_Due"), 0) AS invoice_amount,
-              COALESCE(SUM(f."Paid"), 0) AS legacy_received
+              COALESCE(SUM(f."Total_Amount"), 0) AS invoice_amount,
+              COALESCE(SUM(f."Total_Received"), 0) AS current_received
             FROM {_farm_transection_table_ref()} f
             {_farm_customer_link_join("f")}
             WHERE COALESCE(f.__nc_deleted, false) = false
@@ -3154,7 +3172,7 @@ def _payment_voucher_lookup(sector, voucher_number):
               MIN(s."Invoice_Date") AS invoice_date,
               MIN(COALESCE({_linked_customer_expr("s")}, '')) AS customer,
               COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount,
-              COALESCE(SUM(s."Amount_Received"), 0) AS legacy_received
+              COALESCE(SUM(s."Total_Received"), 0) AS current_received
             FROM {_sotephwar_transection_table_ref()} s
             {_sotephwar_customer_link_join("s")}
             WHERE COALESCE(s.__nc_deleted, false) = false
@@ -3181,17 +3199,14 @@ def _payment_receive_total(sector, voucher_number):
 
 
 def _payment_previous_paid(sector, voucher_number):
-    voucher = _payment_voucher_lookup(sector, voucher_number)
-    legacy_received = int(voucher.get("legacy_received") or 0)
-    return legacy_received + _payment_receive_total(sector, voucher_number)
+    return _payment_receive_total(sector, voucher_number)
 
 
 def _update_voucher_payment_summary(sector, voucher_number):
     ensure_voucher_summary_fields()
     voucher = _payment_voucher_lookup(sector, voucher_number)
     voucher_total = int(voucher.get("invoice_amount") or 0)
-    legacy_received = int(voucher.get("legacy_received") or 0)
-    total_received = legacy_received + _payment_receive_total(sector, voucher_number)
+    total_received = _payment_receive_total(sector, voucher_number)
     outstanding_balance = voucher_total - total_received
     payment_status = _payment_status(voucher_total, total_received)
 
@@ -3204,28 +3219,82 @@ def _update_voucher_payment_summary(sector, voucher_number):
     if sector == "Farm":
         _execute(
             f'''
-            UPDATE {_farm_transection_table_ref()}
+            WITH voucher_rows AS (
+              SELECT
+                id,
+                COALESCE("Total_Amount", 0) AS row_total,
+                COALESCE(
+                  SUM(COALESCE("Total_Amount", 0)) OVER (
+                    ORDER BY "Date" NULLS LAST, id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                  ),
+                  0
+                ) AS prior_total,
+                ROW_NUMBER() OVER (ORDER BY "Date" DESC NULLS FIRST, id DESC) AS reverse_row_number
+              FROM {_farm_transection_table_ref()}
+              WHERE COALESCE(__nc_deleted, false) = false
+                AND "Invoice_Number"::text = %(voucher_number)s
+            ),
+            allocated AS (
+              SELECT
+                id,
+                GREATEST(LEAST(%(total_received)s - prior_total, row_total), 0)
+                  + CASE
+                      WHEN reverse_row_number = 1
+                      THEN GREATEST(%(total_received)s - %(voucher_total)s, 0)
+                      ELSE 0
+                    END AS row_received
+              FROM voucher_rows
+            )
+            UPDATE {_farm_transection_table_ref()} target
             SET
-              "Total_Received" = %(total_received)s,
-              "Outstanding_Balance" = %(outstanding_balance)s,
+              "Total_Received" = allocated.row_received,
+              "Outstanding_Balance" = COALESCE(target."Total_Amount", 0) - allocated.row_received,
               "Payment_Status" = %(payment_status)s
-            WHERE COALESCE(__nc_deleted, false) = false
-              AND "Invoice_Number"::text = %(voucher_number)s
+            FROM allocated
+            WHERE target.id = allocated.id
             ''',
-            params,
+            {**params, "voucher_total": voucher_total},
         )
     elif sector == "Sote Phwar":
         _execute(
             f'''
-            UPDATE {_sotephwar_transection_table_ref()}
+            WITH voucher_rows AS (
+              SELECT
+                id,
+                COALESCE("Total_Amount", 0) AS row_total,
+                COALESCE(
+                  SUM(COALESCE("Total_Amount", 0)) OVER (
+                    ORDER BY "Invoice_Date" NULLS LAST, id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                  ),
+                  0
+                ) AS prior_total,
+                ROW_NUMBER() OVER (ORDER BY "Invoice_Date" DESC NULLS FIRST, id DESC) AS reverse_row_number
+              FROM {_sotephwar_transection_table_ref()}
+              WHERE COALESCE(__nc_deleted, false) = false
+                AND "Invoice_Number"::text = %(voucher_number)s
+            ),
+            allocated AS (
+              SELECT
+                id,
+                GREATEST(LEAST(%(total_received)s - prior_total, row_total), 0)
+                  + CASE
+                      WHEN reverse_row_number = 1
+                      THEN GREATEST(%(total_received)s - %(voucher_total)s, 0)
+                      ELSE 0
+                    END AS row_received
+              FROM voucher_rows
+            )
+            UPDATE {_sotephwar_transection_table_ref()} target
             SET
-              "Total_Received" = %(total_received)s,
-              "Outstanding_Balance" = %(outstanding_balance)s,
+              "Total_Received" = allocated.row_received,
+              "Outstanding_Balance" = COALESCE(target."Total_Amount", 0) - allocated.row_received,
               "Payment_Status" = %(payment_status)s
-            WHERE COALESCE(__nc_deleted, false) = false
-              AND "Invoice_Number"::text = %(voucher_number)s
+            FROM allocated
+            WHERE target.id = allocated.id
             ''',
-            params,
+            {**params, "voucher_total": voucher_total},
         )
 
     return {
@@ -3358,32 +3427,37 @@ def payment_receive_summary(period="all_time", sector=None, limit=10):
           SELECT
             'Farm' AS sector,
             COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
-            f."Date" AS invoice_date,
-            COALESCE({_linked_farm_customer_expr("f")}, '') AS customer,
-            COALESCE(f."Total_Due", 0) AS invoice_amount
+            MIN(f."Date") AS invoice_date,
+            MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS customer,
+            COALESCE(SUM(f."Total_Amount"), 0) AS invoice_amount,
+            COALESCE(SUM(f."Total_Received"), 0) AS received_amount,
+            COALESCE(SUM(f."Outstanding_Balance"), 0) AS outstanding_balance
           FROM {_farm_transection_table_ref()} f
           {_farm_customer_link_join("f")}
           WHERE COALESCE(f.__nc_deleted, false) = false
             AND f."Invoice_Number" IS NOT NULL
-            AND f."Total_Due" IS NOT NULL
+            AND f."Total_Amount" IS NOT NULL
+          GROUP BY f."Invoice_Number"::text
           UNION ALL
           SELECT
             'Sote Phwar' AS sector,
             COALESCE(s."Invoice_Number"::text, '') AS voucher_number,
-            s."Invoice_Date" AS invoice_date,
-            COALESCE({_linked_customer_expr("s")}, '') AS customer,
-            COALESCE(s."Total_Amount", 0) AS invoice_amount
+            MIN(s."Invoice_Date") AS invoice_date,
+            MIN(COALESCE({_linked_customer_expr("s")}, '')) AS customer,
+            COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount,
+            COALESCE(SUM(s."Total_Received"), 0) AS received_amount,
+            COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_balance
           FROM {_sotephwar_transection_table_ref()} s
           {_sotephwar_customer_link_join("s")}
           WHERE COALESCE(s.__nc_deleted, false) = false
             AND s."Invoice_Number" IS NOT NULL
             AND s."Total_Amount" IS NOT NULL
+          GROUP BY s."Invoice_Number"::text
         ),
         payments AS (
           SELECT
             "Sector" AS sector,
             "Voucher_Number" AS voucher_number,
-            COALESCE(SUM("Receive_Amount"), 0) AS received_amount,
             MAX("Receive_Date") AS last_receive_date
           FROM {_payment_receive_table_ref()}
           GROUP BY "Sector", "Voucher_Number"
@@ -3394,8 +3468,8 @@ def payment_receive_summary(period="all_time", sector=None, limit=10):
           invoices.invoice_date,
           invoices.customer,
           COALESCE(invoices.invoice_amount, 0) AS invoice_amount,
-          COALESCE(payments.received_amount, 0) AS received_amount,
-          COALESCE(invoices.invoice_amount, 0) - COALESCE(payments.received_amount, 0) AS outstanding_balance,
+          COALESCE(invoices.received_amount, 0) AS received_amount,
+          COALESCE(invoices.outstanding_balance, 0) AS outstanding_balance,
           payments.last_receive_date,
           GREATEST(CURRENT_DATE - COALESCE(invoices.invoice_date::date, CURRENT_DATE), 0) AS age_days
         FROM invoices
@@ -3545,9 +3619,9 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
               COALESCE(cust."customer_name", NULLIF(TRIM(f."Customer"), ''), '-') AS master_name,
               'Income' AS income_expense,
               'Farm' AS sector,
-              COALESCE(SUM(f."Total_Due"), 0) AS amount,
-              COALESCE(SUM(f."Paid"), 0) AS amount_received,
-              COALESCE(SUM(COALESCE(f."Total_Due", 0) - COALESCE(f."Paid", 0)), 0) AS outstanding_amount,
+              COALESCE(SUM(f."Total_Amount"), 0) AS amount,
+              COALESCE(SUM(f."Total_Received"), 0) AS amount_received,
+              COALESCE(SUM(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0)), 0) AS outstanding_amount,
               COUNT(*) AS row_count,
               COUNT(cust."customer_name") AS linked_count
             FROM {_farm_transection_table_ref()} f
@@ -3572,8 +3646,8 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
               'Income' AS income_expense,
               'Sote Phwar' AS sector,
               COALESCE(SUM(s."Total_Amount"), 0) AS amount,
-              COALESCE(SUM(s."Amount_Received"), 0) AS amount_received,
-              COALESCE(SUM(COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0)), 0) AS outstanding_amount,
+              COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
+              COALESCE(SUM(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0)), 0) AS outstanding_amount,
               COUNT(*) AS row_count,
               COUNT(cust."customer_name") AS linked_count
             FROM {_sotephwar_transection_table_ref()} s

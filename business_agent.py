@@ -94,7 +94,7 @@ Available formulas:
 - sotephwar_transection_list: invoice rows from Sotephwar_Transection only
 - sotephwar_transection_quantity: quantity sold by item from Sotephwar_Transection only
 - sotephwar_transection_customer: voucher rows for one customer from Sotephwar_Transection only
-- sotephwar_payment_update: update Amount_Received and Note for a Sotephwar voucher payment
+- sotephwar_payment_update: append one Payment_Receive row and sync Sote Phwar voucher totals
 - sotephwar_inventory_stock: current Sotephwar inventory stock by store and product
 - sotephwar_inventory_movement_summary: Sotephwar inventory production, transfer, and sale movement totals
 - sotephwar_inventory_list: Sotephwar inventory movement rows
@@ -382,14 +382,14 @@ def _fast_answer(result):
                 reverse=True,
             )
             total_sales = int(result.get("total_income") or 0)
-            total_paid = sum(int(row.get("amount_received", row.get("income", 0)) or 0) for row in customers)
+            total_received = sum(int(row.get("amount_received", row.get("income", 0)) or 0) for row in customers)
             total_outstanding = sum(int(row.get("outstanding_amount") or 0) for row in customers)
             lines = [
                 f"Farm Income Summary for {period}",
                 "",
                 "KPI Summary",
                 f"Total Sales: {total_sales:,}",
-                f"Total Received: {total_paid:,}",
+                f"Total Received: {total_received:,}",
                 f"Total Outstanding: {total_outstanding:,}",
                 "",
                 "Top Customers by Revenue",
@@ -398,11 +398,11 @@ def _fast_answer(result):
                 lines.append("No customer sales found.")
             for index, row in enumerate(customers[:10], start=1):
                 sales = int(row.get("income") or row.get("total_amount") or row.get("amount") or 0)
-                paid = int(row.get("amount_received", sales) or 0)
+                received = int(row.get("amount_received", sales) or 0)
                 outstanding = int(row.get("outstanding_amount") or 0)
                 lines.append(
                     f"{index}. {row.get('customer_name') or row.get('category') or row.get('item') or '-'} | "
-                    f"Total Sales: {sales:,} | Received: {paid:,} | Outstanding: {outstanding:,}"
+                    f"Total Sales: {sales:,} | Received: {received:,} | Outstanding: {outstanding:,}"
                 )
             lines.extend([
                 "",
@@ -411,11 +411,11 @@ def _fast_answer(result):
             ])
             for row in customers[:20]:
                 sales = int(row.get("income") or row.get("total_amount") or row.get("amount") or 0)
-                paid = int(row.get("amount_received", sales) or 0)
+                received = int(row.get("amount_received", sales) or 0)
                 outstanding = int(row.get("outstanding_amount") or 0)
                 lines.append(
                     f"{row.get('customer_name') or row.get('category') or row.get('item') or '-'} | "
-                    f"{sales:,} | {paid:,} | {outstanding:,}"
+                    f"{sales:,} | {received:,} | {outstanding:,}"
                 )
             return "\n".join(lines)
 
@@ -571,7 +571,7 @@ def _fast_answer(result):
             f"Quantity sold: {result['quantity']:,}\n"
             f"Invoices: {result['invoice_count']:,}\n"
             f"Total amount: {result['total_amount']:,}\n"
-            f"Amount received: {result['amount_received']:,}\n"
+            f"Total received: {result['amount_received']:,}\n"
             f"Outstanding: {result['outstanding_amount']:,}"
         )
 
@@ -600,8 +600,8 @@ def _fast_answer(result):
                 f"Item: {row['item']}\n"
                 f"Quantity: {row['quantity']:,}\n"
                 f"Total amount: {row['total_amount']:,}\n"
-                f"Amount received: {row['amount_received']:,}\n"
-                f"Amount remained: {row['outstanding_amount']:,}"
+                f"Total received: {row['amount_received']:,}\n"
+                f"Outstanding balance: {row['outstanding_amount']:,}"
             )
             if row.get("note") or result.get("include_note"):
                 line += f"\nNote: {row.get('note') or '-'}"
@@ -778,7 +778,7 @@ def _fast_answer(result):
             f"Voucher: {row['voucher_number']}",
             f"Customer: {row['customer'] or '-'}",
             f"Invoice amount: {row['invoice_amount']:,}",
-            f"Previous paid: {row['previous_paid']:,}",
+            f"Previous received: {row['previous_paid']:,}",
             f"Receive amount: {row['receive_amount']:,}",
             f"Outstanding balance: {row['outstanding_balance']:,}",
             f"Payment method: {row['payment_method'] or '-'}",

@@ -1,4 +1,4 @@
-from openclaw_client import ask_ai
+from tools.openclaw_client import ask_ai
 
 prompt = """
 Analyze this business:
@@ -21,6 +21,6 @@ Give:
 - recommendation
 """
 
-response = ask_ai(prompt)
-
-print(response)
+if __name__ == "__main__":
+    response = ask_ai(prompt)
+    print(response)

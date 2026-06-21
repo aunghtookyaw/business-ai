@@ -85,17 +85,17 @@ def _fixed_income_detail_lines(result):
     return lines
 
 
-def _customer_revenue_lines(result, customers, total_sales_key, total_paid_key=None, total_outstanding_key=None):
+def _customer_revenue_lines(result, customers, total_sales_key, total_received_key=None, total_outstanding_key=None):
     sorted_customers = sorted(
         customers or [],
         key=lambda row: int(row.get("total_amount") or row.get("amount") or row.get("income") or 0),
         reverse=True,
     )
     total_sales = int(result.get(total_sales_key) or sum(int(row.get("total_amount") or row.get("amount") or row.get("income") or 0) for row in sorted_customers) or 0)
-    if total_paid_key and total_paid_key in result:
-        total_paid = int(result.get(total_paid_key) or 0)
+    if total_received_key and total_received_key in result:
+        total_received = int(result.get(total_received_key) or 0)
     else:
-        total_paid = sum(int(row.get("amount_received", row.get("total_amount", row.get("income", 0))) or 0) for row in sorted_customers)
+        total_received = sum(int(row.get("amount_received", row.get("total_amount", row.get("income", 0))) or 0) for row in sorted_customers)
     if total_outstanding_key and total_outstanding_key in result:
         total_outstanding = int(result.get(total_outstanding_key) or 0)
     else:
@@ -104,7 +104,7 @@ def _customer_revenue_lines(result, customers, total_sales_key, total_paid_key=N
     lines = [
         "KPI Summary",
         f"Total Sales: {_money(total_sales)}",
-        f"Total Received: {_money(total_paid)}",
+        f"Total Received: {_money(total_received)}",
         f"Total Outstanding: {_money(total_outstanding)}",
         "",
         "Top Customers by Revenue",
@@ -113,14 +113,14 @@ def _customer_revenue_lines(result, customers, total_sales_key, total_paid_key=N
         lines.append("No customer sales found.")
     for index, row in enumerate(sorted_customers[:10], start=1):
         sales = int(row.get("total_amount") or row.get("amount") or row.get("income") or 0)
-        paid = int(row.get("amount_received", sales) or 0)
+        received = int(row.get("amount_received", sales) or 0)
         outstanding = int(row.get("outstanding_amount") or 0)
         lines.append(
-            "{index}. {customer} | Total Sales: {sales} | Received: {paid} | Outstanding: {outstanding}".format(
+            "{index}. {customer} | Total Sales: {sales} | Received: {received} | Outstanding: {outstanding}".format(
                 index=index,
                 customer=row.get("customer_name") or row.get("item") or row.get("category") or "-",
                 sales=_money(sales),
-                paid=_money(paid),
+                received=_money(received),
                 outstanding=_money(outstanding),
             )
         )
@@ -131,13 +131,13 @@ def _customer_revenue_lines(result, customers, total_sales_key, total_paid_key=N
     ])
     for row in sorted_customers[:20]:
         sales = int(row.get("total_amount") or row.get("amount") or row.get("income") or 0)
-        paid = int(row.get("amount_received", sales) or 0)
+        received = int(row.get("amount_received", sales) or 0)
         outstanding = int(row.get("outstanding_amount") or 0)
         lines.append(
-            "{customer} | {sales} | {paid} | {outstanding}".format(
+            "{customer} | {sales} | {received} | {outstanding}".format(
                 customer=row.get("customer_name") or row.get("item") or row.get("category") or "-",
                 sales=_money(sales),
-                paid=_money(paid),
+                received=_money(received),
                 outstanding=_money(outstanding),
             )
         )
@@ -188,7 +188,7 @@ def format_text_report(payload):
         lines.extend([
             "Category Comparison",
             f"Total: {_money(result.get('total_amount', 0))}",
-            f"Paid / Received: {_money(result.get('amount_received', 0))}",
+            f"Total Received: {_money(result.get('amount_received', 0))}",
             f"Outstanding: {_money(result.get('outstanding_amount', 0))}",
             f"Mode: {result.get('compare_mode') or 'master'}",
             f"Bucket: {result.get('granularity') or 'month'}",
@@ -200,24 +200,24 @@ def format_text_report(payload):
             lines.append("No matching data found.")
         for row in totals:
             lines.append(
-                "{bucket}: total {amount}, paid {paid}, outstanding {outstanding}, rows {rows}".format(
+                "{bucket}: total {amount}, received {received}, outstanding {outstanding}, rows {rows}".format(
                     bucket=row.get("period_bucket") or "-",
                     amount=_money(row.get("amount", 0)),
-                    paid=_money(row.get("amount_received", 0)),
+                    received=_money(row.get("amount_received", 0)),
                     outstanding=_money(row.get("outstanding_amount", 0)),
                     rows=_money(row.get("row_count", 0)),
                 )
             )
-        lines.extend(["", "Category Detail", "Bucket | Category | Sector | Type | Total | Paid | Outstanding | Rows"])
+        lines.extend(["", "Category Detail", "Bucket | Category | Sector | Type | Total | Total Received | Outstanding | Rows"])
         for row in rows[:30]:
             lines.append(
-                "{bucket} | {name} | {sector} | {kind} | {amount} | {paid} | {outstanding} | {rows}".format(
+                "{bucket} | {name} | {sector} | {kind} | {amount} | {received} | {outstanding} | {rows}".format(
                     bucket=row.get("period_bucket") or "-",
                     name=row.get("master_name") or "-",
                     sector=row.get("sector") or "-",
                     kind=row.get("income_expense") or "-",
                     amount=_money(row.get("amount", 0)),
-                    paid=_money(row.get("amount_received", 0)),
+                    received=_money(row.get("amount_received", 0)),
                     outstanding=_money(row.get("outstanding_amount", 0)),
                     rows=_money(row.get("row_count", 0)),
                 )
@@ -347,7 +347,7 @@ def write_excel_report(payload, output_path):
         sheet.append(["Summary"])
         sheet.append(["Metric", "Amount"])
         sheet.append(["Total", result.get("total_amount", 0)])
-        sheet.append(["Paid / Received", result.get("amount_received", 0)])
+        sheet.append(["Total Received", result.get("amount_received", 0)])
         sheet.append(["Outstanding", result.get("outstanding_amount", 0)])
         sheet.append(["Rows", result.get("row_count", 0)])
         sheet.append([])
@@ -388,7 +388,7 @@ def _write_expense_comparison_excel(workbook, sheet, payload):
         sheet.append([
             row.get("label"),
             row.get("total_expense", 0),
-            row.get("paid", 0),
+            row.get("received", 0),
             row.get("outstanding", 0),
             row.get("transaction_count", 0),
         ])

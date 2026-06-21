@@ -42,25 +42,17 @@ def _connect():
 
 def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Invoice_Date" DESC NULLS LAST, "Sector", "Invoice_Number"'):
     schema = config.TRANSACTION_SCHEMA.replace('"', '""')
-    payment_table = formula_engine._payment_receive_table_ref()
     return f'''
-    WITH payment_totals AS (
-      SELECT
-        "Sector",
-        "Voucher_Number",
-        COALESCE(SUM("Receive_Amount"), 0) AS "New_Received"
-      FROM {payment_table}
-      GROUP BY "Sector", "Voucher_Number"
-    ),
-    farm_groups AS (
+    WITH farm_groups AS (
       SELECT
         'Farm' AS "Sector",
         f."Invoice_Number"::text AS "Invoice_Number",
         MIN(NULLIF(TRIM(f."Customer"), '')) AS "Customer",
         '' AS "Sote_Type",
         MIN(f."Date") AS "Invoice_Date",
-        COALESCE(SUM(f."Total_Due"), 0) AS "Voucher_Total",
-        COALESCE(SUM(f."Paid"), 0) AS "Legacy_Received"
+        COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total",
+        COALESCE(SUM(f."Total_Received"), 0) AS "Total_Received",
+        COALESCE(SUM(f."Outstanding_Balance"), 0) AS "Outstanding_Balance"
       FROM "{schema}"."farm_transection" f
       WHERE COALESCE(f.__nc_deleted, false) = false
         AND f."Invoice_Number" IS NOT NULL
@@ -74,7 +66,8 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
         COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(s."Item"), ''), ', ' ORDER BY NULLIF(TRIM(s."Item"), '')), '') AS "Sote_Type",
         MIN(s."Invoice_Date") AS "Invoice_Date",
         COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total",
-        COALESCE(SUM(s."Amount_Received"), 0) AS "Legacy_Received"
+        COALESCE(SUM(s."Total_Received"), 0) AS "Total_Received",
+        COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Outstanding_Balance"
       FROM "{schema}"."Sotephwar_Transection" s
       WHERE COALESCE(s.__nc_deleted, false) = false
         AND s."Invoice_Number" IS NOT NULL
@@ -92,14 +85,11 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
       COALESCE(vg."Sote_Type", '') AS "Sote_Type",
       vg."Invoice_Date",
       vg."Voucher_Total",
-      vg."Legacy_Received",
-      COALESCE(pt."New_Received", 0) AS "New_Received",
-      vg."Legacy_Received" + COALESCE(pt."New_Received", 0) AS "Total_Received",
-      vg."Voucher_Total" - vg."Legacy_Received" - COALESCE(pt."New_Received", 0) AS "Outstanding_Balance"
+      0 AS "Legacy_Received",
+      vg."Total_Received" AS "New_Received",
+      vg."Total_Received",
+      vg."Outstanding_Balance"
     FROM voucher_groups vg
-    LEFT JOIN payment_totals pt
-      ON pt."Sector" = vg."Sector"
-     AND pt."Voucher_Number" = vg."Invoice_Number"
     {where_sql}
     {order_sql}
     {limit_sql}

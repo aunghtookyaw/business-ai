@@ -106,7 +106,7 @@ class ChartPdfTest(unittest.TestCase):
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Total", pdf_text)
-            self.assertIn("Paid / Received", pdf_text)
+            self.assertIn("Total Received", pdf_text)
             self.assertIn("Outstanding", pdf_text)
             self.assertIn("Compare Table", pdf_text)
             self.assertIn("Local AI Comment", pdf_text)
