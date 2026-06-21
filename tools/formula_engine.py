@@ -384,6 +384,56 @@ def _date_filter_for_column(period, column_name):
     }
 
 
+def _master_compare_granularity(question):
+    text = _normalized_text(question)
+    if any(_contains_phrase(text, phrase) for phrase in ("day by day", "daily", "by day")):
+        return "day"
+    if any(_contains_phrase(text, phrase) for phrase in ("week by week", "weekly", "by week")):
+        return "week"
+    if any(_contains_phrase(text, phrase) for phrase in ("month by month", "monthly", "by month")):
+        return "month"
+    if any(_contains_phrase(text, phrase) for phrase in ("year by year", "yearly", "by year")):
+        return "year"
+    return "month"
+
+
+def _master_compare_scope(question):
+    text = _normalized_text(question)
+    has_category = "category" in text or "categories" in text or "category master" in text
+    has_customer = "customer" in text or "customers" in text or "customer master" in text
+    if has_category and not has_customer:
+        return "category"
+    if has_customer and not has_category:
+        return "customer"
+    return "both"
+
+
+def _master_compare_period(question):
+    text = _normalized_text(question)
+    if _contains_phrase(text, "last year") or _contains_phrase(text, "previous year"):
+        return "last_year"
+    if _contains_phrase(text, "this year") or "yearly" in text or "annual" in text:
+        return "this_year"
+    if _contains_phrase(text, "last month") or _contains_phrase(text, "previous month"):
+        return "last_month"
+    if _contains_phrase(text, "this month"):
+        return "this_month"
+    if _contains_phrase(text, "last week") or _contains_phrase(text, "previous week"):
+        return "last_week"
+    if _contains_phrase(text, "this week"):
+        return "this_week"
+    return normalize_period(question)
+
+
+def is_master_comparison_question(question):
+    text = _normalized_text(question)
+    return (
+        ("master" in text or "category master" in text or "customer master" in text)
+        and any(word in text for word in ("compare", "comparison", "report", "day", "week", "month", "year"))
+        and ("category" in text or "customer" in text)
+    )
+
+
 def _normalized_text(text):
     return " ".join(re.sub(r"[^a-z0-9\s]", " ", text.lower()).split())
 
@@ -3415,6 +3465,155 @@ def payment_receive_summary(period="all_time", sector=None, limit=10):
     }
 
 
+def _master_bucket_sql(granularity, column_name):
+    if granularity not in {"day", "week", "month", "year"}:
+        granularity = "month"
+    return f"TO_CHAR(DATE_TRUNC('{granularity}', {column_name}), " + {
+        "day": "'YYYY-MM-DD'",
+        "week": "'IYYY-\"W\"IW'",
+        "month": "'YYYY-MM'",
+        "year": "'YYYY'",
+    }[granularity] + ")"
+
+
+def _master_comparison_ai_comment(rows, categories=None, compare_mode=None):
+    if not rows:
+        return "No matching master usage found for this enquiry."
+    top = max(rows, key=lambda row: int(row.get("amount") or 0))
+    category_text = ""
+    if categories:
+        category_text = f" for {', '.join(categories[:3])}"
+        if len(categories) > 3:
+            category_text += f" and {len(categories) - 3} more"
+    mode_text = "same-category" if compare_mode == "same" else "different-category" if compare_mode == "different" else "master"
+    return (
+        f"{mode_text.title()} enquiry{category_text}: highest amount is "
+        f"{top.get('master_name') or '-'} in {top.get('period_bucket') or '-'}."
+    )
+
+
+def master_name_comparison(period="this_year", scope="both", granularity="month", limit=50, categories=None, compare_mode=None):
+    scope = scope if scope in {"category", "customer", "both"} else "both"
+    granularity = granularity if granularity in {"day", "week", "month", "year"} else "month"
+    limit = max(1, min(int(limit or 50), 200))
+    categories = [str(category).strip() for category in (categories or []) if str(category).strip()]
+    rows = []
+
+    if scope in {"category", "both"}:
+        date_sql, params = _date_filter_for_column(period, 't."Date"')
+        category_filter_sql = ""
+        if categories:
+            category_filter_sql = '''
+              AND COALESCE(cm."category_name", NULLIF(TRIM(t."Categorization"), '')) = ANY(%s)
+            '''
+            params = list(params) + [categories]
+        category_rows = _fetch_all(
+            f'''
+            SELECT
+              'category' AS master_type,
+              {_master_bucket_sql(granularity, 't."Date"')} AS period_bucket,
+              COALESCE(cm."category_name", NULLIF(TRIM(t."Categorization"), ''), '-') AS master_name,
+              t."Income_Expense" AS income_expense,
+              t."Sector" AS sector,
+              COALESCE(SUM(t."Amount"), 0) AS amount,
+              COUNT(*) AS row_count,
+              COUNT(cm."category_name") AS linked_count
+            FROM {_table_ref()} t
+            {_transaction_category_link_join("t")}
+            WHERE COALESCE(t.__nc_deleted, false) = false
+              {date_sql}
+              {category_filter_sql}
+            GROUP BY
+              DATE_TRUNC('{granularity}', t."Date"),
+              COALESCE(cm."category_name", NULLIF(TRIM(t."Categorization"), ''), '-'),
+              t."Income_Expense",
+              t."Sector"
+            ''',
+            params,
+        )
+        rows.extend(category_rows)
+
+    if scope in {"customer", "both"}:
+        farm_date_sql, farm_params = _date_filter_for_column(period, 'f."Date"')
+        farm_rows = _fetch_all(
+            f'''
+            SELECT
+              'customer' AS master_type,
+              {_master_bucket_sql(granularity, 'f."Date"')} AS period_bucket,
+              COALESCE(cust."customer_name", NULLIF(TRIM(f."Customer"), ''), '-') AS master_name,
+              'Income' AS income_expense,
+              'Farm' AS sector,
+              COALESCE(SUM(f."Total_Due"), 0) AS amount,
+              COUNT(*) AS row_count,
+              COUNT(cust."customer_name") AS linked_count
+            FROM {_farm_transection_table_ref()} f
+            {_farm_customer_link_join("f")}
+            WHERE COALESCE(f.__nc_deleted, false) = false
+              {farm_date_sql}
+            GROUP BY
+              DATE_TRUNC('{granularity}', f."Date"),
+              COALESCE(cust."customer_name", NULLIF(TRIM(f."Customer"), ''), '-')
+            ''',
+            farm_params,
+        )
+        rows.extend(farm_rows)
+
+        sote_date_sql, sote_params = _date_filter_for_column(period, 's."Invoice_Date"')
+        sote_rows = _fetch_all(
+            f'''
+            SELECT
+              'customer' AS master_type,
+              {_master_bucket_sql(granularity, 's."Invoice_Date"')} AS period_bucket,
+              COALESCE(cust."customer_name", NULLIF(TRIM(s."Customer_Name"), ''), '-') AS master_name,
+              'Income' AS income_expense,
+              'Sote Phwar' AS sector,
+              COALESCE(SUM(s."Total_Amount"), 0) AS amount,
+              COUNT(*) AS row_count,
+              COUNT(cust."customer_name") AS linked_count
+            FROM {_sotephwar_transection_table_ref()} s
+            {_sotephwar_customer_link_join("s")}
+            WHERE COALESCE(s.__nc_deleted, false) = false
+              {sote_date_sql}
+            GROUP BY
+              DATE_TRUNC('{granularity}', s."Invoice_Date"),
+              COALESCE(cust."customer_name", NULLIF(TRIM(s."Customer_Name"), ''), '-')
+            ''',
+            sote_params,
+        )
+        rows.extend(sote_rows)
+
+    for row in rows:
+        row["amount"] = int(row.get("amount") or 0)
+        row["row_count"] = int(row.get("row_count") or 0)
+        row["linked_count"] = int(row.get("linked_count") or 0)
+        row["unlinked_count"] = max(0, row["row_count"] - row["linked_count"])
+
+    rows = sorted(
+        rows,
+        key=lambda row: (str(row.get("period_bucket") or ""), row.get("master_type") or "", -int(row.get("amount") or 0)),
+    )
+    totals = {}
+    for row in rows:
+        bucket = row.get("period_bucket") or "-"
+        totals.setdefault(bucket, {"period_bucket": bucket, "amount": 0, "row_count": 0, "unlinked_count": 0})
+        totals[bucket]["amount"] += row["amount"]
+        totals[bucket]["row_count"] += row["row_count"]
+        totals[bucket]["unlinked_count"] += row["unlinked_count"]
+
+    return {
+        "formula": "master_name_comparison",
+        "period": period,
+        "scope": scope,
+        "granularity": granularity,
+        "compare_mode": compare_mode,
+        "selected_categories": categories,
+        "totals": list(totals.values()),
+        "rows": rows[:limit],
+        "row_count": len(rows),
+        "ai_comment": _master_comparison_ai_comment(rows, categories=categories, compare_mode=compare_mode),
+    }
+
+
 FORMULAS = {
     "sales_total": sales_total,
     "expense_total": expense_total,
@@ -3443,6 +3642,7 @@ FORMULAS = {
     "financial_obligation_insert": financial_obligation_insert,
     "payment_receive_insert": payment_receive_insert,
     "payment_receive_summary": payment_receive_summary,
+    "master_name_comparison": master_name_comparison,
 }
 
 
@@ -3466,6 +3666,9 @@ def choose_formula_by_keywords(question):
         if _payment_receive_insert_requested(question):
             return "payment_receive_insert"
         return "payment_receive_summary"
+
+    if is_master_comparison_question(question):
+        return "master_name_comparison"
 
     if is_sotephwar_inventory_question(question):
         normalized = _normalized_text(question)
@@ -3724,5 +3927,15 @@ def run_formula(formula_name, question):
             period,
             sector=_normalize_payment_sector(question),
             limit=extract_top_limit(question, default=10),
+        )
+    if formula_name == "master_name_comparison":
+        period = _master_compare_period(question)
+        if period == "all_time":
+            period = "this_year"
+        return formula(
+            period,
+            scope=_master_compare_scope(question),
+            granularity=_master_compare_granularity(question),
+            limit=extract_top_limit(question, default=80, maximum=200),
         )
     return formula(period, filters)

@@ -701,6 +701,47 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertNotIn('"Total_Due" =', sql_text)
         self.assertNotIn('"Total_Amount" =', sql_text)
 
+    def test_master_name_comparison_routes_and_formats_fast_answer(self):
+        self.assertEqual(
+            "master_name_comparison",
+            business_agent.choose_formula("compare category_master and customer_master month by month this year report"),
+        )
+
+        answer = business_agent._fast_answer({
+            "formula": "master_name_comparison",
+            "period": "this_year",
+            "scope": "both",
+            "granularity": "month",
+            "totals": [
+                {"period_bucket": "2026-06", "amount": 1000000, "row_count": 12, "unlinked_count": 1},
+            ],
+            "rows": [
+                {
+                    "period_bucket": "2026-06",
+                    "master_type": "category",
+                    "sector": "Farm",
+                    "master_name": "Fertilizer",
+                    "amount": 700000,
+                    "row_count": 8,
+                    "unlinked_count": 0,
+                },
+                {
+                    "period_bucket": "2026-06",
+                    "master_type": "customer",
+                    "sector": "Sote Phwar",
+                    "master_name": "Aung Myat Thu",
+                    "amount": 300000,
+                    "row_count": 4,
+                    "unlinked_count": 1,
+                },
+            ],
+        })
+
+        self.assertIn("Master name comparison for this year", answer)
+        self.assertIn("Scope: both", answer)
+        self.assertIn("2026-06: amount 1,000,000, rows 12, unlinked rows 1", answer)
+        self.assertIn("2026-06 | customer | Sote Phwar | Aung Myat Thu | 300,000 | 4 | 1", answer)
+
     def test_payment_receive_summary_answer_shows_kpis(self):
         answer = business_agent._fast_answer({
             "formula": "payment_receive_summary",

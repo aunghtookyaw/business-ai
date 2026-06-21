@@ -17,7 +17,7 @@ def _rows_from_result(result):
         return result.get("categories") or []
     for key in (
         "transactions", "expenses", "income", "categories", "sectors", "invoices",
-        "customers", "stock", "movements", "months", "summary", "obligations",
+        "customers", "stock", "movements", "months", "summary", "obligations", "rows",
     ):
         rows = result.get(key)
         if rows:
@@ -181,6 +181,43 @@ def format_text_report(payload):
                     percent="-" if row.get("change_percent") is None else f"{row['change_percent']}%",
                 )
             )
+    elif formula == "master_name_comparison":
+        totals = result.get("totals") or []
+        rows = result.get("rows") or []
+        selected = result.get("selected_categories") or []
+        lines.extend([
+            "Category Comparison",
+            f"Mode: {result.get('compare_mode') or 'master'}",
+            f"Bucket: {result.get('granularity') or 'month'}",
+            "Selected categories: " + (", ".join(selected) if selected else "All"),
+            "",
+            "Period Totals",
+        ])
+        if not totals:
+            lines.append("No matching data found.")
+        for row in totals:
+            lines.append(
+                "{bucket}: amount {amount}, rows {rows}, unlinked rows {unlinked}".format(
+                    bucket=row.get("period_bucket") or "-",
+                    amount=_money(row.get("amount", 0)),
+                    rows=_money(row.get("row_count", 0)),
+                    unlinked=_money(row.get("unlinked_count", 0)),
+                )
+            )
+        lines.extend(["", "Category Detail", "Bucket | Category | Sector | Type | Amount | Rows | Unlinked"])
+        for row in rows[:30]:
+            lines.append(
+                "{bucket} | {name} | {sector} | {kind} | {amount} | {rows} | {unlinked}".format(
+                    bucket=row.get("period_bucket") or "-",
+                    name=row.get("master_name") or "-",
+                    sector=row.get("sector") or "-",
+                    kind=row.get("income_expense") or "-",
+                    amount=_money(row.get("amount", 0)),
+                    rows=_money(row.get("row_count", 0)),
+                    unlinked=_money(row.get("unlinked_count", 0)),
+                )
+            )
+        lines.extend(["", "Local AI Comment", result.get("ai_comment") or "-"])
     elif formula == "sales_total":
         lines.append(f"Total income: {_money(result.get('total_sales', 0))}")
         if "amount_received" in result:
@@ -306,6 +343,11 @@ def write_excel_report(payload, output_path):
         sheet.append(headers)
         for row in rows:
             sheet.append([row.get(header) for header in headers])
+        if payload["result"].get("ai_comment"):
+            sheet.append([])
+            sheet.append(["Local AI Comment"])
+            for line in str(payload["result"].get("ai_comment") or "-").splitlines():
+                sheet.append([line])
     else:
         sheet.append(["Metric", "Value"])
         for key, value in payload["result"].items():

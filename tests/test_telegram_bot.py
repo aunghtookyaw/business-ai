@@ -127,6 +127,8 @@ class FinanceBotFilterTest(unittest.TestCase):
         first_button = markup.inline_keyboard[0][0]
         self.assertEqual("Overall KPI", first_button.text)
         self.assertEqual("bi:overall_kpi", first_button.callback_data)
+        self.assertEqual("Prompt Enquiry", markup.inline_keyboard[1][0].text)
+        self.assertEqual("bi:prompt_enquiry", markup.inline_keyboard[1][0].callback_data)
 
     def test_bi_overall_kpi_button_sends_yearly_kpi_pdf(self):
         original_create_chart_pdf_report = telegram_bot.create_chart_pdf_report
@@ -229,6 +231,95 @@ class FinanceBotFilterTest(unittest.TestCase):
             self.assertIn("Total expense: 123", message.replies[-1]["text"])
         finally:
             telegram_bot.execute_intent = original_execute_intent
+
+    def test_prompt_enquiry_compares_selected_categories_with_text_output(self):
+        original_search_categories = telegram_bot.search_categories
+        original_master_name_comparison = telegram_bot.master_name_comparison
+        seen = {}
+
+        def fake_search_categories(text, **kwargs):
+            return [{"value": f"{text.title()} Category", "score": 1.0}]
+
+        def fake_master_name_comparison(period, scope="both", granularity="month", limit=50, categories=None, compare_mode=None):
+            seen.update({
+                "period": period,
+                "scope": scope,
+                "granularity": granularity,
+                "limit": limit,
+                "categories": categories,
+                "compare_mode": compare_mode,
+            })
+            return {
+                "formula": "master_name_comparison",
+                "period": period,
+                "scope": scope,
+                "granularity": granularity,
+                "compare_mode": compare_mode,
+                "selected_categories": categories,
+                "totals": [{"period_bucket": "2026-06", "amount": 3000, "row_count": 2, "unlinked_count": 0}],
+                "rows": [
+                    {
+                        "period_bucket": "2026-06",
+                        "master_name": "Fuel Category",
+                        "sector": "Farm",
+                        "income_expense": "Expense",
+                        "amount": 3000,
+                        "row_count": 2,
+                        "unlinked_count": 0,
+                    },
+                ],
+                "ai_comment": "Fuel Category is highest in 2026-06.",
+            }
+
+        telegram_bot.search_categories = fake_search_categories
+        telegram_bot.master_name_comparison = fake_master_name_comparison
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            for data in ("bi:prompt_enquiry", "bi:master_mode:different"):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            search_message = FakeMessage(-1003850232296, 5, "fuel")
+            telegram_bot.handle_message(FakeUpdate(search_message), context)
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:select_master_category:0")),
+                context,
+            )
+
+            second_search = FakeMessage(-1003850232296, 5, "motor")
+            telegram_bot.handle_message(FakeUpdate(second_search), context)
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:select_master_category:0")),
+                context,
+            )
+
+            for data in (
+                "bi:master_category_done",
+                "bi:master_granularity:month",
+                "bi:period:this_month",
+                "bi:output:text",
+            ):
+                telegram_bot.handle_bi_callback(
+                    FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                    context,
+                )
+
+            self.assertEqual("this_month", seen["period"])
+            self.assertEqual("category", seen["scope"])
+            self.assertEqual("month", seen["granularity"])
+            self.assertEqual(["Fuel Category", "Motor Category"], seen["categories"])
+            self.assertEqual("different", seen["compare_mode"])
+            text = message.replies[-1]["text"]
+            self.assertIn("Category Comparison", text)
+            self.assertIn("Selected categories: Fuel Category, Motor Category", text)
+            self.assertIn("Local AI Comment", text)
+            self.assertIn("Fuel Category is highest in 2026-06.", text)
+        finally:
+            telegram_bot.search_categories = original_search_categories
+            telegram_bot.master_name_comparison = original_master_name_comparison
 
     def test_bi_wizard_builds_financial_obligation_intent(self):
         original_execute_intent = telegram_bot.execute_intent

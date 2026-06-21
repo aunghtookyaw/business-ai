@@ -5,6 +5,7 @@ from datetime import date
 from tools.formula_engine import (
     FORMULAS,
     choose_formula_by_keywords,
+    is_master_comparison_question,
     is_payment_receive_question,
     is_sotephwar_transection_question,
     normalize_period,
@@ -40,6 +41,7 @@ FAST_FORMULAS = {
     "financial_obligation_insert",
     "payment_receive_insert",
     "payment_receive_summary",
+    "master_name_comparison",
 }
 
 ANALYSIS_KEYWORDS = (
@@ -102,6 +104,7 @@ Available formulas:
 - financial_obligation_insert: insert one Financial_Obligations row from an explicit add/create prompt
 - payment_receive_insert: insert one append-only Payment_Receive row for Farm or Sote Phwar voucher collection
 - payment_receive_summary: outstanding receivables, collection rate, customer balance, aging analysis
+- master_name_comparison: compare category_master/customer_master usage day by day, week by week, month by month, or year by year
 
 Financial_Obligations is for reminders only. Do not route KPI, profit,
 income, expense, cash-flow, statistics, sector, category, top income, or top
@@ -136,6 +139,9 @@ def choose_formula(question):
 
     if is_payment_receive_question(question):
         return choose_formula_by_keywords(question)
+
+    if is_master_comparison_question(question):
+        return "master_name_comparison"
 
     if needs_comparison(question):
         return "comparison"
@@ -806,6 +812,37 @@ def _fast_answer(result):
             lines.extend(["", "Top Customer Balances"])
             for row in customer_balances[:10]:
                 lines.append(f"{row['customer']}: {row['outstanding_balance']:,}")
+        return "\n".join(lines)
+
+    if formula == "master_name_comparison":
+        scope = result.get("scope", "both").replace("_", " ")
+        granularity = result.get("granularity", "month")
+        lines = [
+            f"Master name comparison for {period}",
+            f"Scope: {scope}",
+            f"Bucket: {granularity}",
+            "",
+            "Period Totals",
+        ]
+        for row in result.get("totals") or []:
+            lines.append(
+                f"{row['period_bucket']}: amount {row['amount']:,}, rows {row['row_count']:,}, "
+                f"unlinked rows {row['unlinked_count']:,}"
+            )
+        lines.extend([
+            "",
+            "Master Detail",
+            "Bucket | Type | Sector | Master Name | Amount | Rows | Unlinked",
+        ])
+        for row in result.get("rows") or []:
+            lines.append(
+                f"{row.get('period_bucket') or '-'} | {row.get('master_type') or '-'} | "
+                f"{row.get('sector') or '-'} | {row.get('master_name') or '-'} | "
+                f"{int(row.get('amount') or 0):,} | {int(row.get('row_count') or 0):,} | "
+                f"{int(row.get('unlinked_count') or 0):,}"
+            )
+        if not result.get("rows"):
+            lines.append("No matching master usage found.")
         return "\n".join(lines)
 
     return None

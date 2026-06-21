@@ -31,8 +31,10 @@ from tools.bi_intents import intent_from_state
 from tools.bi_periods import (
     RELATIVE_PERIODS,
     date_period,
+    legacy_period,
     month_days,
     month_period,
+    period_label,
     range_period,
     relative_period,
 )
@@ -51,6 +53,7 @@ from tools.comparison_reports import (
 )
 from tools.executive_agent import answer_executive_question
 from tools.executive_reports import write_executive_excel_report
+from tools.formula_engine import master_name_comparison
 from tools.google_calendar_client import sync_financial_obligations_to_calendar
 
 SOTEPHWAR_PAYMENT_TEMPLATE = (
@@ -67,6 +70,12 @@ CEO_PDF_EXPORT_TITLE = "BigShot CEO Management Report"
 AUTO_DELETE_SECONDS = int(os.getenv("FINANCE_AUTO_DELETE_SECONDS", "86400"))
 BI_STATE_KEY = "bi_wizard"
 BI_PERSISTENCE_FILE = os.getenv("FINANCE_BI_PERSISTENCE_FILE", "/private/tmp/business-ai-bi-wizard-state.pkl")
+MASTER_COMPARE_GRANULARITIES = [
+    ("day", "Day by Day"),
+    ("week", "Week by Week"),
+    ("month", "Month by Month"),
+    ("year", "Year by Year"),
+]
 
 
 COMMAND_QUESTIONS = {
@@ -680,6 +689,7 @@ def _send_bi_message(message, context, text, rows, include_back=True):
 def _show_bi_home(message, context):
     _reset_bi_state(context)
     rows = [[InlineKeyboardButton("Overall KPI", callback_data="bi:overall_kpi")]]
+    rows.append([InlineKeyboardButton("Prompt Enquiry", callback_data="bi:prompt_enquiry")])
     rows.extend(_button_rows(BUSINESS_MENU, "bi:business"))
     return _send_bi_message(
         message,
@@ -688,6 +698,25 @@ def _show_bi_home(message, context):
         rows,
         include_back=False,
     )
+
+
+def _show_prompt_enquiry_menu(message, context):
+    state = _bi_state(context)
+    state.clear()
+    state["step"] = "master_compare_mode"
+    rows = _button_rows(
+        [("same", "Same Category"), ("different", "Different Category")],
+        "bi:master_mode",
+        columns=1,
+    )
+    return _send_bi_message(message, context, "Prompt Enquiry: choose category comparison:", rows)
+
+
+def _show_master_granularity_menu(message, context):
+    state = _bi_state(context)
+    state["step"] = "master_granularity"
+    rows = _button_rows(MASTER_COMPARE_GRANULARITIES, "bi:master_granularity", columns=2)
+    return _send_bi_message(message, context, "Choose time of enquiry:", rows)
 
 
 def _show_module_menu(message, context):
@@ -852,6 +881,18 @@ def _handle_search_text(message, context, text):
                 matches.append(match)
         label = "income name" if state.get("module") == "income" else "category"
         prefix = "bi:select_category"
+    elif awaiting == "master_category":
+        matches = []
+        seen = set()
+        terms = [line.strip() for line in text.splitlines() if line.strip()] or [text]
+        for term in terms:
+            for match in search_categories(term):
+                if match["value"] in seen:
+                    continue
+                seen.add(match["value"])
+                matches.append(match)
+        label = "category"
+        prefix = "bi:select_master_category"
     else:
         return False
 
@@ -869,6 +910,10 @@ def _handle_search_text(message, context, text):
         [InlineKeyboardButton(match["value"], callback_data=f"{prefix}:{index}")]
         for index, match in enumerate(matches)
     ]
+    if awaiting == "master_category" and state.get("master_categories"):
+        rows.append([InlineKeyboardButton("Done", callback_data="bi:master_category_done")])
+        selected = "\n".join(f"- {category}" for category in state["master_categories"])
+        return _send_bi_message(message, context, f"Selected categories:\n{selected}\n\nSelect more category:", rows)
     if awaiting == "category" and state.get("categories"):
         rows.append([InlineKeyboardButton("Done", callback_data="bi:category_done")])
         selected = "\n".join(f"- {category}" for category in state["categories"])
@@ -945,6 +990,70 @@ def _execute_comparison_output(message, context):
         )
         if not created:
             _write_pdf_export(format_text_report(payload), path, title=payload["title"])
+        with path.open("rb") as document:
+            _reply_document(
+                message,
+                context,
+                document=document,
+                filename=_safe_export_filename(payload["title"], "pdf"),
+                caption=payload["title"],
+                reply_markup=_remove_reply_keyboard(),
+            )
+        path.unlink(missing_ok=True)
+        return
+
+    path = temp_report_path(".xlsx")
+    write_excel_report(payload, path)
+    with path.open("rb") as document:
+        _reply_document(
+            message,
+            context,
+            document=document,
+            filename=_safe_export_filename(payload["title"], "xlsx"),
+            caption=payload["title"],
+            reply_markup=_remove_reply_keyboard(),
+        )
+    path.unlink(missing_ok=True)
+
+
+def _execute_master_compare_output(message, context):
+    state = _bi_state(context)
+    output = state.get("output")
+    period = state.get("period") or relative_period("this_year")
+    categories = state.get("master_categories") or []
+    compare_mode = state.get("master_compare_mode")
+    granularity = state.get("master_granularity") or "month"
+    result = master_name_comparison(
+        legacy_period(period),
+        scope="category",
+        granularity=granularity,
+        limit=200 if output in {"pdf", "excel"} else 50,
+        categories=categories,
+        compare_mode=compare_mode,
+    )
+    payload = {
+        "intent": {
+            "business": "prompt_enquiry",
+            "module": "category_master",
+            "report": "master_name_comparison",
+            "categories": categories,
+            "compare_mode": compare_mode,
+            "granularity": granularity,
+            "output": output,
+        },
+        "title": "Prompt Enquiry - Category Comparison",
+        "period_label": period_label(period),
+        "result": result,
+    }
+
+    if output == "text":
+        for part in _split_message(format_text_report(payload)):
+            _reply_text(message, context, part, reply_markup=_remove_reply_keyboard())
+        return
+
+    if output == "pdf":
+        path = temp_report_path(".pdf")
+        _write_pdf_export(format_text_report(payload), path, title=payload["title"])
         with path.open("rb") as document:
             _reply_document(
                 message,
@@ -1051,6 +1160,27 @@ def handle_bi_callback(update: Update, context: CallbackContext):
             _reset_bi_state(context)
             _reply_text(message, context, "Comparison cancelled.", reply_markup=_remove_reply_keyboard())
             return
+        if step == "master_output":
+            state.pop("period", None)
+            state["step"] = "period"
+            _show_period_menu(message, context)
+            return
+        if step == "master_period":
+            state.pop("master_granularity", None)
+            _show_master_granularity_menu(message, context)
+            return
+        if step == "master_granularity":
+            state["awaiting"] = "master_category"
+            _reply_text(
+                message,
+                context,
+                "Type category name to search.",
+                reply_markup=_remove_reply_keyboard(),
+            )
+            return
+        if step == "master_select_category":
+            _show_prompt_enquiry_menu(message, context)
+            return
         if step == "output":
             state.pop("period", None)
             state["step"] = "period"
@@ -1073,6 +1203,22 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         state["step"] = "module"
         _show_module_menu(message, context)
         return
+    if data == "bi:prompt_enquiry":
+        _show_prompt_enquiry_menu(message, context)
+        return
+    if data.startswith("bi:master_mode:"):
+        state.clear()
+        state["master_compare_mode"] = data.rsplit(":", 1)[1]
+        state["master_categories"] = []
+        state["awaiting"] = "master_category"
+        state["step"] = "master_select_category"
+        _reply_text(
+            message,
+            context,
+            "Type category name to search.",
+            reply_markup=_remove_reply_keyboard(),
+        )
+        return
     if data.startswith("bi:module:"):
         state["module"] = data.rsplit(":", 1)[1]
         state["step"] = "report"
@@ -1088,6 +1234,39 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         state["customer"] = state.get("candidates", [])[index]
         state.pop("awaiting", None)
         state["step"] = "period"
+        _show_period_menu(message, context)
+        return
+    if data.startswith("bi:select_master_category:"):
+        index = int(data.rsplit(":", 1)[1])
+        category = state.get("candidates", [])[index]
+        selected = state.setdefault("master_categories", [])
+        if category not in selected:
+            selected.append(category)
+        state.pop("candidates", None)
+        if state.get("master_compare_mode") == "same":
+            state.pop("awaiting", None)
+            _show_master_granularity_menu(message, context)
+            return
+        rows = [[InlineKeyboardButton("Done", callback_data="bi:master_category_done")]]
+        selected_text = "\n".join(f"- {value}" for value in selected)
+        _send_bi_message(
+            message,
+            context,
+            f"Selected categories:\n{selected_text}\n\nType another category to search, or press Done.",
+            rows,
+        )
+        return
+    if data == "bi:master_category_done":
+        if not state.get("master_categories"):
+            _reply_text(message, context, "Select at least one category first.", reply_markup=_remove_reply_keyboard())
+            return
+        state.pop("awaiting", None)
+        state.pop("candidates", None)
+        _show_master_granularity_menu(message, context)
+        return
+    if data.startswith("bi:master_granularity:"):
+        state["master_granularity"] = data.rsplit(":", 1)[1]
+        state["step"] = "master_period"
         _show_period_menu(message, context)
         return
     if data.startswith("bi:select_category:"):
@@ -1116,7 +1295,7 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         return
     if data.startswith("bi:period:"):
         state["period"] = relative_period(data.rsplit(":", 1)[1])
-        state["step"] = "output"
+        state["step"] = "master_output" if state.get("master_compare_mode") else "output"
         _show_output_menu(message, context)
         return
     if data.startswith("bi:custom:"):
@@ -1133,7 +1312,7 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         kind = state.get("calendar_kind")
         if kind == "month":
             state["period"] = month_period(year, month)
-            state["step"] = "output"
+            state["step"] = "master_output" if state.get("master_compare_mode") else "output"
             _show_output_menu(message, context)
         else:
             _show_calendar_dates(message, context, int(year), int(month))
@@ -1151,7 +1330,7 @@ def handle_bi_callback(update: Update, context: CallbackContext):
                 state["period"] = range_period(state["range_start"], selected)
             else:
                 state["period"] = date_period(selected)
-            state["step"] = "output"
+            state["step"] = "master_output" if state.get("master_compare_mode") else "output"
             _show_output_menu(message, context)
         return
     if data.startswith("bi:output:"):
@@ -1160,6 +1339,8 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         try:
             if state.get("comparison_question"):
                 _execute_comparison_output(message, context)
+            elif state.get("master_compare_mode"):
+                _execute_master_compare_output(message, context)
             else:
                 _execute_bi_output(message, context)
         except Exception as exc:
