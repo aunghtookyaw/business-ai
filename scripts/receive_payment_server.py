@@ -42,51 +42,70 @@ def _connect():
 
 def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Invoice_Date" DESC NULLS LAST, "Sector", "Invoice_Number"'):
     schema = config.TRANSACTION_SCHEMA.replace('"', '""')
+    payment_table = formula_engine._payment_receive_table_ref()
     return f'''
-    WITH farm_groups AS (
+    WITH farm_source AS (
       SELECT
         'Farm' AS "Sector",
         f."Invoice_Number"::text AS "Invoice_Number",
-        MIN(NULLIF(TRIM(f."Customer"), '')) AS "Customer",
+        COALESCE(NULLIF(TRIM(f."Customer"), ''), '') AS "Customer",
         '' AS "Sote_Type",
-        MIN(f."Date") AS "Invoice_Date",
-        COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total",
-        COALESCE(SUM(f."Total_Received"), 0) AS "Total_Received",
-        COALESCE(SUM(f."Outstanding_Balance"), 0) AS "Outstanding_Balance",
-        CASE
-          WHEN COALESCE(SUM(f."Outstanding_Balance"), 0) = 0 AND COALESCE(SUM(f."Total_Received"), 0) > 0 THEN 'Paid'
-          WHEN COALESCE(SUM(f."Total_Received"), 0) > 0 THEN 'Partial'
-          ELSE 'Outstanding'
-        END AS "Payment_Status"
+        f."Date" AS "Invoice_Date",
+        COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total"
       FROM "{schema}"."farm_transection" f
       WHERE COALESCE(f.__nc_deleted, false) = false
         AND f."Invoice_Number" IS NOT NULL
-      GROUP BY f."Invoice_Number"::text
+      GROUP BY f."Invoice_Number"::text, f."Date", COALESCE(NULLIF(TRIM(f."Customer"), ''), '')
     ),
-    sote_groups AS (
+    sote_source AS (
       SELECT
         'Sote Phwar' AS "Sector",
         s."Invoice_Number"::text AS "Invoice_Number",
-        MIN(NULLIF(TRIM(s."Customer_Name"), '')) AS "Customer",
+        COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') AS "Customer",
         COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(s."Item"), ''), ', ' ORDER BY NULLIF(TRIM(s."Item"), '')), '') AS "Sote_Type",
-        MIN(s."Invoice_Date") AS "Invoice_Date",
-        COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total",
-        COALESCE(SUM(s."Total_Received"), 0) AS "Total_Received",
-        COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Outstanding_Balance",
-        CASE
-          WHEN COALESCE(SUM(s."Outstanding_Balance"), 0) = 0 AND COALESCE(SUM(s."Total_Received"), 0) > 0 THEN 'Paid'
-          WHEN COALESCE(SUM(s."Total_Received"), 0) > 0 THEN 'Partial'
-          ELSE 'Outstanding'
-        END AS "Payment_Status"
+        s."Invoice_Date" AS "Invoice_Date",
+        COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total"
       FROM "{schema}"."Sotephwar_Transection" s
       WHERE COALESCE(s.__nc_deleted, false) = false
         AND s."Invoice_Number" IS NOT NULL
-      GROUP BY s."Invoice_Number"::text
+      GROUP BY s."Invoice_Number"::text, s."Invoice_Date", COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '')
+    ),
+    source_vouchers AS (
+      SELECT * FROM farm_source
+      UNION ALL
+      SELECT * FROM sote_source
+    ),
+    payments AS (
+      SELECT
+        "Sector",
+        "Voucher_Number"::text AS "Invoice_Number",
+        "Invoice_Date",
+        COALESCE("Customer", '') AS "Customer",
+        COALESCE(SUM("Receive_Amount"), 0) AS "Total_Received"
+      FROM {payment_table}
+      GROUP BY "Sector", "Voucher_Number"::text, "Invoice_Date", COALESCE("Customer", '')
     ),
     voucher_groups AS (
-      SELECT * FROM farm_groups
-      UNION ALL
-      SELECT * FROM sote_groups
+      SELECT
+        sv."Sector",
+        sv."Invoice_Number",
+        sv."Customer",
+        sv."Sote_Type",
+        sv."Invoice_Date",
+        sv."Voucher_Total",
+        COALESCE(p."Total_Received", 0) AS "Total_Received",
+        GREATEST(sv."Voucher_Total" - COALESCE(p."Total_Received", 0), 0) AS "Outstanding_Balance",
+        CASE
+          WHEN sv."Voucher_Total" > 0 AND COALESCE(p."Total_Received", 0) >= sv."Voucher_Total" THEN 'Paid'
+          WHEN COALESCE(p."Total_Received", 0) > 0 THEN 'Partial'
+          ELSE 'Outstanding'
+        END AS "Payment_Status"
+      FROM source_vouchers sv
+      LEFT JOIN payments p
+        ON p."Sector" = sv."Sector"
+       AND p."Invoice_Number" = sv."Invoice_Number"
+       AND COALESCE(p."Customer", '') = COALESCE(sv."Customer", '')
+       AND (p."Invoice_Date" = sv."Invoice_Date" OR p."Invoice_Date" IS NULL)
     )
     SELECT
       vg."Sector",
@@ -173,17 +192,26 @@ def _voucher_payload(row):
     }
 
 
-def _fetch_voucher(sector, invoice_number):
+def _fetch_voucher(sector, invoice_number, invoice_date="", customer=""):
+    formula_engine.ensure_payment_receive_table()
+    conditions = ['vg."Sector" = %(sector)s', 'vg."Invoice_Number" = %(invoice_number)s']
+    params = {"sector": sector, "invoice_number": invoice_number}
+    if invoice_date:
+        conditions.append('vg."Invoice_Date" = %(invoice_date)s')
+        params["invoice_date"] = invoice_date
+    if customer:
+        conditions.append('COALESCE(vg."Customer", \'\') = %(customer)s')
+        params["customer"] = customer
     with _connect() as conn:
         conn.set_session(readonly=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 _voucher_query(
-                    where_sql='WHERE vg."Sector" = %(sector)s AND vg."Invoice_Number" = %(invoice_number)s',
+                    where_sql="WHERE " + " AND ".join(conditions),
                     limit_sql="LIMIT 1",
                     order_sql="",
                 ),
-                {"sector": sector, "invoice_number": invoice_number},
+                params,
             )
             row = cur.fetchone()
             conn.rollback()
@@ -202,36 +230,6 @@ def _list_vouchers(search="", sector="", voucher_number="", invoice_date="", cus
     formula_engine.ensure_payment_receive_table()
     params = {}
     sector = _normalize_sector_filter(sector)
-    if sector == "Sote Phwar":
-        conditions = ['COALESCE(s."Outstanding_Balance", 0) > 0']
-        if search:
-            conditions.append('''
-            (s."Invoice_Number"::text ILIKE %(search)s
-               OR COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') ILIKE %(search)s
-               OR COALESCE(NULLIF(TRIM(s."Item"), ''), '') ILIKE %(search)s)
-            ''')
-            params["search"] = f"%{search}%"
-        if voucher_number:
-            conditions.append('s."Invoice_Number"::text ILIKE %(voucher_number)s')
-            params["voucher_number"] = f"%{voucher_number}%"
-        if invoice_date:
-            conditions.append('s."Invoice_Date" = %(invoice_date)s')
-            params["invoice_date"] = invoice_date
-        if customer:
-            conditions.append('COALESCE(NULLIF(TRIM(s."Customer_Name"), \'\'), \'\') ILIKE %(customer)s')
-            params["customer"] = f"%{customer}%"
-        where_sql = " AND " + " AND ".join(conditions)
-        with _connect() as conn:
-            conn.set_session(readonly=True)
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(
-                    _sotephwar_listing_query(where_sql=where_sql, order_sql='ORDER BY s."Invoice_Date" DESC NULLS LAST, s."Invoice_Number" DESC, s.id DESC'),
-                    params,
-                )
-                rows = cur.fetchall()
-                conn.rollback()
-        return [_voucher_payload(row) for row in rows]
-
     conditions = []
     if sector:
         conditions.append('vg."Sector" = %(sector)s')
@@ -245,8 +243,8 @@ def _list_vouchers(search="", sector="", voucher_number="", invoice_date="", cus
         ''')
         params["search"] = f"%{search}%"
     if voucher_number:
-        conditions.append('vg."Invoice_Number" ILIKE %(voucher_number)s')
-        params["voucher_number"] = f"%{voucher_number}%"
+        conditions.append('vg."Invoice_Number" = %(voucher_number)s')
+        params["voucher_number"] = voucher_number
     if invoice_date:
         conditions.append('vg."Invoice_Date" = %(invoice_date)s')
         params["invoice_date"] = invoice_date
@@ -364,7 +362,7 @@ def _basic_payment_page(
 
     rows = []
     for voucher in vouchers:
-        key = f"{voucher['sector']}||{voucher['invoice_number']}"
+        key = f"{voucher['sector']}||{voucher['invoice_number']}||{voucher['invoice_date']}||{voucher['customer']}"
         summary = (
             f"{voucher['sector']} / {voucher['invoice_number']} / "
             f"{voucher['customer'] or '-'} / Outstanding {voucher['outstanding_balance']:,}"
@@ -659,9 +657,12 @@ def receive_payment_basic_page():
         return _basic_payment_page(**filter_values)
 
     voucher_key = request.form.get("voucher_key") or ""
-    if "||" not in voucher_key:
+    key_parts = voucher_key.split("||")
+    if len(key_parts) < 2:
         return _basic_payment_page("Select a voucher before saving.", error=True, **filter_values)
-    sector, invoice_number = voucher_key.split("||", 1)
+    sector, invoice_number = key_parts[:2]
+    selected_invoice_date = key_parts[2] if len(key_parts) > 2 else ""
+    selected_customer = key_parts[3] if len(key_parts) > 3 else ""
     payment_method = (request.form.get("payment_method") or "").strip()
     reference_number = (request.form.get("reference_number") or "").strip()
     notes = (request.form.get("notes") or "").strip()
@@ -673,7 +674,7 @@ def receive_payment_basic_page():
     if receive_amount <= 0:
         return _basic_payment_page("Receive Amount must be greater than zero.", error=True, **filter_values)
 
-    voucher = _fetch_voucher(sector, invoice_number)
+    voucher = _fetch_voucher(sector, invoice_number, selected_invoice_date, selected_customer)
     if not voucher:
         return _basic_payment_page("Voucher not found.", error=True, **filter_values)
 
@@ -683,6 +684,7 @@ def receive_payment_basic_page():
         _insert_payment_receive(
             sector=sector,
             voucher_number=invoice_number,
+            invoice_date=voucher["invoice_date"],
             customer=voucher["customer"],
             invoice_amount=voucher["voucher_total"],
             previous_paid=previous_paid,
@@ -717,9 +719,11 @@ def list_vouchers():
 def get_voucher():
     sector = (request.args.get("sector") or "").strip()
     invoice_number = (request.args.get("invoice_number") or "").strip()
+    invoice_date = (request.args.get("invoice_date") or "").strip()
+    customer = (request.args.get("customer") or "").strip()
     if not sector or not invoice_number:
         return jsonify({"ok": False, "error": "sector and invoice_number are required"}), 400
-    voucher = _fetch_voucher(sector, invoice_number)
+    voucher = _fetch_voucher(sector, invoice_number, invoice_date, customer)
     if not voucher:
         return jsonify({"ok": False, "error": "Voucher not found"}), 404
     return jsonify({"ok": True, "voucher": voucher})
@@ -733,6 +737,8 @@ def create_payment_receive():
 
     sector = str(payload.get("sector") or "").strip()
     invoice_number = str(payload.get("invoice_number") or "").strip()
+    invoice_date = str(payload.get("invoice_date") or "").strip()
+    customer = str(payload.get("customer") or "").strip()
     payment_method = str(payload.get("payment_method") or "").strip()
     reference_number = str(payload.get("reference_number") or "").strip()
     notes = str(payload.get("notes") or "").strip()
@@ -749,7 +755,7 @@ def create_payment_receive():
     if receive_amount <= 0:
         return jsonify({"ok": False, "error": "receive_amount must be greater than zero"}), 400
 
-    voucher = _fetch_voucher(sector, invoice_number)
+    voucher = _fetch_voucher(sector, invoice_number, invoice_date, customer)
     if not voucher:
         return jsonify({"ok": False, "error": "Voucher not found"}), 404
 
@@ -759,6 +765,7 @@ def create_payment_receive():
         row = _insert_payment_receive(
             sector=sector,
             voucher_number=invoice_number,
+            invoice_date=voucher["invoice_date"],
             customer=voucher["customer"],
             invoice_amount=voucher["voucher_total"],
             previous_paid=previous_paid,
@@ -774,7 +781,7 @@ def create_payment_receive():
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 
-    refreshed = _fetch_voucher(sector, invoice_number)
+    refreshed = _fetch_voucher(sector, invoice_number, voucher["invoice_date"], voucher["customer"])
     return jsonify({"ok": True, "payment": row, "voucher": refreshed})
 
 
@@ -813,12 +820,16 @@ def _insert_payment_receive(**values):
         reference_number=values.get("reference_number") or "",
         notes=values.get("notes") or "",
         recorded_by=values.get("recorded_by") or "",
+        invoice_date=values.get("invoice_date") or None,
+        customer=values.get("customer") or None,
     )
     row = dict(saved["payment"])
     for key in ("invoice_amount", "previous_paid", "receive_amount", "outstanding_balance"):
         row[key] = _money_value(row.get(key))
-    if row.get("receive_date"):
+    if row.get("receive_date") and hasattr(row["receive_date"], "isoformat"):
         row["receive_date"] = row["receive_date"].isoformat()
+    if row.get("invoice_date") and hasattr(row["invoice_date"], "isoformat"):
+        row["invoice_date"] = row["invoice_date"].isoformat()
     return row
 
 
@@ -1030,7 +1041,13 @@ PAGE_HTML = r'''<!doctype html>
       rowsEl.innerHTML = '';
       vouchers.forEach(v => {
         const tr = document.createElement('tr');
-        if (selected && selected.sector === v.sector && selected.invoice_number === v.invoice_number) tr.className = 'selected';
+        if (
+          selected &&
+          selected.sector === v.sector &&
+          selected.invoice_number === v.invoice_number &&
+          selected.invoice_date === v.invoice_date &&
+          selected.customer === v.customer
+        ) tr.className = 'selected';
         tr.innerHTML = `
           <td>${v.sector}</td>
           <td>${v.invoice_number}</td>
@@ -1052,7 +1069,12 @@ PAGE_HTML = r'''<!doctype html>
       if (!data.ok) throw new Error(data.error || 'Could not load vouchers');
       vouchers = data.vouchers;
       if (selected) {
-        const refreshed = vouchers.find(v => v.sector === selected.sector && v.invoice_number === selected.invoice_number);
+        const refreshed = vouchers.find(v =>
+          v.sector === selected.sector &&
+          v.invoice_number === selected.invoice_number &&
+          v.invoice_date === selected.invoice_date &&
+          v.customer === selected.customer
+        );
         selected = refreshed || null;
         if (selected) fill(selected);
       }
@@ -1060,7 +1082,12 @@ PAGE_HTML = r'''<!doctype html>
     }
     async function refreshSelected() {
       if (!selected) return;
-      const response = await fetch(`/api/voucher?sector=${encodeURIComponent(selected.sector)}&invoice_number=${encodeURIComponent(selected.invoice_number)}`);
+      const response = await fetch(
+        `/api/voucher?sector=${encodeURIComponent(selected.sector)}` +
+        `&invoice_number=${encodeURIComponent(selected.invoice_number)}` +
+        `&invoice_date=${encodeURIComponent(selected.invoice_date || '')}` +
+        `&customer=${encodeURIComponent(selected.customer || '')}`
+      );
       const data = await response.json();
       if (data.ok) fill(data.voucher);
       await loadVouchers();
@@ -1079,6 +1106,8 @@ PAGE_HTML = r'''<!doctype html>
           body: JSON.stringify({
             sector: selected.sector,
             invoice_number: selected.invoice_number,
+            invoice_date: selected.invoice_date,
+            customer: selected.customer,
             receive_amount: document.getElementById('receiveAmount').value,
             payment_method: document.getElementById('paymentMethod').value,
             reference_number: document.getElementById('referenceNumber').value,

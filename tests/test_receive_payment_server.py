@@ -78,19 +78,18 @@ class ReceivePaymentServerTest(unittest.TestCase):
         self.assertIn("Could not load vouchers: database unavailable", html)
         self.assertIn("No vouchers are available.", html)
 
-    def test_sotephwar_listing_query_uses_raw_rows(self):
-        sql = receive_payment_server._sotephwar_listing_query(
-            where_sql='WHERE COALESCE(s."Outstanding_Balance", 0) > 0'
+    def test_voucher_query_groups_sotephwar_by_invoice_and_uses_payment_history(self):
+        sql = receive_payment_server._voucher_query(
+            where_sql='WHERE vg."Sector" = %(sector)s AND COALESCE(vg."Outstanding_Balance", 0) > 0'
         )
 
         self.assertIn('FROM "', sql)
         self.assertIn('"Sotephwar_Transection" s', sql)
-        self.assertIn('s."Customer_Name"', sql)
-        self.assertIn('s."Item"', sql)
-        self.assertIn('s."Invoice_Number"::text', sql)
-        self.assertIn('COALESCE(s."Outstanding_Balance", 0) > 0', sql)
-        self.assertNotIn('MIN(NULLIF(TRIM(s."Customer_Name")', sql)
-        self.assertNotIn('GROUP BY s."Invoice_Number"', sql)
+        self.assertIn('GROUP BY s."Invoice_Number"::text', sql)
+        self.assertIn('"Payment_Receive"', sql)
+        self.assertIn('GREATEST(sv."Voucher_Total" - COALESCE(p."Total_Received", 0), 0)', sql)
+        self.assertIn('COALESCE(vg."Outstanding_Balance", 0) > 0', sql)
+        self.assertNotIn('COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Outstanding_Balance"', sql)
 
     def test_create_payment_receive_inserts_history_and_returns_refreshed_voucher(self):
         calls = []
@@ -125,7 +124,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
             },
         ]
 
-        def fake_fetch_voucher(sector, invoice_number):
+        def fake_fetch_voucher(sector, invoice_number, invoice_date="", customer=""):
             calls.append(("fetch", sector, invoice_number))
             fetch_count["count"] += 1
             return vouchers[1] if fetch_count["count"] > 1 else vouchers[0]
@@ -170,6 +169,8 @@ class ReceivePaymentServerTest(unittest.TestCase):
         self.assertEqual("insert", calls[1][0])
         inserted = calls[1][1]
         self.assertEqual(3128000, inserted["invoice_amount"])
+        self.assertEqual("2026-06-11", inserted["invoice_date"])
+        self.assertEqual("Makro", inserted["customer"])
         self.assertEqual(200000, inserted["previous_paid"])
         self.assertEqual(2828000, inserted["outstanding_balance"])
 
@@ -177,7 +178,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
         original_fetch_voucher = receive_payment_server._fetch_voucher
         original_insert = receive_payment_server._insert_payment_receive
 
-        def fake_fetch_voucher(sector, invoice_number):
+        def fake_fetch_voucher(sector, invoice_number, invoice_date="", customer=""):
             return {
                 "sector": sector,
                 "invoice_number": invoice_number,

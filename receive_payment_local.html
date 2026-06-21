@@ -98,7 +98,13 @@
       }
       for (const v of vouchers) {
         const tr = document.createElement('tr');
-        if (selected && selected.sector === v.sector && selected.invoice_number === v.invoice_number) tr.className = 'selected';
+        if (
+          selected &&
+          selected.sector === v.sector &&
+          selected.invoice_number === v.invoice_number &&
+          selected.invoice_date === v.invoice_date &&
+          selected.customer === v.customer
+        ) tr.className = 'selected';
         tr.innerHTML = `<td>${v.sector}</td><td>${v.invoice_number}</td><td>${v.customer || ''}</td><td>${v.invoice_date || ''}</td><td>${money(v.voucher_total)}</td><td>${money(v.total_received)}</td><td>${money(v.outstanding_balance)}</td>`;
         tr.onclick = () => selectVoucher(v);
         rowsEl.appendChild(tr);
@@ -128,7 +134,12 @@
     }
     async function refreshSelected() {
       if (!selected) return;
-      const res = await fetch(API + `/api/voucher?sector=${encodeURIComponent(selected.sector)}&invoice_number=${encodeURIComponent(selected.invoice_number)}`);
+      const res = await fetch(
+        API + `/api/voucher?sector=${encodeURIComponent(selected.sector)}` +
+        `&invoice_number=${encodeURIComponent(selected.invoice_number)}` +
+        `&invoice_date=${encodeURIComponent(selected.invoice_date || '')}` +
+        `&customer=${encodeURIComponent(selected.customer || '')}`
+      );
       const data = await res.json();
       if (data.ok) selectVoucher(data.voucher);
       await loadVouchers();
@@ -147,6 +158,8 @@
           body: JSON.stringify({
             sector: selected.sector,
             invoice_number: selected.invoice_number,
+            invoice_date: selected.invoice_date,
+            customer: selected.customer,
             receive_amount: document.getElementById('receiveAmount').value,
             payment_method: document.getElementById('paymentMethod').value,
             reference_number: document.getElementById('referenceNumber').value,
