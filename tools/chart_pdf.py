@@ -492,6 +492,46 @@ def _chart_spec(result, question):
             ],
         }
 
+    if formula == "master_name_comparison":
+        rows = result.get("rows") or []
+        totals = result.get("totals") or []
+        chart_kind = "line" if len(totals) > 1 else "bar"
+        return {
+            "kind": "master_compare_report",
+            "title": result.get("_report_title") or "Compare - Category Comparison",
+            "chart_kind": chart_kind,
+            "chart_title": "Compare Trend" if chart_kind == "line" else "Category Amounts",
+            "total": result.get("total_amount", 0),
+            "paid": result.get("amount_received", 0),
+            "outstanding": result.get("outstanding_amount", 0),
+            "ai_comment": result.get("ai_comment") or "",
+            "trend_values": [
+                (row.get("period_bucket") or "-", row.get("amount", 0))
+                for row in totals
+            ],
+            "values": [
+                (
+                    f"{row.get('period_bucket') or '-'} / {row.get('master_name') or '-'}",
+                    row.get("amount", 0),
+                )
+                for row in rows
+            ],
+            "summary_table": [("Metric", "Amount"), ("Total", result.get("total_amount", 0)), ("Paid / Received", result.get("amount_received", 0)), ("Outstanding", result.get("outstanding_amount", 0)), ("Rows", result.get("row_count", 0))],
+            "table": [("Bucket", "Category", "Sector", "Type", "Total", "Paid", "Outstanding", "Rows")] + [
+                (
+                    row.get("period_bucket") or "-",
+                    row.get("master_name") or "-",
+                    row.get("sector") or "-",
+                    row.get("income_expense") or "-",
+                    row.get("amount", 0),
+                    row.get("amount_received", 0),
+                    row.get("outstanding_amount", 0),
+                    row.get("row_count", 0),
+                )
+                for row in rows
+            ],
+        }
+
     if formula in ("kpi_overview", "gross_profit"):
         values = [
             ("Income", result.get("total_income", result.get("income", 0))),
@@ -1666,6 +1706,62 @@ def _draw_expense_comparison_report(pdf, spec):
     pdf.new_page()
     pdf.text(50, 795, "Category Comparison Table", size=13, bold=True)
     _draw_table(pdf, spec.get("table"), start_y=760)
+
+
+def _draw_master_compare_report(pdf, spec):
+    pdf.text(50, 720, spec["title"], size=12, bold=True)
+    _draw_metric_cards(
+        pdf,
+        [
+            ("Total", spec.get("total", 0)),
+            ("Paid / Received", spec.get("paid", 0)),
+            ("Outstanding", spec.get("outstanding", 0)),
+        ],
+        y=692,
+    )
+
+    chart_kind = spec.get("chart_kind")
+    pdf.text(50, 610, spec.get("chart_title") or "Compare Chart", size=11.5, bold=True)
+    if chart_kind == "line":
+        _draw_line_chart(pdf, spec.get("trend_values") or [], x=70, y=365, width=430, height=190)
+        summary_y = 320
+        table_y = 296
+    else:
+        _draw_bar(pdf, spec, x=60, y=260, width=475, height=290)
+        summary_y = 220
+        table_y = 196
+
+    pdf.text(50, summary_y, "Summary", size=11.5, bold=True)
+    _draw_table(
+        pdf,
+        spec.get("summary_table"),
+        start_y=table_y,
+        column_widths=[245, 250],
+    )
+
+    pdf.new_page()
+    pdf.text(50, 795, "Compare Table", size=13, bold=True)
+    _draw_table(
+        pdf,
+        spec.get("table"),
+        start_y=760,
+        column_widths=[62, 125, 70, 58, 62, 62, 78, 38],
+        font_size=7.1,
+        line_gap=10,
+        min_row_height=24,
+    )
+
+    pdf.new_page()
+    pdf.text(50, 795, "Local AI Comment", size=13, bold=True)
+    y = 770
+    for paragraph in (spec.get("ai_comment") or "-").splitlines():
+        if not paragraph:
+            y -= 8
+            continue
+        y -= pdf.text(50, y, paragraph, size=9.2, max_width=495)
+        if y < 80:
+            pdf.new_page()
+            y = 795
 
 
 def _draw_voucher_cards(pdf, vouchers, start_y=620):
@@ -3163,6 +3259,11 @@ def create_chart_pdf_report_from_result(result, question, output_path, title="Bi
 
     if kind == "expense_comparison_report":
         _draw_expense_comparison_report(pdf, spec)
+        pdf.finish(output_path)
+        return True
+
+    if kind == "master_compare_report":
+        _draw_master_compare_report(pdf, spec)
         pdf.finish(output_path)
         return True
 

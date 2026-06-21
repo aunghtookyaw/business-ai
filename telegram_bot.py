@@ -1057,7 +1057,14 @@ def _execute_master_compare_output(message, context):
 
     if output == "pdf":
         path = temp_report_path(".pdf")
-        _write_pdf_export(format_text_report(payload), path, title=payload["title"])
+        created = create_chart_pdf_report_from_result(
+            payload["result"],
+            payload["title"],
+            path,
+            title=payload["title"],
+        )
+        if not created:
+            _write_pdf_export(format_text_report(payload), path, title=payload["title"])
         with path.open("rb") as document:
             _reply_document(
                 message,

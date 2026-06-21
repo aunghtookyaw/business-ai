@@ -53,6 +53,64 @@ class ChartPdfTest(unittest.TestCase):
         self.assertIn("-300", commands)
         self.assertNotIn("-165.00", commands)
 
+    def test_master_name_comparison_pdf_uses_compare_report_layout(self):
+        result = {
+            "formula": "master_name_comparison",
+            "period": "this_month",
+            "scope": "category",
+            "granularity": "month",
+            "compare_mode": "different",
+            "selected_categories": ["Fuel", "Motor"],
+            "total_amount": 5000,
+            "amount_received": 4200,
+            "outstanding_amount": 800,
+            "row_count": 3,
+            "totals": [
+                {"period_bucket": "2026-06", "amount": 5000, "amount_received": 4200, "outstanding_amount": 800, "row_count": 3},
+            ],
+            "rows": [
+                {
+                    "period_bucket": "2026-06",
+                    "master_name": "Fuel",
+                    "sector": "Sote Phwar",
+                    "income_expense": "Expense",
+                    "amount": 3000,
+                    "amount_received": 3000,
+                    "outstanding_amount": 0,
+                    "row_count": 2,
+                },
+                {
+                    "period_bucket": "2026-06",
+                    "master_name": "Motor",
+                    "sector": "Farm",
+                    "income_expense": "Expense",
+                    "amount": 2000,
+                    "amount_received": 1200,
+                    "outstanding_amount": 800,
+                    "row_count": 1,
+                },
+            ],
+            "ai_comment": "Fuel is highest for this compare report.",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "compare.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Compare - Category Comparison",
+                output_path,
+                title="Compare - Category Comparison",
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Total", pdf_text)
+            self.assertIn("Paid / Received", pdf_text)
+            self.assertIn("Outstanding", pdf_text)
+            self.assertIn("Compare Table", pdf_text)
+            self.assertIn("Local AI Comment", pdf_text)
+
     def test_ceo_management_pdf_uses_professional_multi_page_report(self):
         original_kpi = chart_pdf.kpi_overview
         original_sector = chart_pdf.sector_summary

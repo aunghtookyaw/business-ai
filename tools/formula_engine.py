@@ -3516,6 +3516,8 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
               t."Income_Expense" AS income_expense,
               t."Sector" AS sector,
               COALESCE(SUM(t."Amount"), 0) AS amount,
+              COALESCE(SUM(t."Amount"), 0) AS amount_received,
+              0 AS outstanding_amount,
               COUNT(*) AS row_count,
               COUNT(cm."category_name") AS linked_count
             FROM {_table_ref()} t
@@ -3544,6 +3546,8 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
               'Income' AS income_expense,
               'Farm' AS sector,
               COALESCE(SUM(f."Total_Due"), 0) AS amount,
+              COALESCE(SUM(f."Paid"), 0) AS amount_received,
+              COALESCE(SUM(COALESCE(f."Total_Due", 0) - COALESCE(f."Paid", 0)), 0) AS outstanding_amount,
               COUNT(*) AS row_count,
               COUNT(cust."customer_name") AS linked_count
             FROM {_farm_transection_table_ref()} f
@@ -3568,6 +3572,8 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
               'Income' AS income_expense,
               'Sote Phwar' AS sector,
               COALESCE(SUM(s."Total_Amount"), 0) AS amount,
+              COALESCE(SUM(s."Amount_Received"), 0) AS amount_received,
+              COALESCE(SUM(COALESCE(s."Total_Amount", 0) - COALESCE(s."Amount_Received", 0)), 0) AS outstanding_amount,
               COUNT(*) AS row_count,
               COUNT(cust."customer_name") AS linked_count
             FROM {_sotephwar_transection_table_ref()} s
@@ -3584,6 +3590,8 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
 
     for row in rows:
         row["amount"] = int(row.get("amount") or 0)
+        row["amount_received"] = int(row.get("amount_received") or 0)
+        row["outstanding_amount"] = int(row.get("outstanding_amount") or 0)
         row["row_count"] = int(row.get("row_count") or 0)
         row["linked_count"] = int(row.get("linked_count") or 0)
         row["unlinked_count"] = max(0, row["row_count"] - row["linked_count"])
@@ -3595,10 +3603,15 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
     totals = {}
     for row in rows:
         bucket = row.get("period_bucket") or "-"
-        totals.setdefault(bucket, {"period_bucket": bucket, "amount": 0, "row_count": 0, "unlinked_count": 0})
+        totals.setdefault(bucket, {"period_bucket": bucket, "amount": 0, "amount_received": 0, "outstanding_amount": 0, "row_count": 0, "unlinked_count": 0})
         totals[bucket]["amount"] += row["amount"]
+        totals[bucket]["amount_received"] += row["amount_received"]
+        totals[bucket]["outstanding_amount"] += row["outstanding_amount"]
         totals[bucket]["row_count"] += row["row_count"]
         totals[bucket]["unlinked_count"] += row["unlinked_count"]
+    total_amount = sum(row["amount"] for row in rows)
+    amount_received = sum(row["amount_received"] for row in rows)
+    outstanding_amount = sum(row["outstanding_amount"] for row in rows)
 
     return {
         "formula": "master_name_comparison",
@@ -3607,6 +3620,9 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
         "granularity": granularity,
         "compare_mode": compare_mode,
         "selected_categories": categories,
+        "total_amount": total_amount,
+        "amount_received": amount_received,
+        "outstanding_amount": outstanding_amount,
         "totals": list(totals.values()),
         "rows": rows[:limit],
         "row_count": len(rows),

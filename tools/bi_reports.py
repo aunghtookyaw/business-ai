@@ -187,6 +187,9 @@ def format_text_report(payload):
         selected = result.get("selected_categories") or []
         lines.extend([
             "Category Comparison",
+            f"Total: {_money(result.get('total_amount', 0))}",
+            f"Paid / Received: {_money(result.get('amount_received', 0))}",
+            f"Outstanding: {_money(result.get('outstanding_amount', 0))}",
             f"Mode: {result.get('compare_mode') or 'master'}",
             f"Bucket: {result.get('granularity') or 'month'}",
             "Selected categories: " + (", ".join(selected) if selected else "All"),
@@ -197,24 +200,26 @@ def format_text_report(payload):
             lines.append("No matching data found.")
         for row in totals:
             lines.append(
-                "{bucket}: amount {amount}, rows {rows}, unlinked rows {unlinked}".format(
+                "{bucket}: total {amount}, paid {paid}, outstanding {outstanding}, rows {rows}".format(
                     bucket=row.get("period_bucket") or "-",
                     amount=_money(row.get("amount", 0)),
+                    paid=_money(row.get("amount_received", 0)),
+                    outstanding=_money(row.get("outstanding_amount", 0)),
                     rows=_money(row.get("row_count", 0)),
-                    unlinked=_money(row.get("unlinked_count", 0)),
                 )
             )
-        lines.extend(["", "Category Detail", "Bucket | Category | Sector | Type | Amount | Rows | Unlinked"])
+        lines.extend(["", "Category Detail", "Bucket | Category | Sector | Type | Total | Paid | Outstanding | Rows"])
         for row in rows[:30]:
             lines.append(
-                "{bucket} | {name} | {sector} | {kind} | {amount} | {rows} | {unlinked}".format(
+                "{bucket} | {name} | {sector} | {kind} | {amount} | {paid} | {outstanding} | {rows}".format(
                     bucket=row.get("period_bucket") or "-",
                     name=row.get("master_name") or "-",
                     sector=row.get("sector") or "-",
                     kind=row.get("income_expense") or "-",
                     amount=_money(row.get("amount", 0)),
+                    paid=_money(row.get("amount_received", 0)),
+                    outstanding=_money(row.get("outstanding_amount", 0)),
                     rows=_money(row.get("row_count", 0)),
-                    unlinked=_money(row.get("unlinked_count", 0)),
                 )
             )
         lines.extend(["", "Local AI Comment", result.get("ai_comment") or "-"])
@@ -336,6 +341,16 @@ def write_excel_report(payload, output_path):
         _write_expense_comparison_excel(workbook, sheet, payload)
         workbook.save(output_path)
         return
+
+    if payload["result"].get("formula") == "master_name_comparison":
+        result = payload["result"]
+        sheet.append(["Summary"])
+        sheet.append(["Metric", "Amount"])
+        sheet.append(["Total", result.get("total_amount", 0)])
+        sheet.append(["Paid / Received", result.get("amount_received", 0)])
+        sheet.append(["Outstanding", result.get("outstanding_amount", 0)])
+        sheet.append(["Rows", result.get("row_count", 0)])
+        sheet.append([])
 
     rows = _rows_from_result(payload["result"])
     if rows:
