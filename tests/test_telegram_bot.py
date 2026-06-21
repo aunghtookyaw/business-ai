@@ -127,7 +127,7 @@ class FinanceBotFilterTest(unittest.TestCase):
         first_button = markup.inline_keyboard[0][0]
         self.assertEqual("Overall KPI", first_button.text)
         self.assertEqual("bi:overall_kpi", first_button.callback_data)
-        self.assertEqual("Prompt Enquiry", markup.inline_keyboard[1][0].text)
+        self.assertEqual("Compare", markup.inline_keyboard[1][0].text)
         self.assertEqual("bi:prompt_enquiry", markup.inline_keyboard[1][0].callback_data)
         labels = [
             button.text

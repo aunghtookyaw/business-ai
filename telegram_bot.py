@@ -689,7 +689,7 @@ def _send_bi_message(message, context, text, rows, include_back=True):
 def _show_bi_home(message, context):
     _reset_bi_state(context)
     rows = [[InlineKeyboardButton("Overall KPI", callback_data="bi:overall_kpi")]]
-    rows.append([InlineKeyboardButton("Prompt Enquiry", callback_data="bi:prompt_enquiry")])
+    rows.append([InlineKeyboardButton("Compare", callback_data="bi:prompt_enquiry")])
     home_business_menu = [
         item for item in BUSINESS_MENU
         if item[0] != "extension"
@@ -713,7 +713,7 @@ def _show_prompt_enquiry_menu(message, context):
         "bi:master_mode",
         columns=1,
     )
-    return _send_bi_message(message, context, "Prompt Enquiry: choose category comparison:", rows)
+    return _send_bi_message(message, context, "Compare: choose category comparison:", rows)
 
 
 def _show_master_granularity_menu(message, context):
@@ -1037,7 +1037,7 @@ def _execute_master_compare_output(message, context):
     )
     payload = {
         "intent": {
-            "business": "prompt_enquiry",
+            "business": "compare",
             "module": "category_master",
             "report": "master_name_comparison",
             "categories": categories,
@@ -1045,7 +1045,7 @@ def _execute_master_compare_output(message, context):
             "granularity": granularity,
             "output": output,
         },
-        "title": "Prompt Enquiry - Category Comparison",
+        "title": "Compare - Category Comparison",
         "period_label": period_label(period),
         "result": result,
     }

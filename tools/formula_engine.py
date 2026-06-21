@@ -3504,9 +3504,9 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
         category_filter_sql = ""
         if categories:
             category_filter_sql = '''
-              AND COALESCE(cm."category_name", NULLIF(TRIM(t."Categorization"), '')) = ANY(%s)
+              AND COALESCE(cm."category_name", NULLIF(TRIM(t."Categorization"), '')) = ANY(%(categories)s)
             '''
-            params = list(params) + [categories]
+            params = {**params, "categories": categories}
         category_rows = _fetch_all(
             f'''
             SELECT
