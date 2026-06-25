@@ -1,0 +1,135 @@
+import unittest
+from unittest.mock import patch
+
+from tools import dashboard_service
+
+
+class DashboardServiceTest(unittest.TestCase):
+    def setUp(self):
+        dashboard_service.clear_dashboard_cache()
+
+    def test_parse_dashboard_filters_validates_period_and_status(self):
+        filters = dashboard_service.parse_dashboard_filters({
+            "filters": {
+                "period": {"type": "month", "year": 2026, "month": 6},
+                "sector": "Sote Phwar",
+                "business_unit": "sote_phwar",
+                "payment_status": "Partial",
+            }
+        })
+
+        self.assertEqual("month:2026-06", dashboard_service.legacy_period(filters.period))
+        self.assertEqual("Sote Phwar", filters.sector)
+        self.assertEqual("Partial", filters.payment_status)
+
+        with self.assertRaisesRegex(ValueError, "payment_status"):
+            dashboard_service.parse_dashboard_filters({
+                "filters": {
+                    "period": {"type": "year", "year": 2026},
+                    "payment_status": "Deleted",
+                }
+            })
+
+    @patch("tools.dashboard_service._trend_periods", return_value=[("Jun", "month:2026-06")])
+    @patch("tools.dashboard_service.formula_engine.list_transactions")
+    @patch("tools.dashboard_service.formula_engine.recent_payment_receipts")
+    @patch("tools.dashboard_service.formula_engine.top_expense_categories")
+    @patch("tools.dashboard_service.formula_engine.sotephwar_product_ranking")
+    @patch("tools.dashboard_service.formula_engine.top_income")
+    @patch("tools.dashboard_service.formula_engine.sotephwar_inventory_stock")
+    @patch("tools.dashboard_service.formula_engine.payment_receive_summary")
+    @patch("tools.dashboard_service.formula_engine.sales_total")
+    @patch("tools.dashboard_service.formula_engine.cash_flow")
+    @patch("tools.dashboard_service.formula_engine.kpi_overview")
+    def test_executive_dashboard_passes_through_canonical_values(
+        self,
+        kpi,
+        cash,
+        sales,
+        receivables,
+        inventory,
+        top_customers,
+        top_products,
+        expense_categories,
+        payments,
+        transactions,
+        _trend_periods,
+    ):
+        kpi.return_value = {
+            "total_income": 1000,
+            "total_expense": 400,
+            "net_profit": 600,
+            "profit_margin_percent": 60,
+        }
+        cash.return_value = {"total_inflow": 700, "total_outflow": 400, "net_cash_flow": 300}
+        sales.return_value = {"amount_received": 700, "outstanding_amount": 300}
+        receivables.return_value = {
+            "outstanding_receivables": 300,
+            "collection_rate_percent": 70,
+            "total_received": 700,
+        }
+        inventory.return_value = {"stock": [{"store": "A", "product": "P", "stock_qty": 5}]}
+        top_customers.return_value = {"income": [{"customer_name": "C", "total_amount": 1000}]}
+        top_products.return_value = {"products": [{"product": "P", "quantity": 5}]}
+        expense_categories.return_value = {"categories": [{"category": "E", "amount": 400}]}
+        payments.return_value = {"payments": [{"id": 1, "receive_amount": 100}]}
+        transactions.return_value = {"transactions": [{"id": 2, "amount": 50}]}
+        filters = dashboard_service.parse_dashboard_filters({
+            "filters": {"period": {"type": "year", "year": 2026}}
+        })
+
+        result, cached = dashboard_service.executive_dashboard(filters)
+
+        self.assertFalse(cached)
+        self.assertEqual(1000, result["metrics"]["revenue"])
+        self.assertEqual(400, result["metrics"]["expenses"])
+        self.assertEqual(600, result["metrics"]["net_profit"])
+        self.assertEqual(700, result["metrics"]["cash_received"])
+        self.assertEqual(300, result["metrics"]["outstanding_receivables"])
+        self.assertIsNone(result["metrics"]["inventory_value"])
+        self.assertEqual(1000, result["trend"][0]["revenue"])
+        self.assertEqual(300, result["trend"][0]["cash_flow"])
+
+    def test_cached_dashboard_does_not_reexecute_loader(self):
+        filters = dashboard_service.parse_dashboard_filters({
+            "filters": {"period": {"type": "year", "year": 2026}}
+        })
+        calls = []
+
+        def loader():
+            calls.append(True)
+            return {"ok": True}
+
+        first, first_cached = dashboard_service._cached("test", filters, 30, loader)
+        second, second_cached = dashboard_service._cached("test", filters, 30, loader)
+
+        self.assertEqual(first, second)
+        self.assertFalse(first_cached)
+        self.assertTrue(second_cached)
+        self.assertEqual(1, len(calls))
+
+    @patch("tools.dashboard_service.ask_ai", return_value="Executive Summary\n- Revenue is $10.")
+    @patch("tools.dashboard_service.executive_dashboard")
+    def test_qwen_narrative_rejects_numeric_or_currency_content(self, executive_dashboard, _ask_ai):
+        executive_dashboard.return_value = ({
+            "filter_label": "2026",
+            "metrics": {},
+            "cash_flow": {
+                "total_inflow": 0,
+                "total_outflow": 0,
+                "net_cash_flow": 0,
+            },
+            "top_customers": [],
+            "top_expense_categories": [],
+            "data_quality": [],
+        }, False)
+        filters = dashboard_service.parse_dashboard_filters({
+            "filters": {"period": {"type": "year", "year": 2026}}
+        })
+
+        with self.assertRaisesRegex(RuntimeError, "prohibited"):
+            dashboard_service._build_executive_insight(filters)
+
+
+if __name__ == "__main__":
+    unittest.main()

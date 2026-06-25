@@ -134,13 +134,6 @@ def _extract_json(text):
 
 
 def choose_formula(question):
-    normalized = " ".join(str(question or "").lower().split())
-    if re.search(r"\btop\s+(?:five|\d+)?\s*customers?\b", normalized):
-        return "top_income"
-
-    if "customer payment history" in normalized:
-        return "sotephwar_transection_customer"
-
     if is_sotephwar_transection_question(question):
         return choose_formula_by_keywords(question)
 

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bigshot.business-ai.telegram-bot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/bigshot/ai-automation/business-ai/start_bot.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/bigshot/ai-automation/business-ai</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/private/tmp/business-ai-telegram-bot.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/private/tmp/business-ai-telegram-bot.err.log</string>
+</dict>
+</plist>

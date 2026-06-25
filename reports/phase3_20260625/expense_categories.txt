@@ -1,0 +1,28 @@
+Sote Phwar - Expense - Expense Summary
+Period: This Year
+
+Total income: 0
+Total expense: 1,488,343,423
+Net total: -1,488,343,423
+Rows: 890
+
+1. category: Factory 2 Set up cost | sector: Sote Phwar
+2. category: Packaging equipment | sector: Sote Phwar
+3. category: Fish | sector: Sote Phwar
+4. category: Wages and Salaries | sector: Sote Phwar
+5. category: Loan | sector: Sote Phwar
+6. category: Tanks and Accessories | sector: Sote Phwar
+7. category: Molasses | sector: Sote Phwar
+8. category: Fuel | sector: Sote Phwar
+9. category: Loan Interest | sector: Sote Phwar
+10. category: Carriage Inward | sector: Sote Phwar
+11. category: Household Usage | sector: Sote Phwar
+12. category: Carriage Outward | sector: Sote Phwar
+13. category: Marketing  and Promotion Expenses | sector: Sote Phwar
+14. category: Machinery repair & maintenance | sector: Sote Phwar
+15. category: Car repair and maintenance | sector: Sote Phwar
+16. category: Gifts & Donations | sector: Sote Phwar
+17. category: Advanced Expense | sector: Sote Phwar
+18. category: Warehouse | sector: Sote Phwar
+19. category: Loan settlement | sector: Sote Phwar
+20. category: Kitchen Expense | sector: Sote Phwar

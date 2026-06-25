@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>BigShot Business Dashboard — Phase 1 Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="prototype-banner">
+    Phase 1 clickable prototype · Representative values only · Not connected to production data
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#executive" aria-label="BigShot Dashboard home">
+        <span class="brand-mark">B</span>
+        <span>
+          <strong>BIGSHOT</strong>
+          <small>Business Intelligence</small>
+        </span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Dashboard pages">
+        <button class="nav-item active" data-page="executive">
+          <span class="nav-icon">⌂</span><span>Executive</span>
+        </button>
+        <button class="nav-item" data-page="payments">
+          <span class="nav-icon">₭</span><span>Payments</span>
+        </button>
+        <button class="nav-item" data-page="inventory">
+          <span class="nav-icon">□</span><span>Inventory</span>
+        </button>
+        <button class="nav-item" data-page="customers">
+          <span class="nav-icon">◎</span><span>Customers</span>
+        </button>
+        <button class="nav-item" data-page="farm">
+          <span class="nav-icon">♧</span><span>Farm</span>
+        </button>
+        <button class="nav-item" data-page="sote-phwar">
+          <span class="nav-icon">◇</span><span>Sote Phwar</span>
+        </button>
+        <button class="nav-item" data-page="financial">
+          <span class="nav-icon">▥</span><span>Financial</span>
+        </button>
+        <button class="nav-item" data-page="insights">
+          <span class="nav-icon">✦</span><span>AI Insights</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="system-status">
+          <span class="status-dot"></span>
+          <span><strong>Systems connected</strong><small>Prototype state</small></span>
+        </div>
+        <div class="user-card">
+          <span class="avatar">BS</span>
+          <span><strong>Management</strong><small>Executive View</small></span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="mobile-header">
+        <button class="icon-button" id="menuButton" aria-label="Open navigation">☰</button>
+        <strong>BIGSHOT</strong>
+        <button class="icon-button theme-toggle" aria-label="Toggle theme">◐</button>
+      </header>
+
+      <section class="topbar">
+        <div class="page-heading">
+          <p class="eyebrow">MANAGEMENT OVERVIEW</p>
+          <h1 id="pageTitle">Executive Dashboard</h1>
+          <p id="pageSubtitle">A thirty-second view of performance, cash and operational risk.</p>
+        </div>
+        <div class="top-actions">
+          <button class="button secondary" data-toast="PDF export will use the validated BI report renderer.">Export PDF</button>
+          <button class="button secondary" data-toast="Excel export will use the validated BI report renderer.">Export Excel</button>
+          <button class="button primary" data-toast="View definition saved locally in the future implementation.">Save View</button>
+          <button class="icon-button theme-toggle" aria-label="Toggle theme">◐</button>
+        </div>
+      </section>
+
+      <section class="filter-bar" aria-label="Global dashboard filters">
+        <div class="filter-group period-filter">
+          <button class="period-chip active">Year</button>
+          <button class="period-chip">Month</button>
+          <button class="period-chip">Week</button>
+          <button class="period-chip">Range</button>
+        </div>
+        <label>
+          <span>Period</span>
+          <select><option>2026</option><option>2025</option></select>
+        </label>
+        <label>
+          <span>Sector</span>
+          <select><option>All sectors</option><option>Sote Phwar</option><option>Farm</option><option>Extension</option></select>
+        </label>
+        <label>
+          <span>Business unit</span>
+          <select><option>All units</option><option>Farm</option><option>Factory</option><option>Sote Phwar</option></select>
+        </label>
+        <button class="button filter-more" id="moreFilters">More filters <span>＋</span></button>
+        <button class="button refresh" data-toast="All widgets refreshed from the same global filter intent.">↻ Refresh</button>
+      </section>
+
+      <section class="expanded-filters" id="expandedFilters">
+        <label><span>Customer</span><input placeholder="All customers"></label>
+        <label><span>Category</span><input placeholder="All categories"></label>
+        <label><span>Location</span><input placeholder="All locations"></label>
+        <label><span>Product</span><input placeholder="All products"></label>
+        <label><span>Payment status</span><select><option>All statuses</option><option>Paid</option><option>Partial</option><option>Outstanding</option></select></label>
+      </section>
+
+      <section id="dashboardContent" class="dashboard-content"></section>
+
+      <footer class="page-footer">
+        <span>BigShot Business Dashboard v1.0 — Phase 1 prototype</span>
+        <span>Presentation layer only · BI engine remains the source of truth</span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <template id="executiveTemplate">
+    <div class="metric-grid">
+      <article class="metric-card featured">
+        <div class="metric-label"><span>Revenue</span><span class="metric-icon">↗</span></div>
+        <strong>3.75B</strong><small>MMK</small>
+        <p class="positive">▲ 12.4% <span>vs previous year</span></p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label"><span>Expenses</span><span class="metric-icon">↘</span></div>
+        <strong>2.08B</strong><small>MMK</small>
+        <p class="negative">▲ 8.1% <span>vs previous year</span></p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label"><span>Net Profit</span><span class="metric-icon">◎</span></div>
+        <strong>1.67B</strong><small>MMK</small>
+        <p class="positive">44.58% <span>profit margin</span></p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label"><span>Cash Received</span><span class="metric-icon">₭</span></div>
+        <strong>1.95B</strong><small>MMK</small>
+        <p class="neutral">52.1% <span>of recorded revenue</span></p>
+      </article>
+      <article class="metric-card alert">
+        <div class="metric-label"><span>Outstanding</span><span class="metric-icon">!</span></div>
+        <strong>1.81B</strong><small>MMK</small>
+        <p class="negative">Collection focus <span>required</span></p>
+      </article>
+      <article class="metric-card unavailable">
+        <div class="metric-label"><span>Inventory Value</span><span class="metric-icon">□</span></div>
+        <strong>—</strong><small>Unit cost required</small>
+        <p class="neutral">21,778 <span>units in stock</span></p>
+      </article>
+    </div>
+
+    <div class="executive-grid">
+      <article class="panel chart-panel span-8">
+        <div class="panel-header">
+          <div><p class="eyebrow">PERFORMANCE</p><h2>Revenue, expense & profit trend</h2></div>
+          <div class="legend"><span class="revenue-dot">Revenue</span><span class="expense-dot">Expenses</span><span class="profit-dot">Profit</span></div>
+        </div>
+        <div class="chart-shell line-chart">
+          <div class="y-labels"><span>900M</span><span>600M</span><span>300M</span><span>0</span></div>
+          <svg viewBox="0 0 820 260" preserveAspectRatio="none" aria-label="Representative financial trend chart">
+            <g class="grid-lines"><line x1="0" y1="40" x2="820" y2="40"/><line x1="0" y1="110" x2="820" y2="110"/><line x1="0" y1="180" x2="820" y2="180"/><line x1="0" y1="250" x2="820" y2="250"/></g>
+            <path class="area revenue-area" d="M0,210 C90,180 120,190 205,145 S345,95 410,122 S560,65 615,88 S745,40 820,55 L820,260 L0,260 Z"/>
+            <path class="line revenue-line" d="M0,210 C90,180 120,190 205,145 S345,95 410,122 S560,65 615,88 S745,40 820,55"/>
+            <path class="line expense-line" d="M0,224 C80,205 140,210 205,190 S338,160 410,168 S545,138 615,145 S744,104 820,122"/>
+            <path class="line profit-line" d="M0,246 C90,230 125,235 205,215 S345,190 410,205 S550,170 615,178 S745,145 820,155"/>
+          </svg>
+          <div class="x-labels"><span>Jan</span><span>Mar</span><span>May</span><span>Jul</span><span>Sep</span><span>Nov</span></div>
+        </div>
+      </article>
+
+      <article class="panel insight-panel span-4">
+        <div class="panel-header">
+          <div><p class="eyebrow">QWEN NARRATIVE</p><h2>Executive brief</h2></div>
+          <span class="ai-badge">✦ AI</span>
+        </div>
+        <div class="insight-body">
+          <div class="insight-lead">
+            <span class="insight-status"></span>
+            <p>Profitability is strong, but cash conversion is the immediate management concern.</p>
+          </div>
+          <div class="insight-section"><strong>Primary risk</strong><p>Outstanding receivables remain high relative to cash received.</p></div>
+          <div class="insight-section"><strong>Opportunity</strong><p>Protect Sote Phwar momentum while broadening Farm contribution.</p></div>
+          <div class="insight-section"><strong>CEO focus</strong><p>Assign collection owners and review the top overdue customers weekly.</p></div>
+        </div>
+        <button class="text-button nav-link" data-page="insights">Open full AI insights →</button>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-header"><div><p class="eyebrow">CASH</p><h2>Cash flow position</h2></div><span class="panel-kpi negative">−125.5M</span></div>
+        <div class="bar-comparison">
+          <div><span>Inflow</span><strong>1.95B</strong><i style="--value: 94%"></i></div>
+          <div><span>Outflow</span><strong>2.08B</strong><i class="outflow" style="--value: 100%"></i></div>
+        </div>
+        <p class="panel-note warning-note">Accounting profit is positive while net cash flow is negative.</p>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-header"><div><p class="eyebrow">COLLECTIONS</p><h2>Receivable status</h2></div><span class="panel-kpi">49.8%</span></div>
+        <div class="donut-wrap">
+          <div class="donut"><span><strong>49.8%</strong><small>collected</small></span></div>
+          <div class="donut-legend">
+            <p><i class="paid"></i><span>Received</span><strong>1.80B</strong></p>
+            <p><i class="due"></i><span>Outstanding</span><strong>1.81B</strong></p>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-header"><div><p class="eyebrow">INVENTORY</p><h2>Stock by location</h2></div><button class="kebab">•••</button></div>
+        <div class="location-list">
+          <p><span>Heho Store</span><strong>7,460</strong><i style="--value: 78%"></i></p>
+          <p><span>Min Hla Store</span><strong>6,080</strong><i style="--value: 64%"></i></p>
+          <p><span>Tatkone Store</span><strong>7,238</strong><i style="--value: 76%"></i></p>
+          <p><span>Naung Tayar</span><strong>3,000</strong><i style="--value: 31%"></i></p>
+        </div>
+      </article>
+
+      <article class="panel table-panel span-7">
+        <div class="panel-header"><div><p class="eyebrow">CUSTOMERS</p><h2>Top customers</h2></div><button class="text-button nav-link" data-page="customers">View customer dashboard →</button></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Customer</th><th>Revenue</th><th>Received</th><th>Outstanding</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><span class="table-avatar">MY</span>Mya Yadanar</td><td>540.0M</td><td>384.0M</td><td>156.0M</td><td><span class="pill warn">Partial</span></td></tr>
+              <tr><td><span class="table-avatar">CK</span>Chit Oo Ko Ko</td><td>420.0M</td><td>249.1M</td><td>170.9M</td><td><span class="pill alert-pill">Priority</span></td></tr>
+              <tr><td><span class="table-avatar">DK</span>Daw Khin Mar Lwin</td><td>368.0M</td><td>224.7M</td><td>143.3M</td><td><span class="pill warn">Partial</span></td></tr>
+              <tr><td><span class="table-avatar">PA</span>Pwint Aung Kyaw</td><td>301.0M</td><td>275.0M</td><td>26.0M</td><td><span class="pill good">Healthy</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-header"><div><p class="eyebrow">EXPENSE CONTROL</p><h2>Top expense categories</h2></div><span class="panel-kpi">2.08B</span></div>
+        <div class="rank-list">
+          <p><span class="rank">01</span><span><strong>Farm operations</strong><small>28.4% of expenses</small></span><b>590.0M</b></p>
+          <p><span class="rank">02</span><span><strong>Machinery & maintenance</strong><small>19.7% of expenses</small></span><b>409.0M</b></p>
+          <p><span class="rank">03</span><span><strong>Wages & salaries</strong><small>16.2% of expenses</small></span><b>336.0M</b></p>
+          <p><span class="rank">04</span><span><strong>Marketing & promotion</strong><small>8.1% of expenses</small></span><b>168.0M</b></p>
+        </div>
+      </article>
+    </div>
+  </template>
+
+  <template id="moduleTemplate">
+    <div class="module-hero">
+      <div>
+        <p class="eyebrow" id="moduleEyebrow">DOMAIN DASHBOARD</p>
+        <h2 id="moduleHeadline">Page blueprint</h2>
+        <p id="moduleDescription"></p>
+      </div>
+      <span class="wireframe-badge">Phase 1 wireframe</span>
+    </div>
+    <div class="module-kpis" id="moduleKpis"></div>
+    <div class="module-layout">
+      <article class="panel blueprint span-8">
+        <div class="panel-header"><div><p class="eyebrow">PRIMARY ANALYSIS</p><h2 id="primaryChartTitle">Trend analysis</h2></div><span class="api-chip">BI API</span></div>
+        <div class="wire-chart">
+          <span class="wire-y y1"></span><span class="wire-y y2"></span><span class="wire-y y3"></span>
+          <svg viewBox="0 0 820 220" preserveAspectRatio="none"><path d="M0,180 C100,130 160,160 235,105 S390,145 470,82 S650,120 820,45"/></svg>
+        </div>
+      </article>
+      <article class="panel blueprint span-4">
+        <div class="panel-header"><div><p class="eyebrow">BREAKDOWN</p><h2 id="breakdownTitle">Status distribution</h2></div><span class="api-chip">BI API</span></div>
+        <div class="wire-donut"><span></span></div>
+        <div class="wire-lines"><i></i><i></i><i></i></div>
+      </article>
+      <article class="panel blueprint span-7">
+        <div class="panel-header"><div><p class="eyebrow">DETAIL</p><h2 id="tableTitle">Management table</h2></div><span class="api-chip">BI API</span></div>
+        <div class="wire-table">
+          <b></b><i></i><i></i><i></i><i></i><i></i>
+        </div>
+      </article>
+      <article class="panel blueprint span-5">
+        <div class="panel-header"><div><p class="eyebrow">MANAGEMENT SIGNALS</p><h2>Risks & actions</h2></div><span class="ai-badge">✦ Qwen</span></div>
+        <div class="wire-insights">
+          <p><span class="risk-marker"></span><i></i></p>
+          <p><span class="opportunity-marker"></span><i></i></p>
+          <p><span class="action-marker"></span><i></i></p>
+        </div>
+        <p class="panel-note">Narrative only. Metrics remain sourced from deterministic BI outputs.</p>
+      </article>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

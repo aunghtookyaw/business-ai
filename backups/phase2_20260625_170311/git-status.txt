@@ -1,0 +1,9 @@
+## main...origin/main [ahead 12]
+ M config.example.py
+ M receive_payment_local.html
+ M scripts/receive_payment_server.py
+ M telegram_bot.py
+ M tests/test_receive_payment_server.py
+ M tools/formula_engine.py
+?? backups/
+?? reports/

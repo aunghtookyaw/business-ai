@@ -33,6 +33,14 @@ Important variables:
 ./start_bot.sh
 ```
 
+Executive Dashboard:
+
+```bash
+python3 scripts/dashboard_server.py
+```
+
+Open `http://127.0.0.1:5062`.
+
 To verify the local Ollama model:
 
 ```bash

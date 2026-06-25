@@ -1,0 +1,13 @@
+Sote Phwar - Income - Top Customers
+Period: This Year
+
+1. customer_name: Mya Yadanar | item: Mya Yadanar | category: Sote Phwar Sales | sector: Sote Phwar | amount: 292,300,000 | total_amount: 292,300,000 | amount_received: 292,300,000 | outstanding_amount: 0
+2. customer_name: Ma Shwe War | item: Ma Shwe War | category: Sote Phwar Sales | sector: Sote Phwar | amount: 217,030,000 | total_amount: 217,030,000 | amount_received: 152,635,000 | outstanding_amount: 64,395,000
+3. customer_name: Pwint Aung Kyaw MDY | item: Pwint Aung Kyaw MDY | category: Sote Phwar Sales | sector: Sote Phwar | amount: 183,970,000 | total_amount: 183,970,000 | amount_received: 114,960,000 | outstanding_amount: 69,010,000
+4. customer_name: Chit Oo Ko Ko | item: Chit Oo Ko Ko | category: Sote Phwar Sales | sector: Sote Phwar | amount: 158,030,000 | total_amount: 158,030,000 | amount_received: 21,720,000 | outstanding_amount: 136,310,000
+5. customer_name: Pwint Aung Kyaw POL | item: Pwint Aung Kyaw POL | category: Sote Phwar Sales | sector: Sote Phwar | amount: 151,200,000 | total_amount: 151,200,000 | amount_received: 43,597,500 | outstanding_amount: 107,602,500
+6. customer_name: Zun Ei Khaing | item: Zun Ei Khaing | category: Sote Phwar Sales | sector: Sote Phwar | amount: 149,955,000 | total_amount: 149,955,000 | amount_received: 139,260,000 | outstanding_amount: 10,695,000
+7. customer_name: Mingalar Myay | item: Mingalar Myay | category: Sote Phwar Sales | sector: Sote Phwar | amount: 129,240,000 | total_amount: 129,240,000 | amount_received: 44,460,000 | outstanding_amount: 84,780,000
+8. customer_name: Daw Khin Mar Lwin | item: Daw Khin Mar Lwin | category: Sote Phwar Sales | sector: Sote Phwar | amount: 127,720,000 | total_amount: 127,720,000 | amount_received: 45,925,000 | outstanding_amount: 81,795,000
+9. customer_name: Lucky 7 | item: Lucky 7 | category: Sote Phwar Sales | sector: Sote Phwar | amount: 118,050,000 | total_amount: 118,050,000 | amount_received: 68,285,000 | outstanding_amount: 49,765,000
+10. customer_name: Myat Nyi Aung | item: Myat Nyi Aung | category: Sote Phwar Sales | sector: Sote Phwar | amount: 117,500,000 | total_amount: 117,500,000 | amount_received: 20,700,000 | outstanding_amount: 96,800,000

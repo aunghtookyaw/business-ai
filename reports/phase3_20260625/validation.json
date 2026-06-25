@@ -1,0 +1,1460 @@
+{
+  "canonical": {
+    "kpi": {
+      "formula": "kpi_overview",
+      "period": "this_year",
+      "total_income": 3748439670,
+      "total_expense": 2077486915,
+      "net_profit": 1670952755,
+      "profit_margin_percent": 44.58,
+      "sources": {
+        "sotephwar_transection_total_amount": 3439779000,
+        "farm_transection_total_amount": 124919500
+      }
+    },
+    "cash_flow": {
+      "formula": "cash_flow",
+      "period": "this_year",
+      "total_inflow": 1951962170,
+      "total_outflow": 2077486915,
+      "net_cash_flow": -125524745,
+      "by_payment_method": [
+        {
+          "payment_method": "By Cash",
+          "inflow": 29520200,
+          "outflow": 733732233,
+          "net_cash_flow": -704212033
+        },
+        {
+          "payment_method": "By K-Pay",
+          "inflow": 60717250,
+          "outflow": 93700300,
+          "net_cash_flow": -32983050
+        },
+        {
+          "payment_method": "By -Pay",
+          "inflow": 44802500,
+          "outflow": 116445796,
+          "net_cash_flow": -71643296
+        },
+        {
+          "payment_method": "In Cash",
+          "inflow": 48701220,
+          "outflow": 1133608586,
+          "net_cash_flow": -1084907366
+        },
+        {
+          "payment_method": "Unknown",
+          "inflow": 0,
+          "outflow": 0,
+          "net_cash_flow": 0
+        },
+        {
+          "payment_method": "Sotephwar_Transection received",
+          "inflow": 1643301500,
+          "outflow": 0,
+          "net_cash_flow": 1643301500
+        },
+        {
+          "payment_method": "Farm_Transection received",
+          "inflow": 124919500,
+          "outflow": 0,
+          "net_cash_flow": 124919500
+        }
+      ]
+    },
+    "inventory": {
+      "formula": "sotephwar_inventory_stock",
+      "period": "all_time",
+      "product": null,
+      "store": null,
+      "stock": [
+        {
+          "store": "Heho Store (Home)",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 6800
+        },
+        {
+          "store": "Heho Store (Home)",
+          "product": "Sote Phwar 4L",
+          "stock_qty": 200
+        },
+        {
+          "store": "Heho Store (Home)",
+          "product": "Sote Phwar 500 mL",
+          "stock_qty": 460
+        },
+        {
+          "store": "Min Hla Store",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 5000
+        },
+        {
+          "store": "Min Hla Store",
+          "product": "Sote Phwar 4L",
+          "stock_qty": 80
+        },
+        {
+          "store": "Min Hla Store",
+          "product": "Sote Phwar 500 mL",
+          "stock_qty": 1000
+        },
+        {
+          "store": "Naung Tayar",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 3000
+        },
+        {
+          "store": "Tatkone Store",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 4985
+        },
+        {
+          "store": "Tatkone Store",
+          "product": "Sote Phwar 4L",
+          "stock_qty": 493
+        },
+        {
+          "store": "Tatkone Store",
+          "product": "Sote Phwar 500 mL",
+          "stock_qty": 1760
+        }
+      ]
+    }
+  },
+  "kpi": {
+    "intent": {
+      "business": "sote_phwar",
+      "module": "kpi",
+      "report": "kpi",
+      "period": {
+        "type": "relative",
+        "value": "this_year"
+      },
+      "output": "text"
+    },
+    "title": "Sote Phwar - Kpi - Kpi",
+    "period_label": "This Year",
+    "result": {
+      "formula": "kpi_overview",
+      "period": "this_year",
+      "total_income": 3439779000,
+      "total_expense": 1488343423,
+      "net_profit": 1951435577,
+      "profit_margin_percent": 56.73,
+      "invoice_count": 695,
+      "amount_received": 1643301500,
+      "outstanding_amount": 1796477500,
+      "expense_count": 890,
+      "sources": {
+        "sotephwar_transection_total_amount": 3439779000,
+        "sotephwar_sector_expense": 1488343423
+      },
+      "note": "Sote Phwar income comes from Sotephwar_Transection; expenses come from Transection sector Sote Phwar.",
+      "_bi_intent": {
+        "business": "sote_phwar",
+        "module": "kpi",
+        "report": "kpi",
+        "period": {
+          "type": "relative",
+          "value": "this_year"
+        },
+        "output": "text"
+      },
+      "_report_title": "Sote Phwar - Kpi - Kpi",
+      "_period_label": "This Year"
+    }
+  },
+  "top_customers": {
+    "intent": {
+      "business": "sote_phwar",
+      "module": "income",
+      "report": "top_customers",
+      "period": {
+        "type": "relative",
+        "value": "this_year"
+      },
+      "output": "text"
+    },
+    "title": "Sote Phwar - Income - Top Customers",
+    "period_label": "This Year",
+    "result": {
+      "formula": "top_income",
+      "period": "this_year",
+      "income": [
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Mya Yadanar",
+          "customer_name": "Mya Yadanar",
+          "amount": 292300000,
+          "total_amount": 292300000,
+          "amount_received": 292300000,
+          "outstanding_amount": 0,
+          "invoice_count": 22,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Ma Shwe War",
+          "customer_name": "Ma Shwe War",
+          "amount": 217030000,
+          "total_amount": 217030000,
+          "amount_received": 152635000,
+          "outstanding_amount": 64395000,
+          "invoice_count": 30,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Pwint Aung Kyaw MDY",
+          "customer_name": "Pwint Aung Kyaw MDY",
+          "amount": 183970000,
+          "total_amount": 183970000,
+          "amount_received": 114960000,
+          "outstanding_amount": 69010000,
+          "invoice_count": 36,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Chit Oo Ko Ko",
+          "customer_name": "Chit Oo Ko Ko",
+          "amount": 158030000,
+          "total_amount": 158030000,
+          "amount_received": 21720000,
+          "outstanding_amount": 136310000,
+          "invoice_count": 18,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Pwint Aung Kyaw POL",
+          "customer_name": "Pwint Aung Kyaw POL",
+          "amount": 151200000,
+          "total_amount": 151200000,
+          "amount_received": 43597500,
+          "outstanding_amount": 107602500,
+          "invoice_count": 17,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Zun Ei Khaing",
+          "customer_name": "Zun Ei Khaing",
+          "amount": 149955000,
+          "total_amount": 149955000,
+          "amount_received": 139260000,
+          "outstanding_amount": 10695000,
+          "invoice_count": 13,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Mingalar Myay",
+          "customer_name": "Mingalar Myay",
+          "amount": 129240000,
+          "total_amount": 129240000,
+          "amount_received": 44460000,
+          "outstanding_amount": 84780000,
+          "invoice_count": 20,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Daw Khin Mar Lwin",
+          "customer_name": "Daw Khin Mar Lwin",
+          "amount": 127720000,
+          "total_amount": 127720000,
+          "amount_received": 45925000,
+          "outstanding_amount": 81795000,
+          "invoice_count": 29,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Lucky 7",
+          "customer_name": "Lucky 7",
+          "amount": 118050000,
+          "total_amount": 118050000,
+          "amount_received": 68285000,
+          "outstanding_amount": 49765000,
+          "invoice_count": 14,
+          "payment_method": "Sotephwar_Transection"
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Sales",
+          "item": "Myat Nyi Aung",
+          "customer_name": "Myat Nyi Aung",
+          "amount": 117500000,
+          "total_amount": 117500000,
+          "amount_received": 20700000,
+          "outstanding_amount": 96800000,
+          "invoice_count": 14,
+          "payment_method": "Sotephwar_Transection"
+        }
+      ],
+      "filters": {
+        "sector": "Sote Phwar",
+        "income_expense": "Income"
+      },
+      "_bi_intent": {
+        "business": "sote_phwar",
+        "module": "income",
+        "report": "top_customers",
+        "period": {
+          "type": "relative",
+          "value": "this_year"
+        },
+        "output": "text"
+      },
+      "_report_title": "Sote Phwar - Income - Top Customers",
+      "_period_label": "This Year"
+    }
+  },
+  "outstanding": {
+    "intent": {
+      "business": "sote_phwar",
+      "module": "customers",
+      "report": "outstanding_balance",
+      "period": {
+        "type": "relative",
+        "value": "this_year"
+      },
+      "output": "text",
+      "customer": "Mya Yadanar"
+    },
+    "title": "Sote Phwar - Customers - Outstanding Balance - Mya Yadanar",
+    "period_label": "This Year",
+    "result": {
+      "formula": "sotephwar_transection_customer",
+      "period": "this_year",
+      "customer": "Mya Yadanar",
+      "unpaid_only": true,
+      "invoice_numbers": [],
+      "include_note": false,
+      "invoices": [],
+      "_bi_intent": {
+        "business": "sote_phwar",
+        "module": "customers",
+        "report": "outstanding_balance",
+        "period": {
+          "type": "relative",
+          "value": "this_year"
+        },
+        "output": "text",
+        "customer": "Mya Yadanar"
+      },
+      "_report_title": "Sote Phwar - Customers - Outstanding Balance - Mya Yadanar",
+      "_period_label": "This Year"
+    }
+  },
+  "inventory": {
+    "intent": {
+      "business": "inventory",
+      "module": "inventory",
+      "report": "current_stock",
+      "period": {
+        "type": "relative",
+        "value": "this_year"
+      },
+      "output": "text"
+    },
+    "title": "Inventory - Inventory - Current Stock",
+    "period_label": "This Year",
+    "result": {
+      "formula": "sotephwar_inventory_stock",
+      "period": "all_time",
+      "product": null,
+      "store": null,
+      "stock": [
+        {
+          "store": "Heho Store (Home)",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 6800
+        },
+        {
+          "store": "Heho Store (Home)",
+          "product": "Sote Phwar 4L",
+          "stock_qty": 200
+        },
+        {
+          "store": "Heho Store (Home)",
+          "product": "Sote Phwar 500 mL",
+          "stock_qty": 460
+        },
+        {
+          "store": "Min Hla Store",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 5000
+        },
+        {
+          "store": "Min Hla Store",
+          "product": "Sote Phwar 4L",
+          "stock_qty": 80
+        },
+        {
+          "store": "Min Hla Store",
+          "product": "Sote Phwar 500 mL",
+          "stock_qty": 1000
+        },
+        {
+          "store": "Naung Tayar",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 3000
+        },
+        {
+          "store": "Tatkone Store",
+          "product": "Sote Phwar 1L",
+          "stock_qty": 4985
+        },
+        {
+          "store": "Tatkone Store",
+          "product": "Sote Phwar 4L",
+          "stock_qty": 493
+        },
+        {
+          "store": "Tatkone Store",
+          "product": "Sote Phwar 500 mL",
+          "stock_qty": 1760
+        }
+      ],
+      "_bi_intent": {
+        "business": "inventory",
+        "module": "inventory",
+        "report": "current_stock",
+        "period": {
+          "type": "relative",
+          "value": "this_year"
+        },
+        "output": "text"
+      },
+      "_report_title": "Inventory - Inventory - Current Stock",
+      "_period_label": "This Year"
+    }
+  },
+  "expense_categories": {
+    "intent": {
+      "business": "sote_phwar",
+      "module": "expense",
+      "report": "expense_summary",
+      "period": {
+        "type": "relative",
+        "value": "this_year"
+      },
+      "output": "text"
+    },
+    "title": "Sote Phwar - Expense - Expense Summary",
+    "period_label": "This Year",
+    "result": {
+      "formula": "category_summary",
+      "period": "this_year",
+      "total_income": 0,
+      "total_expense": 1488343423,
+      "net_total": -1488343423,
+      "transaction_count": 890,
+      "categories": [
+        {
+          "sector": "Sote Phwar",
+          "category": "Factory 2 Set up cost",
+          "income": 0,
+          "expense": 369575355,
+          "net": -369575355,
+          "transaction_count": 111
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Packaging equipment",
+          "income": 0,
+          "expense": 235860990,
+          "net": -235860990,
+          "transaction_count": 78
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Fish",
+          "income": 0,
+          "expense": 151307919,
+          "net": -151307919,
+          "transaction_count": 27
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Wages and Salaries",
+          "income": 0,
+          "expense": 137775600,
+          "net": -137775600,
+          "transaction_count": 23
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Loan",
+          "income": 0,
+          "expense": 106000000,
+          "net": -106000000,
+          "transaction_count": 3
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Tanks and Accessories",
+          "income": 0,
+          "expense": 82590000,
+          "net": -82590000,
+          "transaction_count": 5
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Molasses",
+          "income": 0,
+          "expense": 67796000,
+          "net": -67796000,
+          "transaction_count": 25
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Fuel",
+          "income": 0,
+          "expense": 64635692,
+          "net": -64635692,
+          "transaction_count": 213
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Loan Interest",
+          "income": 0,
+          "expense": 44760000,
+          "net": -44760000,
+          "transaction_count": 7
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Carriage Inward",
+          "income": 0,
+          "expense": 39254950,
+          "net": -39254950,
+          "transaction_count": 53
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Household Usage",
+          "income": 0,
+          "expense": 36635250,
+          "net": -36635250,
+          "transaction_count": 53
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Carriage Outward",
+          "income": 0,
+          "expense": 27081100,
+          "net": -27081100,
+          "transaction_count": 15
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Marketing  and Promotion Expenses",
+          "income": 0,
+          "expense": 26453700,
+          "net": -26453700,
+          "transaction_count": 24
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Machinery repair & maintenance",
+          "income": 0,
+          "expense": 16346331,
+          "net": -16346331,
+          "transaction_count": 44
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Car repair and maintenance",
+          "income": 0,
+          "expense": 11705400,
+          "net": -11705400,
+          "transaction_count": 6
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Gifts & Donations",
+          "income": 0,
+          "expense": 10827636,
+          "net": -10827636,
+          "transaction_count": 19
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Advanced Expense",
+          "income": 0,
+          "expense": 10000000,
+          "net": -10000000,
+          "transaction_count": 6
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Warehouse",
+          "income": 0,
+          "expense": 6133000,
+          "net": -6133000,
+          "transaction_count": 8
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Loan settlement",
+          "income": 0,
+          "expense": 6000000,
+          "net": -6000000,
+          "transaction_count": 2
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Kitchen Expense",
+          "income": 0,
+          "expense": 4946500,
+          "net": -4946500,
+          "transaction_count": 3
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Office",
+          "income": 0,
+          "expense": 4200000,
+          "net": -4200000,
+          "transaction_count": 1
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "General Expense",
+          "income": 0,
+          "expense": 3518000,
+          "net": -3518000,
+          "transaction_count": 34
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Stationaries & Admin Expenses",
+          "income": 0,
+          "expense": 3012000,
+          "net": -3012000,
+          "transaction_count": 9
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Internet & Telecommunication",
+          "income": 0,
+          "expense": 3002000,
+          "net": -3002000,
+          "transaction_count": 6
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Sote Phwar Income",
+          "income": 0,
+          "expense": 3000000,
+          "net": -3000000,
+          "transaction_count": 1
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Travel allowance",
+          "income": 0,
+          "expense": 2695050,
+          "net": -2695050,
+          "transaction_count": 3
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Staff Accomodation Expense",
+          "income": 0,
+          "expense": 2012100,
+          "net": -2012100,
+          "transaction_count": 2
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Personnel protective equipment",
+          "income": 0,
+          "expense": 1927100,
+          "net": -1927100,
+          "transaction_count": 15
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Extension Car repair & Maintenance",
+          "income": 0,
+          "expense": 1803000,
+          "net": -1803000,
+          "transaction_count": 2
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "License & Registration",
+          "income": 0,
+          "expense": 1655000,
+          "net": -1655000,
+          "transaction_count": 6
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "furniture expense",
+          "income": 0,
+          "expense": 1500000,
+          "net": -1500000,
+          "transaction_count": 1
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Travelling Expense",
+          "income": 0,
+          "expense": 1397000,
+          "net": -1397000,
+          "transaction_count": 5
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Drugs and Health care expense",
+          "income": 0,
+          "expense": 825750,
+          "net": -825750,
+          "transaction_count": 11
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Telecommunications and Internet",
+          "income": 0,
+          "expense": 750000,
+          "net": -750000,
+          "transaction_count": 1
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Tools",
+          "income": 0,
+          "expense": 481500,
+          "net": -481500,
+          "transaction_count": 6
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Fuel (Octane)",
+          "income": 0,
+          "expense": 324000,
+          "net": -324000,
+          "transaction_count": 4
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Tax",
+          "income": 0,
+          "expense": 243000,
+          "net": -243000,
+          "transaction_count": 53
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Labour Shelter & its maintenance",
+          "income": 0,
+          "expense": 172500,
+          "net": -172500,
+          "transaction_count": 2
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Food and Drinks",
+          "income": 0,
+          "expense": 82000,
+          "net": -82000,
+          "transaction_count": 2
+        },
+        {
+          "sector": "Sote Phwar",
+          "category": "Cultivation requirement",
+          "income": 0,
+          "expense": 58000,
+          "net": -58000,
+          "transaction_count": 1
+        }
+      ],
+      "filters": {
+        "sector": "Sote Phwar",
+        "income_expense": "Expense"
+      },
+      "_bi_intent": {
+        "business": "sote_phwar",
+        "module": "expense",
+        "report": "expense_summary",
+        "period": {
+          "type": "relative",
+          "value": "this_year"
+        },
+        "output": "text"
+      },
+      "_report_title": "Sote Phwar - Expense - Expense Summary",
+      "_period_label": "This Year"
+    }
+  },
+  "cash_flow": {
+    "intent": {
+      "business": "sote_phwar",
+      "module": "cash_flow",
+      "report": "cash_flow",
+      "period": {
+        "type": "relative",
+        "value": "this_year"
+      },
+      "output": "text"
+    },
+    "title": "Sote Phwar - Cash Flow - Cash Flow",
+    "period_label": "This Year",
+    "result": {
+      "formula": "cash_flow",
+      "period": "this_year",
+      "total_inflow": 1643301500,
+      "total_outflow": 1488343423,
+      "net_cash_flow": 154958077,
+      "by_payment_method": [
+        {
+          "payment_method": "Sotephwar_Transection received",
+          "inflow": 1643301500,
+          "outflow": 0,
+          "net_cash_flow": 1643301500
+        },
+        {
+          "payment_method": "By Cash",
+          "inflow": 0,
+          "outflow": 448192978,
+          "net_cash_flow": -448192978
+        },
+        {
+          "payment_method": "By K-Pay",
+          "inflow": 0,
+          "outflow": 73211800,
+          "net_cash_flow": -73211800
+        },
+        {
+          "payment_method": "By -Pay",
+          "inflow": 0,
+          "outflow": 98365440,
+          "net_cash_flow": -98365440
+        },
+        {
+          "payment_method": "In Cash",
+          "inflow": 0,
+          "outflow": 868573205,
+          "net_cash_flow": -868573205
+        }
+      ],
+      "sources": {
+        "sotephwar_transection_total_received": 1643301500,
+        "sotephwar_sector_expense_outflow": 1488343423
+      },
+      "note": "Sote Phwar cash inflow uses Total_Received from Sotephwar_Transection; outflow uses Transection sector Sote Phwar expenses.",
+      "_bi_intent": {
+        "business": "sote_phwar",
+        "module": "cash_flow",
+        "report": "cash_flow",
+        "period": {
+          "type": "relative",
+          "value": "this_year"
+        },
+        "output": "text"
+      },
+      "_report_title": "Sote Phwar - Cash Flow - Cash Flow",
+      "_period_label": "This Year"
+    }
+  },
+  "executive_tool_results": [
+    {
+      "tool": "kpi",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year"
+      },
+      "result": {
+        "formula": "kpi_overview",
+        "period": "this_year",
+        "total_income": 3439779000,
+        "total_expense": 1488343423,
+        "net_profit": 1951435577,
+        "profit_margin_percent": 56.73,
+        "sources": {
+          "sotephwar_transection_total_amount": 3439779000,
+          "farm_transection_total_amount": 0
+        },
+        "filters": {
+          "sector": "Sote Phwar"
+        }
+      }
+    },
+    {
+      "tool": "revenue",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year"
+      },
+      "result": {
+        "formula": "sales_total",
+        "period": "this_year",
+        "total_sales": 3439779000,
+        "amount_received": 1643301500,
+        "outstanding_amount": 1796477500,
+        "transection_income_rows": [
+          {
+            "Date": "2026-06-04",
+            "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u104a \u1002\u103b\u1015\u103a\u1016\u102c\u101b\u1031\u102c\u1004\u103a\u1038\u101b\u1004\u103d\u1031",
+            "amount": 511800,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-05-30",
+            "item": "ZLP",
+            "amount": 300000,
+            "payment_method": "By -Pay"
+          },
+          {
+            "Date": "2026-05-28",
+            "item": "U Ye Myint",
+            "amount": 6600000,
+            "payment_method": "By -Pay"
+          },
+          {
+            "Date": "2026-05-17",
+            "item": "San Thit Aung",
+            "amount": 1500000,
+            "payment_method": "By -Pay"
+          },
+          {
+            "Date": "2026-05-13",
+            "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u101b\u1031\u102c\u1004\u103a\u1038\u200c\u101b\u1004\u103d\u1031",
+            "amount": 352000,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-04-21",
+            "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u1005\u102f\u1036\u101b\u1031\u102c\u1004\u103a\u1038\u101b\u1004\u103d\u1031",
+            "amount": 340200,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-04-21",
+            "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u1005\u102f\u1036\u101b\u1031\u102c\u1004\u103a\u1038\u101b\u1004\u103d\u1031",
+            "amount": 340200,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-03-30",
+            "item": "2.5% Loan",
+            "amount": 100000000,
+            "payment_method": "In Cash"
+          }
+        ],
+        "sources": {
+          "transection_income": 0,
+          "sotephwar_transection_total_amount": 3439779000,
+          "sotephwar_transection_total_received": 1643301500,
+          "sotephwar_transection_outstanding_balance": 1796477500,
+          "farm_transection_total_amount": 0,
+          "farm_transection_total_received": 0,
+          "farm_transection_outstanding_balance": 0
+        },
+        "filters": {
+          "sector": "Sote Phwar",
+          "income_expense": "Income"
+        }
+      }
+    },
+    {
+      "tool": "expense",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year"
+      },
+      "result": {
+        "formula": "expense_total",
+        "period": "this_year",
+        "total_expense": 1488343423,
+        "expense_count": 890,
+        "missing_amount_count": 0,
+        "filters": {
+          "sector": "Sote Phwar",
+          "income_expense": "Expense"
+        }
+      }
+    },
+    {
+      "tool": "cash_flow",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year"
+      },
+      "result": {
+        "formula": "cash_flow",
+        "period": "this_year",
+        "total_inflow": 1643301500,
+        "total_outflow": 1488343423,
+        "net_cash_flow": 154958077,
+        "by_payment_method": [
+          {
+            "payment_method": "By Cash",
+            "inflow": 0,
+            "outflow": 448192978,
+            "net_cash_flow": -448192978
+          },
+          {
+            "payment_method": "By K-Pay",
+            "inflow": 0,
+            "outflow": 73211800,
+            "net_cash_flow": -73211800
+          },
+          {
+            "payment_method": "By -Pay",
+            "inflow": 0,
+            "outflow": 98365440,
+            "net_cash_flow": -98365440
+          },
+          {
+            "payment_method": "In Cash",
+            "inflow": 0,
+            "outflow": 868573205,
+            "net_cash_flow": -868573205
+          },
+          {
+            "payment_method": "Sotephwar_Transection received",
+            "inflow": 1643301500,
+            "outflow": 0,
+            "net_cash_flow": 1643301500
+          }
+        ],
+        "filters": {
+          "sector": "Sote Phwar"
+        }
+      }
+    },
+    {
+      "tool": "top_customers",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year"
+      },
+      "result": {
+        "formula": "top_income",
+        "period": "this_year",
+        "income": [
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Mya Yadanar",
+            "customer_name": "Mya Yadanar",
+            "amount": 292300000,
+            "total_amount": 292300000,
+            "amount_received": 292300000,
+            "outstanding_amount": 0,
+            "invoice_count": 22,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Ma Shwe War",
+            "customer_name": "Ma Shwe War",
+            "amount": 217030000,
+            "total_amount": 217030000,
+            "amount_received": 152635000,
+            "outstanding_amount": 64395000,
+            "invoice_count": 30,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Pwint Aung Kyaw MDY",
+            "customer_name": "Pwint Aung Kyaw MDY",
+            "amount": 183970000,
+            "total_amount": 183970000,
+            "amount_received": 114960000,
+            "outstanding_amount": 69010000,
+            "invoice_count": 36,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Chit Oo Ko Ko",
+            "customer_name": "Chit Oo Ko Ko",
+            "amount": 158030000,
+            "total_amount": 158030000,
+            "amount_received": 21720000,
+            "outstanding_amount": 136310000,
+            "invoice_count": 18,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Pwint Aung Kyaw POL",
+            "customer_name": "Pwint Aung Kyaw POL",
+            "amount": 151200000,
+            "total_amount": 151200000,
+            "amount_received": 43597500,
+            "outstanding_amount": 107602500,
+            "invoice_count": 17,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Zun Ei Khaing",
+            "customer_name": "Zun Ei Khaing",
+            "amount": 149955000,
+            "total_amount": 149955000,
+            "amount_received": 139260000,
+            "outstanding_amount": 10695000,
+            "invoice_count": 13,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Mingalar Myay",
+            "customer_name": "Mingalar Myay",
+            "amount": 129240000,
+            "total_amount": 129240000,
+            "amount_received": 44460000,
+            "outstanding_amount": 84780000,
+            "invoice_count": 20,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Daw Khin Mar Lwin",
+            "customer_name": "Daw Khin Mar Lwin",
+            "amount": 127720000,
+            "total_amount": 127720000,
+            "amount_received": 45925000,
+            "outstanding_amount": 81795000,
+            "invoice_count": 29,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Lucky 7",
+            "customer_name": "Lucky 7",
+            "amount": 118050000,
+            "total_amount": 118050000,
+            "amount_received": 68285000,
+            "outstanding_amount": 49765000,
+            "invoice_count": 14,
+            "payment_method": "Sotephwar_Transection"
+          },
+          {
+            "sector": "Sote Phwar",
+            "category": "Sote Phwar Sales",
+            "item": "Myat Nyi Aung",
+            "customer_name": "Myat Nyi Aung",
+            "amount": 117500000,
+            "total_amount": 117500000,
+            "amount_received": 20700000,
+            "outstanding_amount": 96800000,
+            "invoice_count": 14,
+            "payment_method": "Sotephwar_Transection"
+          }
+        ],
+        "filters": {
+          "sector": "Sote Phwar",
+          "income_expense": "Income"
+        }
+      }
+    },
+    {
+      "tool": "top_expenses",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year"
+      },
+      "result": {
+        "formula": "top_expenses",
+        "period": "this_year",
+        "expenses": [
+          {
+            "Date": "2026-03-09",
+            "sector": "Sote Phwar",
+            "category": "Loan",
+            "item": "3% Loan",
+            "amount": 100000000,
+            "payment_method": "In Cash"
+          },
+          {
+            "Date": "2026-01-19",
+            "sector": "Sote Phwar",
+            "category": "Tanks and Accessories",
+            "item": "5000 L\u00a0 tank\u00a0 500pcs",
+            "amount": 79000000,
+            "payment_method": "In Cash"
+          },
+          {
+            "Date": "2026-02-26",
+            "sector": "Sote Phwar",
+            "category": "Factory 2 Set up cost",
+            "item": "Electrical work \u104a Iron frame \u104a Gear pump \u104aMotor \u104aSpeed reducer",
+            "amount": 59680000,
+            "payment_method": "In Cash"
+          },
+          {
+            "Date": "2026-05-31",
+            "sector": "Sote Phwar",
+            "category": "Wages and Salaries",
+            "item": "For  Extension Staff",
+            "amount": 21550000,
+            "payment_method": "By -Pay"
+          },
+          {
+            "Date": "2026-01-04",
+            "sector": "Sote Phwar",
+            "category": "Factory 2 Set up cost",
+            "item": "\u1021\u1019\u100a\u103a\u1015\u103c\u1031\u102c\u1004\u103a\u1038\u101d\u101a\u103a\u1001\u103d\u1014\u103a\u1006\u1031\u102c\u1004\u103a",
+            "amount": 21000000,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-01-04",
+            "sector": "Sote Phwar",
+            "category": "Factory 2 Set up cost",
+            "item": "\u1021\u1019\u100a\u103a\u1015\u103c\u1031\u102c\u1004\u103a\u1038\u101d\u101a\u103a\u1001\u103d\u1014\u103a\u1006\u1031\u102c\u1004\u103a",
+            "amount": 21000000,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-03-13",
+            "sector": "Sote Phwar",
+            "category": "Factory 2 Set up cost",
+            "item": "Kubota 155 engine 3 pcs",
+            "amount": 20600000,
+            "payment_method": "In Cash"
+          },
+          {
+            "Date": "2026-04-30",
+            "sector": "Sote Phwar",
+            "category": "Wages and Salaries",
+            "item": "Salaries for extension",
+            "amount": 17800000,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-04-30",
+            "sector": "Sote Phwar",
+            "category": "Wages and Salaries",
+            "item": "Salaries for extension",
+            "amount": 17800000,
+            "payment_method": "By Cash"
+          },
+          {
+            "Date": "2026-05-09",
+            "sector": "Sote Phwar",
+            "category": "Packaging equipment",
+            "item": "1000cc \u104a 100cc \u104a \u1016\u102d\u1010\u103a\u1005\u102c",
+            "amount": 17240000,
+            "payment_method": "By -Pay"
+          }
+        ],
+        "filters": {
+          "sector": "Sote Phwar",
+          "income_expense": "Expense"
+        }
+      }
+    },
+    {
+      "tool": "inventory",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year"
+      },
+      "result": {
+        "formula": "sotephwar_inventory_stock",
+        "period": "all_time",
+        "product": null,
+        "store": null,
+        "stock": [
+          {
+            "store": "Heho Store (Home)",
+            "product": "Sote Phwar 1L",
+            "stock_qty": 6800
+          },
+          {
+            "store": "Heho Store (Home)",
+            "product": "Sote Phwar 4L",
+            "stock_qty": 200
+          },
+          {
+            "store": "Heho Store (Home)",
+            "product": "Sote Phwar 500 mL",
+            "stock_qty": 460
+          },
+          {
+            "store": "Min Hla Store",
+            "product": "Sote Phwar 1L",
+            "stock_qty": 5000
+          },
+          {
+            "store": "Min Hla Store",
+            "product": "Sote Phwar 4L",
+            "stock_qty": 80
+          },
+          {
+            "store": "Min Hla Store",
+            "product": "Sote Phwar 500 mL",
+            "stock_qty": 1000
+          },
+          {
+            "store": "Naung Tayar",
+            "product": "Sote Phwar 1L",
+            "stock_qty": 3000
+          },
+          {
+            "store": "Tatkone Store",
+            "product": "Sote Phwar 1L",
+            "stock_qty": 4985
+          },
+          {
+            "store": "Tatkone Store",
+            "product": "Sote Phwar 4L",
+            "stock_qty": 493
+          },
+          {
+            "store": "Tatkone Store",
+            "product": "Sote Phwar 500 mL",
+            "stock_qty": 1760
+          }
+        ]
+      }
+    },
+    {
+      "tool": "comparison",
+      "args": {
+        "business": "sote_phwar",
+        "period": "this_year",
+        "metric": "revenue"
+      },
+      "result": {
+        "formula": "comparison",
+        "metric": "revenue",
+        "period": "this_year",
+        "current": {
+          "formula": "sales_total",
+          "period": "this_year",
+          "total_sales": 3439779000,
+          "amount_received": 1643301500,
+          "outstanding_amount": 1796477500,
+          "transection_income_rows": [
+            {
+              "Date": "2026-06-04",
+              "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u104a \u1002\u103b\u1015\u103a\u1016\u102c\u101b\u1031\u102c\u1004\u103a\u1038\u101b\u1004\u103d\u1031",
+              "amount": 511800,
+              "payment_method": "By Cash"
+            },
+            {
+              "Date": "2026-05-30",
+              "item": "ZLP",
+              "amount": 300000,
+              "payment_method": "By -Pay"
+            },
+            {
+              "Date": "2026-05-28",
+              "item": "U Ye Myint",
+              "amount": 6600000,
+              "payment_method": "By -Pay"
+            },
+            {
+              "Date": "2026-05-17",
+              "item": "San Thit Aung",
+              "amount": 1500000,
+              "payment_method": "By -Pay"
+            },
+            {
+              "Date": "2026-05-13",
+              "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u101b\u1031\u102c\u1004\u103a\u1038\u200c\u101b\u1004\u103d\u1031",
+              "amount": 352000,
+              "payment_method": "By Cash"
+            },
+            {
+              "Date": "2026-04-21",
+              "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u1005\u102f\u1036\u101b\u1031\u102c\u1004\u103a\u1038\u101b\u1004\u103d\u1031",
+              "amount": 340200,
+              "payment_method": "By Cash"
+            },
+            {
+              "Date": "2026-04-21",
+              "item": "\u1000\u1031\u102c\u103a\u1018\u1030\u1038\u1005\u102f\u1036\u101b\u1031\u102c\u1004\u103a\u1038\u101b\u1004\u103d\u1031",
+              "amount": 340200,
+              "payment_method": "By Cash"
+            },
+            {
+              "Date": "2026-03-30",
+              "item": "2.5% Loan",
+              "amount": 100000000,
+              "payment_method": "In Cash"
+            }
+          ],
+          "sources": {
+            "transection_income": 0,
+            "sotephwar_transection_total_amount": 3439779000,
+            "sotephwar_transection_total_received": 1643301500,
+            "sotephwar_transection_outstanding_balance": 1796477500,
+            "farm_transection_total_amount": 0,
+            "farm_transection_total_received": 0,
+            "farm_transection_outstanding_balance": 0
+          },
+          "filters": {
+            "sector": "Sote Phwar",
+            "income_expense": "Income"
+          }
+        },
+        "previous": {
+          "formula": "sales_total",
+          "period": "last_year",
+          "total_sales": 52464000,
+          "amount_received": 34414000,
+          "outstanding_amount": 18050000,
+          "transection_income_rows": [],
+          "sources": {
+            "transection_income": 0,
+            "sotephwar_transection_total_amount": 52464000,
+            "sotephwar_transection_total_received": 34414000,
+            "sotephwar_transection_outstanding_balance": 18050000,
+            "farm_transection_total_amount": 0,
+            "farm_transection_total_received": 0,
+            "farm_transection_outstanding_balance": 0
+          },
+          "filters": {
+            "sector": "Sote Phwar",
+            "income_expense": "Income"
+          }
+        }
+      }
+    }
+  ],
+  "timings_seconds": {
+    "kpi_this_year": 0.0605,
+    "cash_flow_this_year": 0.0327,
+    "inventory_stock": 0.0068,
+    "bi_kpi": 0.0271,
+    "bi_top_customers": 0.0138,
+    "bi_outstanding": 0.0069,
+    "bi_inventory": 0.0053,
+    "bi_expense_categories": 0.0115,
+    "bi_cash_flow": 0.0243,
+    "executive_tools": 0.2376,
+    "ceo_pdf": 120.6786
+  },
+  "max_rss_kb": 66125824
+}

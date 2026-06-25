@@ -4,7 +4,6 @@
 
 ```bash
 curl http://127.0.0.1:5059/health
-curl http://127.0.0.1:5062/health
 curl http://127.0.0.1:8080/api/v1/health
 curl http://127.0.0.1:11434/api/tags
 docker compose ps
@@ -15,7 +14,6 @@ Expected network exposure:
 - PostgreSQL: `127.0.0.1:5433`
 - NocoDB: `127.0.0.1:8080`
 - Receive Payment: `127.0.0.1:5059`
-- Business Dashboard: `127.0.0.1:5062`
 - Ollama: local runtime on `127.0.0.1:11434`
 
 ## Deployment
@@ -30,7 +28,6 @@ python3 -m unittest discover -s tests
 python3 -m py_compile telegram_bot.py business_agent.py scripts/receive_payment_server.py tools/formula_engine.py
 launchctl kickstart -k gui/$(id -u)/com.bigshot.business-ai.telegram-bot
 launchctl kickstart -k gui/$(id -u)/com.bigshot.receive-payment
-launchctl kickstart -k gui/$(id -u)/com.bigshot.business-dashboard
 ```
 
 Run the health checks after every deployment. Do not deploy when the regression
@@ -42,15 +39,12 @@ suite fails or when the database backup cannot be listed by `pg_restore -l`.
 - Finance bot stderr: `/private/tmp/business-ai-telegram-bot.err.log`
 - Payment stdout: `logs/receive_payment_server.out.log`
 - Payment stderr: `logs/receive_payment_server.err.log`
-- Dashboard stdout: `logs/dashboard_server.out.log`
-- Dashboard stderr: `logs/dashboard_server.err.log`
 
 ## Graceful Restart
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.bigshot.business-ai.telegram-bot
 launchctl kickstart -k gui/$(id -u)/com.bigshot.receive-payment
-launchctl kickstart -k gui/$(id -u)/com.bigshot.business-dashboard
 ```
 
 Do not use `pkill -9`. launchd owns recovery and process lifecycle.
@@ -114,9 +108,6 @@ up to 24 hours of data exposure unless additional intra-day backups are added.
   report output, and error logs.
 - BI: verify deterministic formula selection, canonical KPI totals, and output
   parity across text, PDF, Excel, executive, and Telegram paths.
-- Dashboard: verify global filters refresh all Executive widgets, API responses
-  identify canonical sources, exports are non-empty, and browser source contains
-  no SQL or database driver.
 
 ## Regression Test
 

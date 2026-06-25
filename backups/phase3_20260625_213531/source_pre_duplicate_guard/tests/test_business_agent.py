@@ -60,69 +60,6 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             captured["params"]["lock_key"],
         )
 
-    def test_duplicate_payment_with_reference_uses_voucher_identity(self):
-        captured = {}
-        original_fetch_one = formula_engine._fetch_one_in_connection
-
-        def fake_fetch_one(connection, sql, params=None):
-            captured["sql"] = sql
-            captured["params"] = params
-            return {"id": 42}
-
-        formula_engine._fetch_one_in_connection = fake_fetch_one
-        try:
-            duplicate = formula_engine._duplicate_payment_exists(
-                object(),
-                sector="Sote Phwar",
-                voucher_number="77",
-                invoice_date="2026-06-18",
-                customer="Mya Yadanar",
-                receive_amount=100000,
-                payment_method="KPay",
-                reference_number="KPAY-123",
-                notes="partial",
-                recorded_by="Receive Payment Basic Page",
-            )
-        finally:
-            formula_engine._fetch_one_in_connection = original_fetch_one
-
-        self.assertTrue(duplicate)
-        self.assertIn('"Invoice_Date" IS NOT DISTINCT FROM %(invoice_date)s', captured["sql"])
-        self.assertIn('COALESCE("Reference_Number", \'\') = %(reference_number)s', captured["sql"])
-        self.assertNotIn("INTERVAL '2 minutes'", captured["sql"])
-        self.assertEqual("KPAY-123", captured["params"]["reference_number"])
-
-    def test_duplicate_payment_without_reference_uses_short_exact_match_window(self):
-        captured = {}
-        original_fetch_one = formula_engine._fetch_one_in_connection
-
-        def fake_fetch_one(connection, sql, params=None):
-            captured["sql"] = sql
-            captured["params"] = params
-            return {}
-
-        formula_engine._fetch_one_in_connection = fake_fetch_one
-        try:
-            duplicate = formula_engine._duplicate_payment_exists(
-                object(),
-                sector="Sote Phwar",
-                voucher_number="59",
-                invoice_date="2026-06-15",
-                customer="Mya Yadanar",
-                receive_amount=3750000,
-                payment_method="KPay",
-                reference_number="",
-                notes="",
-                recorded_by="Receive Payment Basic Page",
-            )
-        finally:
-            formula_engine._fetch_one_in_connection = original_fetch_one
-
-        self.assertFalse(duplicate)
-        self.assertIn('"Receive_Amount" = %(receive_amount)s', captured["sql"])
-        self.assertIn("INTERVAL '2 minutes'", captured["sql"])
-        self.assertEqual(3750000, captured["params"]["receive_amount"])
-
     def test_canonical_income_condition_excludes_sotephwar_transection_duplicates(self):
         sql = formula_engine._canonical_transection_income_condition("source")
 
@@ -176,18 +113,6 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual(
             "top_income",
             business_agent.choose_formula("top customers this year"),
-        )
-
-    def test_top_five_customers_routes_without_ai_fallback(self):
-        self.assertEqual(
-            "top_income",
-            business_agent.choose_formula("Top five customers this year"),
-        )
-
-    def test_customer_payment_history_routes_to_customer_vouchers(self):
-        self.assertEqual(
-            "sotephwar_transection_customer",
-            business_agent.choose_formula("Customer payment history Mya Yadanar"),
         )
 
     def test_machinery_cost_routes_to_expense_total(self):

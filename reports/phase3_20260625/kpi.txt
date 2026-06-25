@@ -1,0 +1,11 @@
+Sote Phwar - Kpi - Kpi
+Period: This Year
+
+Income: 3,439,779,000
+Expense: 1,488,343,423
+Profit: 1,951,435,577
+Margin: 56.73%
+Received: 1,643,301,500
+Outstanding / unpaid: 1,796,477,500
+
+Note: Sote Phwar income comes from Sotephwar_Transection; expenses come from Transection sector Sote Phwar.

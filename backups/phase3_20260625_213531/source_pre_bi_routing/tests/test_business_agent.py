@@ -178,18 +178,6 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             business_agent.choose_formula("top customers this year"),
         )
 
-    def test_top_five_customers_routes_without_ai_fallback(self):
-        self.assertEqual(
-            "top_income",
-            business_agent.choose_formula("Top five customers this year"),
-        )
-
-    def test_customer_payment_history_routes_to_customer_vouchers(self):
-        self.assertEqual(
-            "sotephwar_transection_customer",
-            business_agent.choose_formula("Customer payment history Mya Yadanar"),
-        )
-
     def test_machinery_cost_routes_to_expense_total(self):
         self.assertEqual(
             "expense_total",

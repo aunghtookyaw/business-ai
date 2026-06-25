@@ -1,0 +1,8 @@
+Sote Phwar - Cash Flow - Cash Flow
+Period: This Year
+
+Inflow: 1,643,301,500
+Outflow: 1,488,343,423
+Net cash flow: 154,958,077
+
+Note: Sote Phwar cash inflow uses Total_Received from Sotephwar_Transection; outflow uses Transection sector Sote Phwar expenses.

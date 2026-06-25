@@ -124,22 +124,6 @@ def _sotephwar_inventory_table_ref():
     return f'"{schema}"."{table}"'
 
 
-def _sotephwar_product_canonical_sql(alias="s"):
-    normalized = (
-        f"REGEXP_REPLACE(LOWER(COALESCE({alias}.\"Item\", '')), "
-        "'[^a-z0-9]', '', 'g')"
-    )
-    return f'''
-      CASE
-        WHEN {normalized} = 'sotephwar1l' THEN 'Sote Phwar 1L'
-        WHEN {normalized} = 'sotephwar4l' THEN 'Sote Phwar 4L'
-        WHEN {normalized} = 'sotephwar500ml' THEN 'Sote Phwar 500 mL'
-        WHEN {normalized} = 'sotephwar100ml' THEN 'Sote Phwar 100 mL'
-        ELSE COALESCE(NULLIF(TRIM({alias}."Item"), ''), 'Unknown')
-      END
-    '''
-
-
 def _financial_obligations_table_ref():
     schema = config.TRANSACTION_SCHEMA.replace('"', '""')
     table = getattr(
@@ -1011,7 +995,7 @@ def _include_sotephwar_income(filters):
 
 def _include_transaction_rows(filters):
     filters = filters or {}
-    return not filters.get("farm_customer") and not filters.get("customer")
+    return not filters.get("farm_customer")
 
 
 def _canonical_transection_income_condition(alias="t"):
@@ -1030,9 +1014,6 @@ def _farm_filter(period, filters):
     if filters.get("farm_customer"):
         clauses.append(f"AND {_farm_customer_normalized_sql()} = %(farm_customer)s")
         params["farm_customer"] = normalize_name(filters["farm_customer"])
-    if filters.get("customer"):
-        clauses.append(f"AND {_farm_customer_normalized_sql()} = %(customer)s")
-        params["customer"] = normalize_name(filters["customer"])
     return "\n          ".join(clauses), date_sql, params
 
 
@@ -1083,31 +1064,6 @@ def _sotephwar_income_summary(period, filters=None):
     }
     if not _include_sotephwar_income(filters):
         return empty
-    if (filters or {}).get("customer"):
-        date_sql, params = _date_filter_for_column(period, 's."Invoice_Date"')
-        params["customer"] = normalize_name(filters["customer"])
-        row = _fetch_one(
-            f'''
-            SELECT
-              COUNT(*) AS invoice_count,
-              COALESCE(SUM(s."Total_Amount"), 0) AS total_amount,
-              COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
-              COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_amount
-            FROM {_sotephwar_transection_table_ref()} s
-            {_sotephwar_customer_link_join("s")}
-            WHERE COALESCE(s.__nc_deleted, false) = false
-              AND {_customer_normalized_sql()} = %(customer)s
-              {date_sql}
-            ''',
-            params,
-        )
-        return {
-            "invoice_count": int(row.get("invoice_count") or 0),
-            "total_amount": int(row.get("total_amount") or 0),
-            "amount_received": int(row.get("amount_received") or 0),
-            "outstanding_amount": int(row.get("outstanding_amount") or 0),
-            "customers": [],
-        }
     result = sotephwar_transection_summary(period, include_customers=False)
     return {
         "invoice_count": int(result.get("invoice_count") or 0),
@@ -1219,10 +1175,6 @@ def _sotephwar_income_rows(period, filters=None, limit=5):
     if not _include_sotephwar_income(filters):
         return []
     date_sql, params = _date_filter_for_column(period, 's."Invoice_Date"')
-    customer_sql = ""
-    if (filters or {}).get("customer"):
-        customer_sql = f"AND {_customer_normalized_sql()} = %(customer)s"
-        params["customer"] = normalize_name(filters["customer"])
     if limit is not None:
         params["limit"] = limit
         limit_sql = "LIMIT %(limit)s"
@@ -1245,7 +1197,6 @@ def _sotephwar_income_rows(period, filters=None, limit=5):
         {_sotephwar_customer_link_join("s")}
         WHERE COALESCE(s.__nc_deleted, false) = false
           AND s."Total_Amount" IS NOT NULL
-          {customer_sql}
           {date_sql}
         GROUP BY COALESCE({_linked_customer_expr("s")}, '')
         ORDER BY amount DESC NULLS LAST
@@ -2733,184 +2684,6 @@ def sotephwar_transection_quantity(period="all_time", item=None):
     }
 
 
-def sotephwar_product_ranking(period="all_time", product=None, limit=10):
-    date_sql, params = _date_filter_for_column(period, 's."Invoice_Date"')
-    product_sql = ""
-    if product:
-        product_sql = f'AND {_sotephwar_product_canonical_sql("s")} = %(product)s'
-        params["product"] = product
-    params["limit"] = max(1, min(int(limit or 10), 50))
-    rows = _fetch_all(
-        f'''
-        SELECT
-          {_sotephwar_product_canonical_sql("s")} AS product,
-          COUNT(DISTINCT (
-            s."Invoice_Number"::text,
-            s."Invoice_Date",
-            COALESCE(s."Customer_Name", '')
-          )) AS invoice_count,
-          COALESCE(SUM(s."Quantity"), 0) AS quantity,
-          COALESCE(SUM(s."Total_Amount"), 0) AS total_amount,
-          COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
-          COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_amount
-        FROM {_sotephwar_transection_table_ref()} s
-        WHERE COALESCE(s.__nc_deleted, false) = false
-          AND s."Total_Amount" IS NOT NULL
-          {product_sql}
-          {date_sql}
-        GROUP BY {_sotephwar_product_canonical_sql("s")}
-        ORDER BY quantity DESC, total_amount DESC, product
-        LIMIT %(limit)s
-        ''',
-        params,
-    )
-    for row in rows:
-        for key in (
-            "invoice_count",
-            "quantity",
-            "total_amount",
-            "amount_received",
-            "outstanding_amount",
-        ):
-            row[key] = int(row.get(key) or 0)
-    return {
-        "formula": "sotephwar_product_ranking",
-        "period": period,
-        "product": product,
-        "products": rows,
-    }
-
-
-def top_expense_categories(period="all_time", filters=None, limit=10):
-    date_sql, params = _date_filter(period)
-    filter_sql, filter_params = _dimension_filter(filters)
-    params.update(filter_params)
-    params["limit"] = max(1, min(int(limit or 10), 50))
-    rows = _fetch_all(
-        f'''
-        SELECT
-          COALESCE({_linked_category_expr("t")}, 'Unknown') AS category,
-          COALESCE(SUM(t."Amount"), 0) AS amount,
-          COUNT(*) AS transaction_count
-        FROM {_table_ref()} t
-        {_transaction_category_link_join("t")}
-        WHERE COALESCE(t.__nc_deleted, false) = false
-          AND t."Income_Expense" = 'Expense'
-          AND t."Amount" IS NOT NULL
-          {filter_sql}
-          {date_sql}
-        GROUP BY COALESCE({_linked_category_expr("t")}, 'Unknown')
-        ORDER BY amount DESC, category
-        LIMIT %(limit)s
-        ''',
-        params,
-    )
-    for row in rows:
-        row["amount"] = int(row.get("amount") or 0)
-        row["transaction_count"] = int(row.get("transaction_count") or 0)
-    return _with_filters({
-        "formula": "top_expense_categories",
-        "period": period,
-        "categories": rows,
-    }, filters)
-
-
-def recent_payment_receipts(
-    period="all_time",
-    sector=None,
-    customer=None,
-    payment_status=None,
-    limit=10,
-):
-    ensure_payment_receive_table()
-    date_sql, params = _date_filter_for_column(period, '"Receive_Date"')
-    filters = []
-    if sector:
-        filters.append('AND "Sector" = %(sector)s')
-        params["sector"] = sector
-    if customer:
-        filters.append('AND COALESCE("Customer", \'\') = %(customer)s')
-        params["customer"] = customer
-    if payment_status:
-        filters.append('''
-          AND CASE
-            WHEN COALESCE("Outstanding_Balance", 0) = 0 THEN 'Paid'
-            WHEN COALESCE("Previous_Paid", 0) + COALESCE("Receive_Amount", 0) > 0 THEN 'Partial'
-            ELSE 'Outstanding'
-          END = %(payment_status)s
-        ''')
-        params["payment_status"] = payment_status
-    params["limit"] = max(1, min(int(limit or 10), 100))
-    rows = _fetch_all(
-        f'''
-        SELECT
-          id,
-          "Receive_Date" AS receive_date,
-          COALESCE("Sector", '') AS sector,
-          COALESCE("Voucher_Number", '') AS voucher_number,
-          "Invoice_Date" AS invoice_date,
-          COALESCE("Customer", '') AS customer,
-          COALESCE("Receive_Amount", 0) AS receive_amount,
-          COALESCE("Payment_Method", '') AS payment_method,
-          COALESCE("Reference_Number", '') AS reference_number,
-          COALESCE("Notes", '') AS notes,
-          CASE
-            WHEN COALESCE("Outstanding_Balance", 0) = 0 THEN 'Paid'
-            WHEN COALESCE("Previous_Paid", 0) + COALESCE("Receive_Amount", 0) > 0 THEN 'Partial'
-            ELSE 'Outstanding'
-          END AS payment_status
-        FROM {_payment_receive_table_ref()}
-        WHERE 1 = 1
-          {date_sql}
-          {' '.join(filters)}
-        ORDER BY "Receive_Date" DESC NULLS LAST, id DESC
-        LIMIT %(limit)s
-        ''',
-        params,
-    )
-    for row in rows:
-        row["receive_amount"] = int(row.get("receive_amount") or 0)
-    return {
-        "formula": "recent_payment_receipts",
-        "period": period,
-        "sector": sector,
-        "customer": customer,
-        "payment_status": payment_status,
-        "payments": rows,
-    }
-
-
-def dashboard_dimension_values():
-    dimensions = _dimension_values()
-    inventory_rows = _fetch_all(
-        f'''
-        SELECT DISTINCT
-          NULLIF(TRIM("Product"), '') AS product,
-          NULLIF(TRIM("From_Store"), '') AS from_store,
-          NULLIF(TRIM("To_Store"), '') AS to_store
-        FROM {_sotephwar_inventory_table_ref()}
-        WHERE COALESCE(__nc_deleted, false) = false
-        '''
-    )
-    products = sorted({
-        row["product"] for row in inventory_rows if row.get("product")
-    })
-    locations = sorted({
-        value
-        for row in inventory_rows
-        for value in (row.get("from_store"), row.get("to_store"))
-        if value and value not in {"-", "Customer"}
-    })
-    return {
-        "formula": "dashboard_dimension_values",
-        "sectors": dimensions.get("sectors") or [],
-        "categories": dimensions.get("categories") or [],
-        "payment_methods": dimensions.get("payment_methods") or [],
-        "products": products,
-        "locations": locations,
-    }
-
-
 def sotephwar_transection_customer(
     period="all_time",
     customer=None,
@@ -3602,60 +3375,6 @@ def _payment_previous_paid(sector, voucher_number):
     return _payment_receive_total(sector, voucher_number)
 
 
-def _duplicate_payment_exists(
-    connection,
-    *,
-    sector,
-    voucher_number,
-    invoice_date,
-    customer,
-    receive_amount,
-    payment_method,
-    reference_number,
-    notes,
-    recorded_by,
-):
-    params = {
-        "sector": sector,
-        "voucher_number": voucher_number,
-        "invoice_date": invoice_date,
-        "customer": customer or "",
-        "receive_amount": receive_amount,
-        "payment_method": payment_method or "",
-        "reference_number": reference_number or "",
-        "notes": notes or "",
-        "recorded_by": recorded_by or "",
-    }
-    if params["reference_number"]:
-        duplicate_filter = '''
-          AND COALESCE("Reference_Number", '') = %(reference_number)s
-        '''
-    else:
-        duplicate_filter = '''
-          AND "Receive_Amount" = %(receive_amount)s
-          AND COALESCE("Payment_Method", '') = %(payment_method)s
-          AND COALESCE("Notes", '') = %(notes)s
-          AND COALESCE("Recorded_By", '') = %(recorded_by)s
-          AND "Created_At" >= NOW() - INTERVAL '2 minutes'
-        '''
-    row = _fetch_one_in_connection(
-        connection,
-        f'''
-        SELECT id
-        FROM {_payment_receive_table_ref()}
-        WHERE "Sector" = %(sector)s
-          AND "Voucher_Number" = %(voucher_number)s
-          AND "Invoice_Date" IS NOT DISTINCT FROM %(invoice_date)s
-          AND COALESCE("Customer", '') = %(customer)s
-          {duplicate_filter}
-        ORDER BY id DESC
-        LIMIT 1
-        ''',
-        params,
-    )
-    return bool(row)
-
-
 def _payment_balance_status(total_amount, total_received):
     total_amount = int(total_amount or 0)
     total_received = int(total_received or 0)
@@ -3892,19 +3611,6 @@ def save_payment_receive(
                     history_received,
                     int(voucher.get("current_received") or 0),
                 )
-                if _duplicate_payment_exists(
-                    connection,
-                    sector=sector,
-                    voucher_number=voucher_number,
-                    invoice_date=invoice_date or voucher.get("invoice_date"),
-                    customer=customer or voucher.get("customer") or "",
-                    receive_amount=receive_amount,
-                    payment_method=payment_method,
-                    reference_number=reference_number,
-                    notes=notes,
-                    recorded_by=recorded_by,
-                ):
-                    raise ValueError("Duplicate payment submission rejected.")
                 outstanding_balance = invoice_amount - (previous_paid + receive_amount)
                 if outstanding_balance < 0:
                     logger.error(
@@ -4081,36 +3787,13 @@ def payment_receive_insert(question):
         }
 
 
-def payment_receive_summary(
-    period="all_time",
-    sector=None,
-    customer=None,
-    payment_status=None,
-    limit=10,
-):
+def payment_receive_summary(period="all_time", sector=None, limit=10):
     ensure_payment_receive_table()
     date_sql, params = _date_filter_for_column(period, "invoices.invoice_date")
     sector_sql = ""
     if sector:
         sector_sql = "AND invoices.sector = %(sector)s"
         params["sector"] = sector
-    customer_sql = ""
-    if customer:
-        customer_sql = "AND invoices.customer = %(customer)s"
-        params["customer"] = customer
-    payment_status_sql = ""
-    if payment_status == "Paid":
-        payment_status_sql = "AND COALESCE(invoices.outstanding_balance, 0) = 0"
-    elif payment_status == "Partial":
-        payment_status_sql = '''
-          AND COALESCE(invoices.received_amount, 0) > 0
-          AND COALESCE(invoices.outstanding_balance, 0) > 0
-        '''
-    elif payment_status == "Outstanding":
-        payment_status_sql = '''
-          AND COALESCE(invoices.received_amount, 0) = 0
-          AND COALESCE(invoices.outstanding_balance, 0) > 0
-        '''
 
     rows = _fetch_all(
         f'''
@@ -4118,8 +3801,8 @@ def payment_receive_summary(
           SELECT
             'Farm' AS sector,
             COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
-            f."Date" AS invoice_date,
-            COALESCE({_linked_farm_customer_expr("f")}, '') AS customer,
+            MIN(f."Date") AS invoice_date,
+            MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS customer,
             COALESCE(SUM(f."Total_Amount"), 0) AS invoice_amount,
             COALESCE(SUM(f."Total_Received"), 0) AS received_amount,
             COALESCE(SUM(f."Outstanding_Balance"), 0) AS outstanding_balance
@@ -4128,16 +3811,13 @@ def payment_receive_summary(
           WHERE COALESCE(f.__nc_deleted, false) = false
             AND f."Invoice_Number" IS NOT NULL
             AND f."Total_Amount" IS NOT NULL
-          GROUP BY
-            f."Invoice_Number"::text,
-            f."Date",
-            COALESCE({_linked_farm_customer_expr("f")}, '')
+          GROUP BY f."Invoice_Number"::text
           UNION ALL
           SELECT
             'Sote Phwar' AS sector,
             COALESCE(s."Invoice_Number"::text, '') AS voucher_number,
-            s."Invoice_Date" AS invoice_date,
-            COALESCE({_linked_customer_expr("s")}, '') AS customer,
+            MIN(s."Invoice_Date") AS invoice_date,
+            MIN(COALESCE({_linked_customer_expr("s")}, '')) AS customer,
             COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount,
             COALESCE(SUM(s."Total_Received"), 0) AS received_amount,
             COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_balance
@@ -4146,10 +3826,15 @@ def payment_receive_summary(
           WHERE COALESCE(s.__nc_deleted, false) = false
             AND s."Invoice_Number" IS NOT NULL
             AND s."Total_Amount" IS NOT NULL
-          GROUP BY
-            s."Invoice_Number"::text,
-            s."Invoice_Date",
-            COALESCE({_linked_customer_expr("s")}, '')
+          GROUP BY s."Invoice_Number"::text
+        ),
+        payments AS (
+          SELECT
+            "Sector" AS sector,
+            "Voucher_Number" AS voucher_number,
+            MAX("Receive_Date") AS last_receive_date
+          FROM {_payment_receive_table_ref()}
+          GROUP BY "Sector", "Voucher_Number"
         )
         SELECT
           invoices.sector,
@@ -4162,25 +3847,12 @@ def payment_receive_summary(
           payments.last_receive_date,
           GREATEST(CURRENT_DATE - COALESCE(invoices.invoice_date::date, CURRENT_DATE), 0) AS age_days
         FROM invoices
-        LEFT JOIN LATERAL (
-          SELECT MAX(p."Receive_Date") AS last_receive_date
-          FROM {_payment_receive_table_ref()} p
-          WHERE p."Sector" = invoices.sector
-            AND p."Voucher_Number" = invoices.voucher_number
-            AND (
-              p."Invoice_Date" = invoices.invoice_date
-              OR p."Invoice_Date" IS NULL
-            )
-            AND (
-              COALESCE(p."Customer", '') = invoices.customer
-              OR COALESCE(p."Customer", '') = ''
-            )
-        ) payments ON true
+        LEFT JOIN payments
+          ON payments.sector = invoices.sector
+         AND payments.voucher_number = invoices.voucher_number
         WHERE COALESCE(invoices.invoice_amount, 0) > 0
           {date_sql}
           {sector_sql}
-          {customer_sql}
-          {payment_status_sql}
         ORDER BY outstanding_balance DESC NULLS LAST, invoices.invoice_date NULLS LAST
         ''',
         params,
@@ -4203,8 +3875,8 @@ def payment_receive_summary(
         outstanding_receivables += outstanding
         bucket = "0-30" if age_days <= 30 else "31-60" if age_days <= 60 else "61-90" if age_days <= 90 else "90+"
         aging[bucket] += max(outstanding, 0)
-        customer_name = row.get("customer") or "-"
-        customer_balances[customer_name] = customer_balances.get(customer_name, 0) + outstanding
+        customer = row.get("customer") or "-"
+        customer_balances[customer] = customer_balances.get(customer, 0) + outstanding
         sector_name = row.get("sector") or "-"
         sector_row = sector_totals.setdefault(
             sector_name,
@@ -4230,8 +3902,6 @@ def payment_receive_summary(
         "formula": "payment_receive_summary",
         "period": period,
         "sector": sector,
-        "customer": customer,
-        "payment_status": payment_status,
         "total_invoice_amount": total_invoice_amount,
         "total_received": total_received,
         "outstanding_receivables": outstanding_receivables,

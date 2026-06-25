@@ -1,0 +1,112 @@
+BigShot Intelligence Report
+Question: KPI Management Report this year
+Generated: 2026-06-25 21:42
+
+Executive Summary
+Income 3,439,779,000 MMK, expense 1,488,343,423 MMK, net profit 1,951,435,577 MMK.
+What this means for BigShot: Outstanding receivables total 1,796,477,500 MMK; collection discipline should be monitored. Use the strongest revenue customers as a base for repeat orders, upsell, and referral growth.
+
+KPI Dashboard
+| KPI | Current | Previous | Change % | Trend |
+| --- | ------- | -------- | -------- | ----- |
+| Revenue | 3,439,779,000 MMK | 52,464,000 MMK | 6456.5% | Up |
+| Expenses | 1,488,343,423 MMK | - | - | Monitor |
+| Net Profit | 1,951,435,577 MMK | 0 MMK | - | No baseline |
+| Profit Margin % | 56.73% | - | - | Monitor |
+| Revenue Growth % | 6456.5% | - | - | Up |
+| Profit Growth % | - | - | - | No baseline |
+| Outstanding Receivables | 1,796,477,500 MMK | - | - | Collection risk |
+| Inventory Value | 0 MMK | - | - | Cost data needed |
+| Cash Position | 154,958,077 MMK | - | - | Stable |
+| Loan Balance | - | - | - | Not available |
+Inventory quantity signal: 23,778 units.
+
+Key Findings
+- Income 3,439,779,000 MMK, expense 1,488,343,423 MMK, net profit 1,951,435,577 MMK.
+- Revenue is 3,439,779,000 MMK; collected 1,643,301,500 MMK; outstanding 1,796,477,500 MMK.
+- Expense is 1,488,343,423 MMK across 890 rows.
+- Net cash flow is 154,958,077 MMK, with inflow 1,643,301,500 MMK and outflow 1,488,343,423 MMK.
+- Top revenue contributor is Mya Yadanar at 292,300,000 MMK.
+- Top expense is 3% Loan at 100,000,000 MMK.
+
+Revenue Analysis
+Revenue: 3,439,779,000 MMK; collected 1,643,301,500 MMK; outstanding 1,796,477,500 MMK.
+Revenue comparison: current 3,439,779,000 MMK vs previous 52,464,000 MMK; growth 6456.5%; trend Up.
+- Mya Yadanar: 292,300,000 MMK (17.8% of shown total)
+- Ma Shwe War: 217,030,000 MMK (13.2% of shown total)
+- Pwint Aung Kyaw MDY: 183,970,000 MMK (11.2% of shown total)
+- Chit Oo Ko Ko: 158,030,000 MMK (9.6% of shown total)
+- Pwint Aung Kyaw POL: 151,200,000 MMK (9.2% of shown total)
+Key revenue driver interpretation: prioritize contributors with the highest share and check whether growth is repeatable or one-time.
+
+Expense Analysis
+Expenses: 1,488,343,423 MMK across 890 rows.
+- 3% Loan: 100,000,000 MMK (26.6% of shown total)
+- 5000 L  tank  500pcs: 79,000,000 MMK (21.0% of shown total)
+- Electrical work ၊ Iron frame ၊ Gear pump ၊Motor ၊Speed reducer: 59,680,000 MMK (15.9% of shown total)
+- For  Extension Staff: 21,550,000 MMK (5.7% of shown total)
+- အမည်ပြောင်းဝယ်ခွန်ဆောင်: 21,000,000 MMK (5.6% of shown total)
+Cost-driver interpretation: management attention should start with the largest categories and any category that increased above 10%.
+Potential Data Quality Issue Detected: categories falling to zero or missing categories require source review when they conflict with normal operations.
+
+Profitability Analysis
+- Revenue 3,439,779,000 MMK, expenses 1,488,343,423 MMK, net profit 1,951,435,577 MMK, profit margin 56.73%.
+- Profitability is sustainable; management should protect margin before pursuing revenue growth that requires heavy spending.
+
+Customer Analysis
+- Mya Yadanar: 292,300,000 MMK (17.8% of shown total)
+- Ma Shwe War: 217,030,000 MMK (13.2% of shown total)
+- Pwint Aung Kyaw MDY: 183,970,000 MMK (11.2% of shown total)
+- Chit Oo Ko Ko: 158,030,000 MMK (9.6% of shown total)
+- Pwint Aung Kyaw POL: 151,200,000 MMK (9.2% of shown total)
+Collection risk: outstanding receivables are 1,796,477,500 MMK and should be followed up by customer priority.
+
+Inventory Analysis
+| Product | Region | Quantity | Reorder Level | Status |
+| ------- | ------ | -------- | ------------- | ------ |
+| Sote Phwar 1L | Heho Store (Home) | 6,800 | 10 | Available |
+| Sote Phwar 4L | Heho Store (Home) | 200 | 10 | Available |
+| Sote Phwar 500 mL | Heho Store (Home) | 460 | 10 | Available |
+| Sote Phwar 1L | Min Hla Store | 5,000 | 10 | Available |
+| Sote Phwar 4L | Min Hla Store | 80 | 10 | Available |
+| Sote Phwar 500 mL | Min Hla Store | 1,000 | 10 | Available |
+| Sote Phwar 1L | Naung Tayar | 3,000 | 10 | Available |
+| Sote Phwar 1L | Tatkone Store | 4,985 | 10 | Available |
+| Sote Phwar 4L | Tatkone Store | 493 | 10 | Available |
+| Sote Phwar 500 mL | Tatkone Store | 1,760 | 10 | Available |
+
+Business Growth Analysis
+- Revenue growth rate = (current 3,439,779,000 MMK - previous 52,464,000 MMK) / previous x 100 = 6456.5%.
+- Growth classification: Growing.
+
+Trend Analysis
+- The largest listed customer contributes 17.8% of the shown revenue, which is useful for growth but can create concentration risk.
+- Expense control should start with the highest-value rows because they have the largest immediate cash impact.
+- Revenue is ahead of the previous period. The next review should confirm whether growth came from repeatable customers or one-time transactions.
+
+Risk Analysis / Risks & Concerns
+- Outstanding receivables total 1,796,477,500 MMK; collection discipline should be monitored.
+- Revenue changed by 6456.5%, above the 10% management review threshold.
+
+Opportunities
+- Use the strongest revenue customers as a base for repeat orders, upsell, and referral growth.
+- Target high-value recurring cost categories for budget control and procurement review.
+- Improve cash conversion by prioritizing collection timing and payment-method visibility.
+- Improve inventory turnover by linking stock movement to customer demand and product margins.
+
+Recommendations
+- Immediate Actions: Monitor customer concentration and build secondary revenue sources where one customer dominates sales.
+- Short-Term Actions: Review the largest expense categories first and set approval thresholds for repeated spending.
+- Strategic Actions: Separate collection timing from profitability and follow up on delayed inflows before adding new cash commitments.
+
+Management Conclusion
+- Business strength: Outstanding receivables total 1,796,477,500 MMK; collection discipline should be monitored.
+- Top 3 management priorities: cash discipline, profit margin protection, and revenue quality.
+- CEO focus next: Monitor customer concentration and build secondary revenue sources where one customer dominates sales.
+- What does this mean for BigShot and what should management do next? Management should focus first on cash and profit protection, then scale the revenue drivers that are supported by repeatable customer demand.
+
+Supporting Data
+- Income 3,439,779,000 MMK, expense 1,488,343,423 MMK, net profit 1,951,435,577 MMK.
+- Revenue is 3,439,779,000 MMK; collected 1,643,301,500 MMK; outstanding 1,796,477,500 MMK.
+- Expense is 1,488,343,423 MMK across 890 rows.
+- Net cash flow is 154,958,077 MMK, with inflow 1,643,301,500 MMK and outflow 1,488,343,423 MMK.

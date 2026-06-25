@@ -1,0 +1,36 @@
+version: '3.9'
+
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: always
+
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: strongpassword
+      POSTGRES_DB: automationdb
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  nocodb:
+    image: nocodb/nocodb:latest
+    container_name: nocodb
+    restart: always
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      NC_DB: "pg://postgres:5432?u=admin&p=strongpassword&d=automationdb"
+
+    depends_on:
+      - postgres
+
+    volumes:
+      - ./nocodb-data:/usr/app/data

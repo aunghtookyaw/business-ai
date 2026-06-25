@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>BigShot Business Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="prototype-banner">
+    BigShot Business Dashboard · Read-only · Canonical Business Intelligence data
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#executive" aria-label="BigShot Dashboard home">
+        <span class="brand-mark">B</span>
+        <span>
+          <strong>BIGSHOT</strong>
+          <small>Business Intelligence</small>
+        </span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Dashboard pages">
+        <button class="nav-item active" data-page="executive">
+          <span class="nav-icon">⌂</span><span>Executive</span>
+        </button>
+        <button class="nav-item" data-page="payments">
+          <span class="nav-icon">₭</span><span>Payments</span>
+        </button>
+        <button class="nav-item" data-page="inventory">
+          <span class="nav-icon">□</span><span>Inventory</span>
+        </button>
+        <button class="nav-item" data-page="customers">
+          <span class="nav-icon">◎</span><span>Customers</span>
+        </button>
+        <button class="nav-item" data-page="farm">
+          <span class="nav-icon">♧</span><span>Farm</span>
+        </button>
+        <button class="nav-item" data-page="sote-phwar">
+          <span class="nav-icon">◇</span><span>Sote Phwar</span>
+        </button>
+        <button class="nav-item" data-page="financial">
+          <span class="nav-icon">▥</span><span>Financial</span>
+        </button>
+        <button class="nav-item" data-page="insights">
+          <span class="nav-icon">✦</span><span>AI Insights</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="system-status">
+          <span class="status-dot"></span>
+          <span><strong>Systems connected</strong><small>Read-only BI API</small></span>
+        </div>
+        <div class="user-card">
+          <span class="avatar">BS</span>
+          <span><strong>Management</strong><small>Executive View</small></span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="mobile-header">
+        <button class="icon-button" id="menuButton" aria-label="Open navigation">☰</button>
+        <strong>BIGSHOT</strong>
+        <button class="icon-button theme-toggle" aria-label="Toggle theme">◐</button>
+      </header>
+
+      <section class="topbar">
+        <div class="page-heading">
+          <p class="eyebrow">MANAGEMENT OVERVIEW</p>
+          <h1 id="pageTitle">Executive Dashboard</h1>
+          <p id="pageSubtitle">A thirty-second view of performance, cash and operational risk.</p>
+        </div>
+        <div class="top-actions">
+          <button class="button secondary" id="exportPdf">Export PDF</button>
+          <button class="button secondary" id="exportExcel">Export Excel</button>
+          <button class="button primary" id="saveView">Save View</button>
+          <button class="icon-button theme-toggle" aria-label="Toggle theme">◐</button>
+        </div>
+      </section>
+
+      <section class="filter-bar" aria-label="Global dashboard filters">
+        <div class="filter-group period-filter">
+          <button class="period-chip active" data-period-type="year">Year</button>
+          <button class="period-chip" data-period-type="month">Month</button>
+          <button class="period-chip" data-period-type="week">Week</button>
+          <button class="period-chip" data-period-type="range">Range</button>
+        </div>
+        <label>
+          <span>Period</span>
+          <select id="yearFilter"></select>
+        </label>
+        <label>
+          <span>Sector</span>
+          <select id="sectorFilter"><option value="">All sectors</option></select>
+        </label>
+        <label>
+          <span>Business unit</span>
+          <select id="businessUnitFilter"><option value="">All units</option></select>
+        </label>
+        <button class="button filter-more" id="moreFilters">More filters <span>＋</span></button>
+        <button class="button refresh" id="refreshDashboard">↻ Refresh</button>
+      </section>
+
+      <section class="expanded-filters" id="expandedFilters">
+        <label class="period-detail month-control"><span>Month</span><input id="monthFilter" type="month"></label>
+        <label class="period-detail week-control"><span>Week</span><input id="weekFilter" type="week"></label>
+        <label class="period-detail range-control"><span>Range start</span><input id="rangeStart" type="date"></label>
+        <label class="period-detail range-control"><span>Range end</span><input id="rangeEnd" type="date"></label>
+        <label><span>Customer</span><select id="customerFilter"><option value="">All customers</option></select></label>
+        <label><span>Category</span><select id="categoryFilter"><option value="">All categories</option></select></label>
+        <label><span>Location</span><select id="locationFilter"><option value="">All locations</option></select></label>
+        <label><span>Product</span><select id="productFilter"><option value="">All products</option></select></label>
+        <label><span>Payment status</span><select id="paymentStatusFilter"><option value="">All statuses</option></select></label>
+      </section>
+
+      <section id="dashboardContent" class="dashboard-content"></section>
+
+      <footer class="page-footer">
+        <span>BigShot Business Dashboard v1.0 — Milestone 1</span>
+        <span>Presentation layer only · BI engine remains the source of truth</span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <template id="executiveTemplate">
+    <div class="metric-grid">
+      <article class="metric-card featured">
+        <div class="metric-label"><span>Revenue</span><span class="metric-icon">↗</span></div>
+        <strong id="metricRevenue">—</strong><small>MMK</small>
+        <p class="positive"><span id="metricPeriodLabel">Loading canonical BI data…</span></p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label"><span>Expenses</span><span class="metric-icon">↘</span></div>
+        <strong id="metricExpenses">—</strong><small>MMK</small>
+        <p class="neutral"><span>Canonical expense total</span></p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label"><span>Net Profit</span><span class="metric-icon">◎</span></div>
+        <strong id="metricProfit">—</strong><small>MMK</small>
+        <p class="positive"><span id="metricMargin">— profit margin</span></p>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label"><span>Cash Received</span><span class="metric-icon">₭</span></div>
+        <strong id="metricCash">—</strong><small>MMK</small>
+        <p class="neutral"><span>Canonical cash inflow</span></p>
+      </article>
+      <article class="metric-card alert">
+        <div class="metric-label"><span>Outstanding</span><span class="metric-icon">!</span></div>
+        <strong id="metricOutstanding">—</strong><small>MMK</small>
+        <p class="negative">Collection focus <span>required</span></p>
+      </article>
+      <article class="metric-card unavailable">
+        <div class="metric-label"><span>Inventory Value</span><span class="metric-icon">□</span></div>
+        <strong id="metricInventoryValue">—</strong><small>Unit cost required</small>
+        <p class="neutral"><span>Unavailable until BI cost data exists</span></p>
+      </article>
+    </div>
+
+    <div class="executive-grid">
+      <article class="panel chart-panel span-8">
+        <div class="panel-header">
+          <div><p class="eyebrow">PERFORMANCE</p><h2>Revenue, expense & profit trend</h2></div>
+          <div class="legend"><span class="revenue-dot">Revenue</span><span class="expense-dot">Expenses</span><span class="profit-dot">Profit</span></div>
+        </div>
+        <div class="chart-shell line-chart">
+          <div class="y-labels" id="trendYLabels"><span>—</span><span>—</span><span>—</span><span>0</span></div>
+          <svg viewBox="0 0 820 260" preserveAspectRatio="none" aria-label="Representative financial trend chart">
+            <g class="grid-lines"><line x1="0" y1="40" x2="820" y2="40"/><line x1="0" y1="110" x2="820" y2="110"/><line x1="0" y1="180" x2="820" y2="180"/><line x1="0" y1="250" x2="820" y2="250"/></g>
+            <path class="area revenue-area" id="revenueArea" d=""/>
+            <path class="line revenue-line" id="revenueLine" d=""/>
+            <path class="line expense-line" id="expenseLine" d=""/>
+            <path class="line profit-line" id="profitLine" d=""/>
+          </svg>
+          <div class="x-labels" id="trendLabels"></div>
+        </div>
+      </article>
+
+      <article class="panel insight-panel span-4">
+        <div class="panel-header">
+          <div><p class="eyebrow">QWEN NARRATIVE</p><h2>Executive brief</h2></div>
+          <span class="ai-badge">✦ AI</span>
+        </div>
+        <div class="insight-body">
+          <div class="insight-lead" id="insightLead">
+            <span class="insight-status"></span>
+            <p>Loading Qwen executive narrative from validated BI evidence…</p>
+          </div>
+          <div id="insightSections"></div>
+        </div>
+        <button class="text-button nav-link" data-page="insights">Open full AI insights →</button>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-header"><div><p class="eyebrow">CASH</p><h2>Cash flow position</h2></div><span class="panel-kpi negative" id="cashNet">—</span></div>
+        <div class="bar-comparison">
+          <div><span>Inflow</span><strong id="cashInflow">—</strong><i id="cashInflowBar" style="--value: 0%"></i></div>
+          <div><span>Outflow</span><strong id="cashOutflow">—</strong><i id="cashOutflowBar" class="outflow" style="--value: 0%"></i></div>
+        </div>
+        <svg class="sparkline" id="cashTrend" viewBox="0 0 320 55" preserveAspectRatio="none" aria-label="Cash flow trend"></svg>
+        <p class="panel-note warning-note">Accounting profit is positive while net cash flow is negative.</p>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-header"><div><p class="eyebrow">COLLECTIONS</p><h2>Receivable status</h2></div><span class="panel-kpi" id="collectionRate">—</span></div>
+        <div class="donut-wrap">
+          <div class="donut" id="collectionDonut"><span><strong id="collectionDonutValue">—</strong><small>collected</small></span></div>
+          <div class="donut-legend">
+            <p><i class="paid"></i><span>Received</span><strong id="collectionReceived">—</strong></p>
+            <p><i class="due"></i><span>Outstanding</span><strong id="collectionOutstanding">—</strong></p>
+          </div>
+        </div>
+        <svg class="sparkline" id="outstandingTrend" viewBox="0 0 320 55" preserveAspectRatio="none" aria-label="Outstanding trend"></svg>
+      </article>
+
+      <article class="panel span-4">
+        <div class="panel-header"><div><p class="eyebrow">INVENTORY</p><h2>Stock by location</h2></div><button class="kebab">•••</button></div>
+        <div class="location-list" id="inventoryLocations"></div>
+      </article>
+
+      <article class="panel table-panel span-7">
+        <div class="panel-header"><div><p class="eyebrow">CUSTOMERS</p><h2>Top customers</h2></div><button class="text-button nav-link" data-page="customers">View customer dashboard →</button></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Customer</th><th>Revenue</th><th>Received</th><th>Outstanding</th><th>Invoices</th></tr></thead>
+            <tbody id="topCustomersBody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-header"><div><p class="eyebrow">EXPENSE CONTROL</p><h2>Top expense categories</h2></div><span class="panel-kpi" id="expenseTotalPanel">—</span></div>
+        <div class="rank-list" id="expenseCategories"></div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-header"><div><p class="eyebrow">PRODUCTS</p><h2>Top products</h2></div><span class="api-chip">BI ranked</span></div>
+        <div class="rank-list" id="topProducts"></div>
+      </article>
+
+      <article class="panel table-panel span-7">
+        <div class="panel-header"><div><p class="eyebrow">PAYMENTS</p><h2>Recent payments</h2></div><span class="api-chip">Read only</span></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Date</th><th>Customer</th><th>Voucher</th><th>Amount</th><th>Status</th></tr></thead>
+            <tbody id="recentPaymentsBody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel table-panel span-12">
+        <div class="panel-header"><div><p class="eyebrow">ACTIVITY</p><h2>Recent transactions</h2></div><span class="api-chip">Canonical ledger</span></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Date</th><th>Type</th><th>Sector</th><th>Category</th><th>Item</th><th>Amount</th></tr></thead>
+            <tbody id="recentTransactionsBody"></tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </template>
+
+  <template id="moduleTemplate">
+    <div class="module-hero">
+      <div>
+        <p class="eyebrow" id="moduleEyebrow">DOMAIN DASHBOARD</p>
+        <h2 id="moduleHeadline">Page blueprint</h2>
+        <p id="moduleDescription"></p>
+      </div>
+      <span class="wireframe-badge">Phase 1 wireframe</span>
+    </div>
+    <div class="module-kpis" id="moduleKpis"></div>
+    <div class="module-layout">
+      <article class="panel blueprint span-8">
+        <div class="panel-header"><div><p class="eyebrow">PRIMARY ANALYSIS</p><h2 id="primaryChartTitle">Trend analysis</h2></div><span class="api-chip">BI API</span></div>
+        <div class="wire-chart">
+          <span class="wire-y y1"></span><span class="wire-y y2"></span><span class="wire-y y3"></span>
+          <svg viewBox="0 0 820 220" preserveAspectRatio="none"><path d="M0,180 C100,130 160,160 235,105 S390,145 470,82 S650,120 820,45"/></svg>
+        </div>
+      </article>
+      <article class="panel blueprint span-4">
+        <div class="panel-header"><div><p class="eyebrow">BREAKDOWN</p><h2 id="breakdownTitle">Status distribution</h2></div><span class="api-chip">BI API</span></div>
+        <div class="wire-donut"><span></span></div>
+        <div class="wire-lines"><i></i><i></i><i></i></div>
+      </article>
+      <article class="panel blueprint span-7">
+        <div class="panel-header"><div><p class="eyebrow">DETAIL</p><h2 id="tableTitle">Management table</h2></div><span class="api-chip">BI API</span></div>
+        <div class="wire-table">
+          <b></b><i></i><i></i><i></i><i></i><i></i>
+        </div>
+      </article>
+      <article class="panel blueprint span-5">
+        <div class="panel-header"><div><p class="eyebrow">MANAGEMENT SIGNALS</p><h2>Risks & actions</h2></div><span class="ai-badge">✦ Qwen</span></div>
+        <div class="wire-insights">
+          <p><span class="risk-marker"></span><i></i></p>
+          <p><span class="opportunity-marker"></span><i></i></p>
+          <p><span class="action-marker"></span><i></i></p>
+        </div>
+        <p class="panel-note">Narrative only. Metrics remain sourced from deterministic BI outputs.</p>
+      </article>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

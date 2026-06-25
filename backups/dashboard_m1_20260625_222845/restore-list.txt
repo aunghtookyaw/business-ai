@@ -1,0 +1,879 @@
+;
+; Archive created at 2026-06-25 15:58:45 UTC
+;     dbname: automationdb
+;     TOC Entries: 868
+;     Compression: gzip
+;     Dump Version: 1.15-0
+;     Format: CUSTOM
+;     Integer: 4 bytes
+;     Offset: 8 bytes
+;     Dumped from database version: 16.14 (Debian 16.14-1.pgdg13+1)
+;     Dumped by pg_dump version: 16.14 (Debian 16.14-1.pgdg13+1)
+;
+;
+; Selected TOC Entries:
+;
+6; 2615 18011 SCHEMA - pipkgfu2wr9qxyy admin
+365; 1255 18045 FUNCTION public to_date_time_safe(text, text) admin
+344; 1259 18013 TABLE pipkgfu2wr9qxyy Sotephwar_Transection admin
+343; 1259 18012 SEQUENCE pipkgfu2wr9qxyy Features_id_seq admin
+5196; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy Features_id_seq admin
+350; 1259 24586 TABLE pipkgfu2wr9qxyy Financial_Obligations admin
+361; 1259 90168 TABLE pipkgfu2wr9qxyy fixed_assests admin
+360; 1259 90167 SEQUENCE pipkgfu2wr9qxyy Fixed assests_id_seq admin
+5197; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy Fixed assests_id_seq admin
+346; 1259 18024 TABLE pipkgfu2wr9qxyy Transection admin
+345; 1259 18023 SEQUENCE pipkgfu2wr9qxyy My test data_id_seq admin
+5198; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy My test data_id_seq admin
+363; 1259 106555 TABLE pipkgfu2wr9qxyy Payment_Receive admin
+362; 1259 106554 SEQUENCE pipkgfu2wr9qxyy Payment_Receive_id_seq admin
+5199; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy Payment_Receive_id_seq admin
+352; 1259 24597 TABLE pipkgfu2wr9qxyy Sotephwar_Inventory admin
+348; 1259 18035 TABLE pipkgfu2wr9qxyy farm_transection admin
+347; 1259 18034 SEQUENCE pipkgfu2wr9qxyy Transactions_id_seq admin
+5200; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy Transactions_id_seq admin
+358; 1259 65623 TABLE pipkgfu2wr9qxyy _nc_m2m_Sotephwar_Trans_customer_master admin
+357; 1259 65616 TABLE pipkgfu2wr9qxyy _nc_m2m_Transection_category_master admin
+359; 1259 73784 TABLE pipkgfu2wr9qxyy _nc_m2m_farm_transectio_customer_master admin
+354; 1259 65593 TABLE pipkgfu2wr9qxyy category_master admin
+353; 1259 65592 SEQUENCE pipkgfu2wr9qxyy category_master_id_seq admin
+5201; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy category_master_id_seq admin
+356; 1259 65604 TABLE pipkgfu2wr9qxyy customer_master admin
+355; 1259 65603 SEQUENCE pipkgfu2wr9qxyy customer_master_id_seq admin
+5202; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy customer_master_id_seq admin
+349; 1259 24585 SEQUENCE pipkgfu2wr9qxyy fixed_cost_loan_and_settlement_id_seq admin
+5203; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy fixed_cost_loan_and_settlement_id_seq admin
+351; 1259 24596 SEQUENCE pipkgfu2wr9qxyy sote_phwar_invoice_id_seq admin
+5204; 0 0 SEQUENCE OWNED BY pipkgfu2wr9qxyy sote_phwar_invoice_id_seq admin
+364; 1259 114751 TABLE pipkgfu2wr9qxyy sotephwar_status_backup_20260621 admin
+332; 1259 17820 TABLE public nc_api_token_scopes admin
+223; 1259 16400 TABLE public nc_api_tokens admin
+222; 1259 16399 SEQUENCE public nc_api_tokens_id_seq admin
+5205; 0 0 SEQUENCE OWNED BY public nc_api_tokens_id_seq admin
+224; 1259 16409 TABLE public nc_audit_v2 admin
+307; 1259 17434 TABLE public nc_automation_executions admin
+314; 1259 17571 TABLE public nc_automation_subscribers admin
+310; 1259 17473 TABLE public nc_automations admin
+225; 1259 16423 TABLE public nc_base_users_v2 admin
+337; 1259 17914 TABLE public nc_base_variables admin
+226; 1259 16432 TABLE public nc_bases_v2 admin
+339; 1259 17950 TABLE public nc_bookmark_groups admin
+340; 1259 17961 TABLE public nc_bookmarks admin
+227; 1259 16444 TABLE public nc_calendar_view_columns_v2 admin
+228; 1259 16451 TABLE public nc_calendar_view_range_v2 admin
+229; 1259 16458 TABLE public nc_calendar_view_v2 admin
+328; 1259 17757 TABLE public nc_chat_messages admin
+327; 1259 17744 TABLE public nc_chat_sessions admin
+230; 1259 16465 TABLE public nc_col_barcode_v2 admin
+231; 1259 16472 TABLE public nc_col_button_v2 admin
+232; 1259 16481 TABLE public nc_col_formula_v2 admin
+233; 1259 16490 TABLE public nc_col_long_text_v2 admin
+234; 1259 16499 TABLE public nc_col_lookup_v2 admin
+235; 1259 16506 TABLE public nc_col_qrcode_v2 admin
+236; 1259 16513 TABLE public nc_col_relations_v2 admin
+237; 1259 16522 TABLE public nc_col_rollup_v2 admin
+238; 1259 16529 TABLE public nc_col_select_options_v2 admin
+239; 1259 16538 TABLE public nc_columns_v2 admin
+240; 1259 16549 TABLE public nc_comment_reactions admin
+241; 1259 16558 TABLE public nc_comments admin
+242; 1259 16567 TABLE public nc_custom_urls_v2 admin
+243; 1259 16576 TABLE public nc_dashboards_v2 admin
+245; 1259 16595 TABLE public nc_data_reflection admin
+331; 1259 17803 TABLE public nc_date_dependency_v2 admin
+246; 1259 16604 TABLE public nc_db_servers admin
+308; 1259 17446 TABLE public nc_dependency_tracker admin
+247; 1259 16615 TABLE public nc_disabled_models_for_role_v2 admin
+330; 1259 17783 TABLE public nc_doc_content_v2 admin
+329; 1259 17769 TABLE public nc_docs_v2 admin
+248; 1259 16623 TABLE public nc_extensions admin
+249; 1259 16632 TABLE public nc_file_references admin
+250; 1259 16643 TABLE public nc_filter_exp_v2 admin
+251; 1259 16652 TABLE public nc_follower admin
+252; 1259 16659 TABLE public nc_form_view_columns_v2 admin
+253; 1259 16668 TABLE public nc_form_view_v2 admin
+254; 1259 16677 TABLE public nc_gallery_view_columns_v2 admin
+255; 1259 16686 TABLE public nc_gallery_view_v2 admin
+334; 1259 17847 TABLE public nc_gcp_marketplace_accounts admin
+335; 1259 17861 TABLE public nc_gcp_marketplace_entitlements admin
+256; 1259 16695 TABLE public nc_grid_view_columns_v2 admin
+257; 1259 16706 TABLE public nc_grid_view_v2 admin
+258; 1259 16715 TABLE public nc_hook_logs_v2 admin
+259; 1259 16725 TABLE public nc_hook_trigger_fields admin
+260; 1259 16732 TABLE public nc_hooks_v2 admin
+309; 1259 17460 TABLE public nc_installations admin
+333; 1259 17833 TABLE public nc_integration_links_v2 admin
+261; 1259 16750 TABLE public nc_integrations_store_v2 admin
+262; 1259 16759 TABLE public nc_integrations_v2 admin
+263; 1259 16773 TABLE public nc_jobs admin
+264; 1259 16782 TABLE public nc_kanban_view_columns_v2 admin
+265; 1259 16791 TABLE public nc_kanban_view_v2 admin
+321; 1259 17671 TABLE public nc_list_view_columns_v2 admin
+322; 1259 17680 TABLE public nc_list_view_levels_v2 admin
+320; 1259 17662 TABLE public nc_list_view_v2 admin
+341; 1259 17979 TABLE public nc_mail_sends admin
+313; 1259 17541 TABLE public nc_managed_app_deployment_logs admin
+312; 1259 17517 TABLE public nc_managed_app_versions admin
+311; 1259 17497 TABLE public nc_managed_apps admin
+266; 1259 16800 TABLE public nc_map_view_columns_v2 admin
+267; 1259 16809 TABLE public nc_map_view_v2 admin
+268; 1259 16816 TABLE public nc_mcp_tokens admin
+269; 1259 16825 TABLE public nc_model_stats_v2 admin
+270; 1259 16834 TABLE public nc_models_v2 admin
+272; 1259 16856 TABLE public nc_oauth_authorization_codes admin
+271; 1259 16847 TABLE public nc_oauth_clients admin
+273; 1259 16867 TABLE public nc_oauth_tokens admin
+342; 1259 17994 TABLE public nc_operation_logs admin
+274; 1259 16877 TABLE public nc_org admin
+275; 1259 16888 TABLE public nc_org_domain admin
+276; 1259 16898 TABLE public nc_org_users admin
+278; 1259 16916 TABLE public nc_permission_subjects admin
+277; 1259 16905 TABLE public nc_permissions admin
+300; 1259 17123 TABLE public nc_plans admin
+279; 1259 16925 TABLE public nc_plugins_v2 admin
+305; 1259 17403 TABLE public nc_principal_assignments admin
+317; 1259 17624 TABLE public nc_record_templates admin
+318; 1259 17638 TABLE public nc_rls_policies admin
+319; 1259 17651 TABLE public nc_rls_policy_subjects admin
+301; 1259 17133 TABLE public nc_row_color_conditions admin
+338; 1259 17930 TABLE public nc_sandbox_changelog admin
+315; 1259 17585 TABLE public nc_sandboxes_v2 admin
+316; 1259 17607 TABLE public nc_scim_config admin
+280; 1259 16936 TABLE public nc_scripts admin
+281; 1259 16945 TABLE public nc_snapshots admin
+282; 1259 16954 TABLE public nc_sort_v2 admin
+283; 1259 16962 TABLE public nc_sources_v2 admin
+284; 1259 16977 TABLE public nc_sql_executor_v2 admin
+285; 1259 16984 TABLE public nc_sso_client admin
+286; 1259 16995 TABLE public nc_sso_client_domain admin
+288; 1259 17004 TABLE public nc_store admin
+287; 1259 17003 SEQUENCE public nc_store_id_seq admin
+5206; 0 0 SEQUENCE OWNED BY public nc_store_id_seq admin
+302; 1259 17140 TABLE public nc_subscriptions admin
+289; 1259 17013 TABLE public nc_sync_configs admin
+290; 1259 17023 TABLE public nc_sync_logs_v2 admin
+291; 1259 17032 TABLE public nc_sync_mappings admin
+292; 1259 17039 TABLE public nc_sync_source_v2 admin
+304; 1259 17390 TABLE public nc_teams admin
+325; 1259 17722 TABLE public nc_timeline_view_columns_v2 admin
+326; 1259 17732 TABLE public nc_timeline_view_range_v2 admin
+324; 1259 17711 TABLE public nc_timeline_view_v2 admin
+336; 1259 17901 TABLE public nc_trash admin
+303; 1259 17150 TABLE public nc_usage_stats admin
+293; 1259 17049 TABLE public nc_user_comment_notifications_preference admin
+294; 1259 17058 TABLE public nc_user_refresh_tokens admin
+295; 1259 17065 TABLE public nc_users_v2 admin
+323; 1259 17699 TABLE public nc_view_sections admin
+296; 1259 17077 TABLE public nc_views_v2 admin
+244; 1259 16586 TABLE public nc_widgets_v2 admin
+306; 1259 17422 TABLE public nc_workflows admin
+297; 1259 17087 TABLE public notification admin
+298; 1259 17098 TABLE public workspace admin
+299; 1259 17112 TABLE public workspace_user admin
+219; 1259 16386 TABLE public xc_knex_migrationsv0 admin
+218; 1259 16385 SEQUENCE public xc_knex_migrationsv0_id_seq admin
+5207; 0 0 SEQUENCE OWNED BY public xc_knex_migrationsv0_id_seq admin
+221; 1259 16393 TABLE public xc_knex_migrationsv0_lock admin
+220; 1259 16392 SEQUENCE public xc_knex_migrationsv0_lock_index_seq admin
+5208; 0 0 SEQUENCE OWNED BY public xc_knex_migrationsv0_lock_index_seq admin
+4199; 2604 24589 DEFAULT pipkgfu2wr9qxyy Financial_Obligations id admin
+4207; 2604 106558 DEFAULT pipkgfu2wr9qxyy Payment_Receive id admin
+4200; 2604 24600 DEFAULT pipkgfu2wr9qxyy Sotephwar_Inventory id admin
+4189; 2604 18016 DEFAULT pipkgfu2wr9qxyy Sotephwar_Transection id admin
+4193; 2604 18027 DEFAULT pipkgfu2wr9qxyy Transection id admin
+4201; 2604 65596 DEFAULT pipkgfu2wr9qxyy category_master id admin
+4203; 2604 65607 DEFAULT pipkgfu2wr9qxyy customer_master id admin
+4194; 2604 18038 DEFAULT pipkgfu2wr9qxyy farm_transection id admin
+4205; 2604 90171 DEFAULT pipkgfu2wr9qxyy fixed_assests id admin
+3817; 2604 16403 DEFAULT public nc_api_tokens id admin
+4007; 2604 17007 DEFAULT public nc_store id admin
+3815; 2604 16389 DEFAULT public xc_knex_migrationsv0 id admin
+3816; 2604 16396 DEFAULT public xc_knex_migrationsv0_lock index admin
+5175; 0 24586 TABLE DATA pipkgfu2wr9qxyy Financial_Obligations admin
+5188; 0 106555 TABLE DATA pipkgfu2wr9qxyy Payment_Receive admin
+5177; 0 24597 TABLE DATA pipkgfu2wr9qxyy Sotephwar_Inventory admin
+5169; 0 18013 TABLE DATA pipkgfu2wr9qxyy Sotephwar_Transection admin
+5171; 0 18024 TABLE DATA pipkgfu2wr9qxyy Transection admin
+5183; 0 65623 TABLE DATA pipkgfu2wr9qxyy _nc_m2m_Sotephwar_Trans_customer_master admin
+5182; 0 65616 TABLE DATA pipkgfu2wr9qxyy _nc_m2m_Transection_category_master admin
+5184; 0 73784 TABLE DATA pipkgfu2wr9qxyy _nc_m2m_farm_transectio_customer_master admin
+5179; 0 65593 TABLE DATA pipkgfu2wr9qxyy category_master admin
+5181; 0 65604 TABLE DATA pipkgfu2wr9qxyy customer_master admin
+5173; 0 18035 TABLE DATA pipkgfu2wr9qxyy farm_transection admin
+5186; 0 90168 TABLE DATA pipkgfu2wr9qxyy fixed_assests admin
+5189; 0 114751 TABLE DATA pipkgfu2wr9qxyy sotephwar_status_backup_20260621 admin
+5157; 0 17820 TABLE DATA public nc_api_token_scopes admin
+5048; 0 16400 TABLE DATA public nc_api_tokens admin
+5049; 0 16409 TABLE DATA public nc_audit_v2 admin
+5132; 0 17434 TABLE DATA public nc_automation_executions admin
+5139; 0 17571 TABLE DATA public nc_automation_subscribers admin
+5135; 0 17473 TABLE DATA public nc_automations admin
+5050; 0 16423 TABLE DATA public nc_base_users_v2 admin
+5162; 0 17914 TABLE DATA public nc_base_variables admin
+5051; 0 16432 TABLE DATA public nc_bases_v2 admin
+5164; 0 17950 TABLE DATA public nc_bookmark_groups admin
+5165; 0 17961 TABLE DATA public nc_bookmarks admin
+5052; 0 16444 TABLE DATA public nc_calendar_view_columns_v2 admin
+5053; 0 16451 TABLE DATA public nc_calendar_view_range_v2 admin
+5054; 0 16458 TABLE DATA public nc_calendar_view_v2 admin
+5153; 0 17757 TABLE DATA public nc_chat_messages admin
+5152; 0 17744 TABLE DATA public nc_chat_sessions admin
+5055; 0 16465 TABLE DATA public nc_col_barcode_v2 admin
+5056; 0 16472 TABLE DATA public nc_col_button_v2 admin
+5057; 0 16481 TABLE DATA public nc_col_formula_v2 admin
+5058; 0 16490 TABLE DATA public nc_col_long_text_v2 admin
+5059; 0 16499 TABLE DATA public nc_col_lookup_v2 admin
+5060; 0 16506 TABLE DATA public nc_col_qrcode_v2 admin
+5061; 0 16513 TABLE DATA public nc_col_relations_v2 admin
+5062; 0 16522 TABLE DATA public nc_col_rollup_v2 admin
+5063; 0 16529 TABLE DATA public nc_col_select_options_v2 admin
+5064; 0 16538 TABLE DATA public nc_columns_v2 admin
+5065; 0 16549 TABLE DATA public nc_comment_reactions admin
+5066; 0 16558 TABLE DATA public nc_comments admin
+5067; 0 16567 TABLE DATA public nc_custom_urls_v2 admin
+5068; 0 16576 TABLE DATA public nc_dashboards_v2 admin
+5070; 0 16595 TABLE DATA public nc_data_reflection admin
+5156; 0 17803 TABLE DATA public nc_date_dependency_v2 admin
+5071; 0 16604 TABLE DATA public nc_db_servers admin
+5133; 0 17446 TABLE DATA public nc_dependency_tracker admin
+5072; 0 16615 TABLE DATA public nc_disabled_models_for_role_v2 admin
+5155; 0 17783 TABLE DATA public nc_doc_content_v2 admin
+5154; 0 17769 TABLE DATA public nc_docs_v2 admin
+5073; 0 16623 TABLE DATA public nc_extensions admin
+5074; 0 16632 TABLE DATA public nc_file_references admin
+5075; 0 16643 TABLE DATA public nc_filter_exp_v2 admin
+5076; 0 16652 TABLE DATA public nc_follower admin
+5077; 0 16659 TABLE DATA public nc_form_view_columns_v2 admin
+5078; 0 16668 TABLE DATA public nc_form_view_v2 admin
+5079; 0 16677 TABLE DATA public nc_gallery_view_columns_v2 admin
+5080; 0 16686 TABLE DATA public nc_gallery_view_v2 admin
+5159; 0 17847 TABLE DATA public nc_gcp_marketplace_accounts admin
+5160; 0 17861 TABLE DATA public nc_gcp_marketplace_entitlements admin
+5081; 0 16695 TABLE DATA public nc_grid_view_columns_v2 admin
+5082; 0 16706 TABLE DATA public nc_grid_view_v2 admin
+5083; 0 16715 TABLE DATA public nc_hook_logs_v2 admin
+5084; 0 16725 TABLE DATA public nc_hook_trigger_fields admin
+5085; 0 16732 TABLE DATA public nc_hooks_v2 admin
+5134; 0 17460 TABLE DATA public nc_installations admin
+5158; 0 17833 TABLE DATA public nc_integration_links_v2 admin
+5086; 0 16750 TABLE DATA public nc_integrations_store_v2 admin
+5087; 0 16759 TABLE DATA public nc_integrations_v2 admin
+5088; 0 16773 TABLE DATA public nc_jobs admin
+5089; 0 16782 TABLE DATA public nc_kanban_view_columns_v2 admin
+5090; 0 16791 TABLE DATA public nc_kanban_view_v2 admin
+5146; 0 17671 TABLE DATA public nc_list_view_columns_v2 admin
+5147; 0 17680 TABLE DATA public nc_list_view_levels_v2 admin
+5145; 0 17662 TABLE DATA public nc_list_view_v2 admin
+5166; 0 17979 TABLE DATA public nc_mail_sends admin
+5138; 0 17541 TABLE DATA public nc_managed_app_deployment_logs admin
+5137; 0 17517 TABLE DATA public nc_managed_app_versions admin
+5136; 0 17497 TABLE DATA public nc_managed_apps admin
+5091; 0 16800 TABLE DATA public nc_map_view_columns_v2 admin
+5092; 0 16809 TABLE DATA public nc_map_view_v2 admin
+5093; 0 16816 TABLE DATA public nc_mcp_tokens admin
+5094; 0 16825 TABLE DATA public nc_model_stats_v2 admin
+5095; 0 16834 TABLE DATA public nc_models_v2 admin
+5097; 0 16856 TABLE DATA public nc_oauth_authorization_codes admin
+5096; 0 16847 TABLE DATA public nc_oauth_clients admin
+5098; 0 16867 TABLE DATA public nc_oauth_tokens admin
+5167; 0 17994 TABLE DATA public nc_operation_logs admin
+5099; 0 16877 TABLE DATA public nc_org admin
+5100; 0 16888 TABLE DATA public nc_org_domain admin
+5101; 0 16898 TABLE DATA public nc_org_users admin
+5103; 0 16916 TABLE DATA public nc_permission_subjects admin
+5102; 0 16905 TABLE DATA public nc_permissions admin
+5125; 0 17123 TABLE DATA public nc_plans admin
+5104; 0 16925 TABLE DATA public nc_plugins_v2 admin
+5130; 0 17403 TABLE DATA public nc_principal_assignments admin
+5142; 0 17624 TABLE DATA public nc_record_templates admin
+5143; 0 17638 TABLE DATA public nc_rls_policies admin
+5144; 0 17651 TABLE DATA public nc_rls_policy_subjects admin
+5126; 0 17133 TABLE DATA public nc_row_color_conditions admin
+5163; 0 17930 TABLE DATA public nc_sandbox_changelog admin
+5140; 0 17585 TABLE DATA public nc_sandboxes_v2 admin
+5141; 0 17607 TABLE DATA public nc_scim_config admin
+5105; 0 16936 TABLE DATA public nc_scripts admin
+5106; 0 16945 TABLE DATA public nc_snapshots admin
+5107; 0 16954 TABLE DATA public nc_sort_v2 admin
+5108; 0 16962 TABLE DATA public nc_sources_v2 admin
+5109; 0 16977 TABLE DATA public nc_sql_executor_v2 admin
+5110; 0 16984 TABLE DATA public nc_sso_client admin
+5111; 0 16995 TABLE DATA public nc_sso_client_domain admin
+5113; 0 17004 TABLE DATA public nc_store admin
+5127; 0 17140 TABLE DATA public nc_subscriptions admin
+5114; 0 17013 TABLE DATA public nc_sync_configs admin
+5115; 0 17023 TABLE DATA public nc_sync_logs_v2 admin
+5116; 0 17032 TABLE DATA public nc_sync_mappings admin
+5117; 0 17039 TABLE DATA public nc_sync_source_v2 admin
+5129; 0 17390 TABLE DATA public nc_teams admin
+5150; 0 17722 TABLE DATA public nc_timeline_view_columns_v2 admin
+5151; 0 17732 TABLE DATA public nc_timeline_view_range_v2 admin
+5149; 0 17711 TABLE DATA public nc_timeline_view_v2 admin
+5161; 0 17901 TABLE DATA public nc_trash admin
+5128; 0 17150 TABLE DATA public nc_usage_stats admin
+5118; 0 17049 TABLE DATA public nc_user_comment_notifications_preference admin
+5119; 0 17058 TABLE DATA public nc_user_refresh_tokens admin
+5120; 0 17065 TABLE DATA public nc_users_v2 admin
+5148; 0 17699 TABLE DATA public nc_view_sections admin
+5121; 0 17077 TABLE DATA public nc_views_v2 admin
+5069; 0 16586 TABLE DATA public nc_widgets_v2 admin
+5131; 0 17422 TABLE DATA public nc_workflows admin
+5122; 0 17087 TABLE DATA public notification admin
+5123; 0 17098 TABLE DATA public workspace admin
+5124; 0 17112 TABLE DATA public workspace_user admin
+5044; 0 16386 TABLE DATA public xc_knex_migrationsv0 admin
+5046; 0 16393 TABLE DATA public xc_knex_migrationsv0_lock admin
+5209; 0 0 SEQUENCE SET pipkgfu2wr9qxyy Features_id_seq admin
+5210; 0 0 SEQUENCE SET pipkgfu2wr9qxyy Fixed assests_id_seq admin
+5211; 0 0 SEQUENCE SET pipkgfu2wr9qxyy My test data_id_seq admin
+5212; 0 0 SEQUENCE SET pipkgfu2wr9qxyy Payment_Receive_id_seq admin
+5213; 0 0 SEQUENCE SET pipkgfu2wr9qxyy Transactions_id_seq admin
+5214; 0 0 SEQUENCE SET pipkgfu2wr9qxyy category_master_id_seq admin
+5215; 0 0 SEQUENCE SET pipkgfu2wr9qxyy customer_master_id_seq admin
+5216; 0 0 SEQUENCE SET pipkgfu2wr9qxyy fixed_cost_loan_and_settlement_id_seq admin
+5217; 0 0 SEQUENCE SET pipkgfu2wr9qxyy sote_phwar_invoice_id_seq admin
+5218; 0 0 SEQUENCE SET public nc_api_tokens_id_seq admin
+5219; 0 0 SEQUENCE SET public nc_store_id_seq admin
+5220; 0 0 SEQUENCE SET public xc_knex_migrationsv0_id_seq admin
+5221; 0 0 SEQUENCE SET public xc_knex_migrationsv0_lock_index_seq admin
+4851; 2606 18020 CONSTRAINT pipkgfu2wr9qxyy Sotephwar_Transection Features_pkey admin
+4896; 2606 90175 CONSTRAINT pipkgfu2wr9qxyy fixed_assests Fixed assests_pkey admin
+4856; 2606 18031 CONSTRAINT pipkgfu2wr9qxyy Transection My test data_pkey admin
+4898; 2606 106567 CONSTRAINT pipkgfu2wr9qxyy Payment_Receive Payment_Receive_pkey admin
+4860; 2606 18042 CONSTRAINT pipkgfu2wr9qxyy farm_transection Transactions_pkey admin
+4884; 2606 65627 CONSTRAINT pipkgfu2wr9qxyy _nc_m2m_Sotephwar_Trans_customer_master _nc_m2m_Sotephwar_Trans_customer_master_pkey admin
+4879; 2606 65620 CONSTRAINT pipkgfu2wr9qxyy _nc_m2m_Transection_category_master _nc_m2m_Transection_category_master_pkey admin
+4889; 2606 73788 CONSTRAINT pipkgfu2wr9qxyy _nc_m2m_farm_transectio_customer_master _nc_m2m_farm_transectio_customer_master_pkey admin
+4873; 2606 65600 CONSTRAINT pipkgfu2wr9qxyy category_master category_master_pkey admin
+4877; 2606 65611 CONSTRAINT pipkgfu2wr9qxyy customer_master customer_master_pkey admin
+4865; 2606 24593 CONSTRAINT pipkgfu2wr9qxyy Financial_Obligations fixed_cost_loan_and_settlement_pkey admin
+4869; 2606 24604 CONSTRAINT pipkgfu2wr9qxyy Sotephwar_Inventory sote_phwar_invoice_pkey admin
+4792; 2606 17832 CONSTRAINT public nc_api_token_scopes idx_api_token_scopes_unique admin
+4218; 2606 17819 CONSTRAINT public nc_api_tokens idx_api_tokens_hash admin
+4794; 2606 17828 CONSTRAINT public nc_api_token_scopes nc_api_token_scopes_pkey admin
+4222; 2606 16408 CONSTRAINT public nc_api_tokens nc_api_tokens_pkey admin
+4227; 2606 16418 CONSTRAINT public nc_audit_v2 nc_audit_v2_pkx admin
+4662; 2606 17492 CONSTRAINT public nc_automation_executions nc_automation_executions_pkey admin
+4717; 2606 17578 CONSTRAINT public nc_automation_subscribers nc_automation_subscribers_pkey admin
+4719; 2606 17944 CONSTRAINT public nc_automation_subscribers nc_automation_subscribers_unique_idx admin
+4684; 2606 17489 CONSTRAINT public nc_automations nc_automations_pkey admin
+4233; 2606 16431 CONSTRAINT public nc_base_users_v2 nc_base_users_v2_pkey admin
+4821; 2606 17926 CONSTRAINT public nc_base_variables nc_base_variables_pkey admin
+4823; 2606 17928 CONSTRAINT public nc_base_variables nc_base_variables_ws_base_key_unique admin
+4554; 2606 16976 CONSTRAINT public nc_sources_v2 nc_bases_v2_pkey admin
+4831; 2606 17959 CONSTRAINT public nc_bookmark_groups nc_bookmark_groups_pkey admin
+4835; 2606 17978 CONSTRAINT public nc_bookmarks nc_bookmarks_fk_user_id_target_type_target_id_unique admin
+4837; 2606 17974 CONSTRAINT public nc_bookmarks nc_bookmarks_pkey admin
+4249; 2606 16450 CONSTRAINT public nc_calendar_view_columns_v2 nc_calendar_view_columns_v2_pkey admin
+4253; 2606 16457 CONSTRAINT public nc_calendar_view_range_v2 nc_calendar_view_range_v2_pkey admin
+4257; 2606 16464 CONSTRAINT public nc_calendar_view_v2 nc_calendar_view_v2_pkey admin
+4776; 2606 17767 CONSTRAINT public nc_chat_messages nc_chat_messages_pkey admin
+4773; 2606 17755 CONSTRAINT public nc_chat_sessions nc_chat_sessions_pkey admin
+4262; 2606 16471 CONSTRAINT public nc_col_barcode_v2 nc_col_barcode_v2_pkey admin
+4267; 2606 16480 CONSTRAINT public nc_col_button_v2 nc_col_button_v2_pkey admin
+4272; 2606 16489 CONSTRAINT public nc_col_formula_v2 nc_col_formula_v2_pkey admin
+4277; 2606 16498 CONSTRAINT public nc_col_long_text_v2 nc_col_long_text_v2_pkey admin
+4284; 2606 16505 CONSTRAINT public nc_col_lookup_v2 nc_col_lookup_v2_pkey admin
+4289; 2606 16512 CONSTRAINT public nc_col_qrcode_v2 nc_col_qrcode_v2_pkey admin
+4302; 2606 16521 CONSTRAINT public nc_col_relations_v2 nc_col_relations_v2_pkey admin
+4309; 2606 16528 CONSTRAINT public nc_col_rollup_v2 nc_col_rollup_v2_pkey admin
+4314; 2606 16537 CONSTRAINT public nc_col_select_options_v2 nc_col_select_options_v2_pkey admin
+4319; 2606 16548 CONSTRAINT public nc_columns_v2 nc_columns_v2_pkey admin
+4324; 2606 16557 CONSTRAINT public nc_comment_reactions nc_comment_reactions_pkey admin
+4330; 2606 16566 CONSTRAINT public nc_comments nc_comments_pkey admin
+4337; 2606 16575 CONSTRAINT public nc_custom_urls_v2 nc_custom_urls_v2_pkey admin
+4341; 2606 16584 CONSTRAINT public nc_dashboards_v2 nc_dashboards_v2_pkey admin
+4350; 2606 16603 CONSTRAINT public nc_data_reflection nc_data_reflection_pkey admin
+4788; 2606 17815 CONSTRAINT public nc_date_dependency_v2 nc_date_dependency_v2_pkey admin
+4352; 2606 16614 CONSTRAINT public nc_db_servers nc_db_servers_pkey admin
+4670; 2606 17495 CONSTRAINT public nc_dependency_tracker nc_dependency_tracker_pkey admin
+4357; 2606 16622 CONSTRAINT public nc_disabled_models_for_role_v2 nc_disabled_models_for_role_v2_pkey admin
+4783; 2606 17791 CONSTRAINT public nc_doc_content_v2 nc_doc_content_v2_pkey admin
+4779; 2606 17780 CONSTRAINT public nc_docs_v2 nc_docs_v2_pkey admin
+4361; 2606 16631 CONSTRAINT public nc_extensions nc_extensions_pkey admin
+4363; 2606 16642 CONSTRAINT public nc_file_references nc_file_references_pkey admin
+4382; 2606 16651 CONSTRAINT public nc_filter_exp_v2 nc_filter_exp_v2_pkey admin
+4386; 2606 16658 CONSTRAINT public nc_follower nc_follower_pkey admin
+4394; 2606 16667 CONSTRAINT public nc_form_view_columns_v2 nc_form_view_columns_v2_pkey admin
+4399; 2606 16676 CONSTRAINT public nc_form_view_v2 nc_form_view_v2_pkey admin
+4406; 2606 16685 CONSTRAINT public nc_gallery_view_columns_v2 nc_gallery_view_columns_v2_pkey admin
+4411; 2606 16694 CONSTRAINT public nc_gallery_view_v2 nc_gallery_view_v2_pkey admin
+4802; 2606 17856 CONSTRAINT public nc_gcp_marketplace_accounts nc_gcp_marketplace_accounts_pkey admin
+4804; 2606 17858 CONSTRAINT public nc_gcp_marketplace_accounts nc_gcp_marketplace_accounts_procurement_account_id_unique admin
+4808; 2606 17872 CONSTRAINT public nc_gcp_marketplace_entitlements nc_gcp_marketplace_entitlements_entitlement_id_unique admin
+4810; 2606 17870 CONSTRAINT public nc_gcp_marketplace_entitlements nc_gcp_marketplace_entitlements_pkey admin
+4418; 2606 16705 CONSTRAINT public nc_grid_view_columns_v2 nc_grid_view_columns_v2_pkey admin
+4423; 2606 16714 CONSTRAINT public nc_grid_view_v2 nc_grid_view_v2_pkey admin
+4428; 2606 16724 CONSTRAINT public nc_hook_logs_v2 nc_hook_logs_v2_pkey admin
+4430; 2606 16731 CONSTRAINT public nc_hook_trigger_fields nc_hook_trigger_fields_pkey admin
+4435; 2606 16749 CONSTRAINT public nc_hooks_v2 nc_hooks_v2_pkey admin
+4678; 2606 17470 CONSTRAINT public nc_installations nc_installations_pkey admin
+4798; 2606 17841 CONSTRAINT public nc_integration_links_v2 nc_integration_links_v2_fk_integration_id_base_id_unique admin
+4800; 2606 17839 CONSTRAINT public nc_integration_links_v2 nc_integration_links_v2_pkey admin
+4438; 2606 16758 CONSTRAINT public nc_integrations_store_v2 nc_integrations_store_v2_pkey admin
+4442; 2606 16772 CONSTRAINT public nc_integrations_v2 nc_integrations_v2_pkey admin
+4446; 2606 16781 CONSTRAINT public nc_jobs nc_jobs_pkey admin
+4453; 2606 16790 CONSTRAINT public nc_kanban_view_columns_v2 nc_kanban_view_columns_v2_pkey admin
+4459; 2606 16799 CONSTRAINT public nc_kanban_view_v2 nc_kanban_view_v2_pkey admin
+4842; 2606 17988 CONSTRAINT public nc_mail_sends nc_mail_sends_pkey admin
+4698; 2606 17561 CONSTRAINT public nc_managed_app_versions nc_managed_app_versions_number_unique_idx admin
+4702; 2606 17559 CONSTRAINT public nc_managed_app_versions nc_managed_app_versions_unique_idx admin
+4466; 2606 16808 CONSTRAINT public nc_map_view_columns_v2 nc_map_view_columns_v2_pkey admin
+4472; 2606 16815 CONSTRAINT public nc_map_view_v2 nc_map_view_v2_pkey admin
+4476; 2606 16824 CONSTRAINT public nc_mcp_tokens nc_mcp_tokens_pkey admin
+4481; 2606 16833 CONSTRAINT public nc_model_stats_v2 nc_model_stats_v2_pkey admin
+4485; 2606 16846 CONSTRAINT public nc_models_v2 nc_models_v2_pkey admin
+4500; 2606 16866 CONSTRAINT public nc_oauth_authorization_codes nc_oauth_authorization_codes_pkey admin
+4492; 2606 16855 CONSTRAINT public nc_oauth_clients nc_oauth_clients_pkey admin
+4510; 2606 16876 CONSTRAINT public nc_oauth_tokens nc_oauth_tokens_pkey admin
+4847; 2606 18003 CONSTRAINT public nc_operation_logs nc_operation_logs_pkey admin
+4521; 2606 16897 CONSTRAINT public nc_org_domain nc_org_domain_pkey admin
+4515; 2606 16887 CONSTRAINT public nc_org nc_org_pkey admin
+4525; 2606 17876 CONSTRAINT public nc_org_users nc_org_users_pkey admin
+4750; 2606 17679 CONSTRAINT public nc_list_view_columns_v2 nc_outline_view_columns_v2_pkey admin
+4754; 2606 17688 CONSTRAINT public nc_list_view_levels_v2 nc_outline_view_levels_v2_pkey admin
+4745; 2606 17670 CONSTRAINT public nc_list_view_v2 nc_outline_view_v2_pkey admin
+4536; 2606 16924 CONSTRAINT public nc_permission_subjects nc_permission_subjects_pkey admin
+4532; 2606 16915 CONSTRAINT public nc_permissions nc_permissions_pkey admin
+4625; 2606 17132 CONSTRAINT public nc_plans nc_plans_pkey admin
+4538; 2606 16935 CONSTRAINT public nc_plugins_v2 nc_plugins_v2_pkey admin
+4651; 2606 17410 CONSTRAINT public nc_principal_assignments nc_principal_assignments_pk admin
+4244; 2606 16443 CONSTRAINT public nc_bases_v2 nc_projects_v2_pkey admin
+4734; 2606 17634 CONSTRAINT public nc_record_templates nc_record_templates_pkey admin
+4738; 2606 17648 CONSTRAINT public nc_rls_policies nc_rls_policies_pk admin
+4741; 2606 17659 CONSTRAINT public nc_rls_policy_subjects nc_rls_policy_subjects_pk admin
+4631; 2606 17139 CONSTRAINT public nc_row_color_conditions nc_row_color_conditions_pkey admin
+4825; 2606 17939 CONSTRAINT public nc_sandbox_changelog nc_sandbox_changelog_pkey admin
+4711; 2606 17550 CONSTRAINT public nc_managed_app_deployment_logs nc_sandbox_deployment_logs_pkey admin
+4704; 2606 17526 CONSTRAINT public nc_managed_app_versions nc_sandbox_versions_pkey admin
+4688; 2606 17510 CONSTRAINT public nc_managed_apps nc_sandboxes_base_id_unique admin
+4693; 2606 17508 CONSTRAINT public nc_managed_apps nc_sandboxes_pkey admin
+4723; 2606 17593 CONSTRAINT public nc_sandboxes_v2 nc_sandboxes_v2_pkey admin
+4729; 2606 17616 CONSTRAINT public nc_scim_config nc_scim_config_pkey admin
+4542; 2606 16944 CONSTRAINT public nc_scripts nc_scripts_pkey admin
+4545; 2606 16953 CONSTRAINT public nc_snapshots nc_snapshots_pkey admin
+4552; 2606 16961 CONSTRAINT public nc_sort_v2 nc_sort_v2_pkey admin
+4560; 2606 16983 CONSTRAINT public nc_sql_executor_v2 nc_sql_executor_v2_pkey admin
+4568; 2606 17002 CONSTRAINT public nc_sso_client_domain nc_sso_client_domain_pkey admin
+4565; 2606 16994 CONSTRAINT public nc_sso_client nc_sso_client_pkey admin
+4571; 2606 17012 CONSTRAINT public nc_store nc_store_pkey admin
+4634; 2606 17149 CONSTRAINT public nc_subscriptions nc_subscriptions_pkey admin
+4576; 2606 17022 CONSTRAINT public nc_sync_configs nc_sync_configs_pkey admin
+4581; 2606 17031 CONSTRAINT public nc_sync_logs_v2 nc_sync_logs_v2_pkey admin
+4585; 2606 17038 CONSTRAINT public nc_sync_mappings nc_sync_mappings_pkey admin
+4590; 2606 17048 CONSTRAINT public nc_sync_source_v2 nc_sync_source_v2_pkey admin
+4644; 2606 17399 CONSTRAINT public nc_teams nc_teams_pkey admin
+4647; 2606 17606 CONSTRAINT public nc_teams nc_teams_scim_external_id_unique admin
+4767; 2606 17728 CONSTRAINT public nc_timeline_view_columns_v2 nc_timeline_view_columns_v2_pkey admin
+4771; 2606 17738 CONSTRAINT public nc_timeline_view_range_v2 nc_timeline_view_range_v2_pkey admin
+4762; 2606 17719 CONSTRAINT public nc_timeline_view_v2 nc_timeline_view_v2_pkey admin
+4815; 2606 17911 CONSTRAINT public nc_trash nc_trash_base_id_resource_type_resource_id_unique admin
+4818; 2606 17909 CONSTRAINT public nc_trash nc_trash_pkey admin
+4638; 2606 17157 CONSTRAINT public nc_usage_stats nc_usage_stats_pkey admin
+4594; 2606 17057 CONSTRAINT public nc_user_comment_notifications_preference nc_user_comment_notifications_preference_pkey admin
+4603; 2606 17076 CONSTRAINT public nc_users_v2 nc_users_v2_pkey admin
+4758; 2606 17707 CONSTRAINT public nc_view_sections nc_view_sections_pkey admin
+4611; 2606 17086 CONSTRAINT public nc_views_v2 nc_views_v2_pkey admin
+4347; 2606 16594 CONSTRAINT public nc_widgets_v2 nc_widgets_v2_pkey admin
+4658; 2606 17432 CONSTRAINT public nc_workflows nc_workflows_pkey admin
+4615; 2606 17097 CONSTRAINT public notification notification_pkey admin
+4618; 2606 17111 CONSTRAINT public workspace workspace_pkey admin
+4623; 2606 17122 CONSTRAINT public workspace_user workspace_user_pkey admin
+4216; 2606 16398 CONSTRAINT public xc_knex_migrationsv0_lock xc_knex_migrationsv0_lock_pkey admin
+4214; 2606 16391 CONSTRAINT public xc_knex_migrationsv0 xc_knex_migrationsv0_pkey admin
+4848; 1259 18022 INDEX pipkgfu2wr9qxyy Features_deleted_idx admin
+4849; 1259 18021 INDEX pipkgfu2wr9qxyy Features_order_idx admin
+4893; 1259 90177 INDEX pipkgfu2wr9qxyy Fixed assests_deleted_idx admin
+4894; 1259 90176 INDEX pipkgfu2wr9qxyy Fixed assests_order_idx admin
+4853; 1259 18033 INDEX pipkgfu2wr9qxyy My test data_deleted_idx admin
+4854; 1259 18032 INDEX pipkgfu2wr9qxyy My test data_order_idx admin
+4857; 1259 18044 INDEX pipkgfu2wr9qxyy Transactions_deleted_idx admin
+4858; 1259 18043 INDEX pipkgfu2wr9qxyy Transactions_order_idx admin
+4870; 1259 65602 INDEX pipkgfu2wr9qxyy category_master_deleted_idx admin
+4871; 1259 65601 INDEX pipkgfu2wr9qxyy category_master_order_idx admin
+4874; 1259 65613 INDEX pipkgfu2wr9qxyy customer_master_deleted_idx admin
+4875; 1259 65612 INDEX pipkgfu2wr9qxyy customer_master_order_idx admin
+4890; 1259 122940 INDEX pipkgfu2wr9qxyy farm_customer_link_unique_idx admin
+4861; 1259 122938 INDEX pipkgfu2wr9qxyy farm_voucher_identity_idx admin
+4862; 1259 24595 INDEX pipkgfu2wr9qxyy fixed_cost_loan_and_settlement_deleted_idx admin
+4863; 1259 24594 INDEX pipkgfu2wr9qxyy fixed_cost_loan_and_settlement_order_idx admin
+4885; 1259 65628 INDEX pipkgfu2wr9qxyy fk_Sotephwar__customer_m_97ucs_zv7k admin
+4886; 1259 65629 INDEX pipkgfu2wr9qxyy fk_Sotephwar__customer_m_x0mioe1d3l admin
+4880; 1259 65621 INDEX pipkgfu2wr9qxyy fk_Transectio_category_m__rrds1uk52 admin
+4881; 1259 65622 INDEX pipkgfu2wr9qxyy fk_Transectio_category_m_syy1c3jc8d admin
+4891; 1259 73790 INDEX pipkgfu2wr9qxyy fk_farm_trans_customer_m_kq4nelwih6 admin
+4892; 1259 73789 INDEX pipkgfu2wr9qxyy fk_farm_trans_customer_m_olqosb79il admin
+4899; 1259 122936 INDEX pipkgfu2wr9qxyy payment_receive_voucher_lookup_idx admin
+4887; 1259 122939 INDEX pipkgfu2wr9qxyy sote_customer_link_unique_idx admin
+4866; 1259 24606 INDEX pipkgfu2wr9qxyy sote_phwar_invoice_deleted_idx admin
+4867; 1259 24605 INDEX pipkgfu2wr9qxyy sote_phwar_invoice_order_idx admin
+4852; 1259 122937 INDEX pipkgfu2wr9qxyy sotephwar_voucher_identity_idx admin
+4882; 1259 122941 INDEX pipkgfu2wr9qxyy transaction_category_link_unique_idx admin
+4789; 1259 17830 INDEX public idx_api_token_scopes_resource admin
+4790; 1259 17829 INDEX public idx_api_token_scopes_token admin
+4387; 1259 17947 INDEX public idx_nc_form_view_columns_row_id admin
+4219; 1259 17194 INDEX public nc_api_tokens_fk_sso_client_id_index admin
+4220; 1259 17193 INDEX public nc_api_tokens_fk_user_id_index admin
+4223; 1259 17886 INDEX public nc_audit_v2_fk_org_id_idx admin
+4224; 1259 16419 INDEX public nc_audit_v2_fk_workspace_idx admin
+4225; 1259 16422 INDEX public nc_audit_v2_old_id_index admin
+4228; 1259 16420 INDEX public nc_audit_v2_tenant_idx admin
+4659; 1259 17570 INDEX public nc_automation_executions_error_notify_idx admin
+4660; 1259 17493 INDEX public nc_automation_executions_oldpk_idx admin
+4663; 1259 17487 INDEX public nc_automation_executions_resume_idx admin
+4715; 1259 17579 INDEX public nc_automation_subscribers_automation_idx admin
+4720; 1259 17580 INDEX public nc_automation_subscribers_user_idx admin
+4679; 1259 17483 INDEX public nc_automations_context_idx admin
+4680; 1259 17485 INDEX public nc_automations_enabled_idx admin
+4681; 1259 17490 INDEX public nc_automations_oldpk_idx admin
+4682; 1259 17486 INDEX public nc_automations_order_idx admin
+4685; 1259 17484 INDEX public nc_automations_type_idx admin
+4230; 1259 17195 INDEX public nc_base_users_v2_base_id_fk_workspace_id_index admin
+4231; 1259 17196 INDEX public nc_base_users_v2_invited_by_index admin
+4819; 1259 17929 INDEX public nc_base_variables_base_ws_index admin
+4235; 1259 17600 INDEX public nc_bases_is_sandbox_idx admin
+4236; 1259 17946 INDEX public nc_bases_is_sandbox_production_idx admin
+4237; 1259 17569 INDEX public nc_bases_managed_app_auto_update_idx admin
+4238; 1259 17567 INDEX public nc_bases_managed_app_id_idx admin
+4239; 1259 17566 INDEX public nc_bases_managed_app_master_idx admin
+4240; 1259 17568 INDEX public nc_bases_managed_app_version_id_idx admin
+4241; 1259 17198 INDEX public nc_bases_v2_fk_custom_url_id_index admin
+4242; 1259 17199 INDEX public nc_bases_v2_fk_workspace_id_index admin
+4829; 1259 17960 INDEX public nc_bookmark_groups_fk_user_id_index admin
+4832; 1259 17976 INDEX public nc_bookmarks_fk_group_id_index admin
+4833; 1259 17975 INDEX public nc_bookmarks_fk_user_id_index admin
+4245; 1259 17200 INDEX public nc_calendar_view_columns_v2_base_id_fk_workspace_id_index admin
+4246; 1259 17201 INDEX public nc_calendar_view_columns_v2_fk_view_id_fk_column_id_index admin
+4247; 1259 17202 INDEX public nc_calendar_view_columns_v2_oldpk_idx admin
+4250; 1259 17203 INDEX public nc_calendar_view_range_v2_base_id_fk_workspace_id_index admin
+4251; 1259 17204 INDEX public nc_calendar_view_range_v2_oldpk_idx admin
+4254; 1259 17205 INDEX public nc_calendar_view_v2_base_id_fk_workspace_id_index admin
+4255; 1259 17206 INDEX public nc_calendar_view_v2_oldpk_idx admin
+4777; 1259 17768 INDEX public nc_chat_messages_session_idx admin
+4774; 1259 17756 INDEX public nc_chat_sessions_user_idx admin
+4258; 1259 17207 INDEX public nc_col_barcode_v2_base_id_fk_workspace_id_index admin
+4259; 1259 17208 INDEX public nc_col_barcode_v2_fk_column_id_index admin
+4260; 1259 17209 INDEX public nc_col_barcode_v2_oldpk_idx admin
+4263; 1259 17210 INDEX public nc_col_button_context admin
+4264; 1259 17211 INDEX public nc_col_button_v2_fk_column_id_index admin
+4265; 1259 17212 INDEX public nc_col_button_v2_oldpk_idx admin
+4268; 1259 17213 INDEX public nc_col_formula_v2_base_id_fk_workspace_id_index admin
+4269; 1259 17214 INDEX public nc_col_formula_v2_fk_column_id_index admin
+4270; 1259 17215 INDEX public nc_col_formula_v2_oldpk_idx admin
+4273; 1259 17216 INDEX public nc_col_long_text_context admin
+4274; 1259 17217 INDEX public nc_col_long_text_v2_fk_column_id_index admin
+4275; 1259 17218 INDEX public nc_col_long_text_v2_oldpk_idx admin
+4278; 1259 17219 INDEX public nc_col_lookup_v2_base_id_fk_workspace_id_index admin
+4279; 1259 17220 INDEX public nc_col_lookup_v2_fk_column_id_index admin
+4280; 1259 17221 INDEX public nc_col_lookup_v2_fk_lookup_column_id_index admin
+4281; 1259 17222 INDEX public nc_col_lookup_v2_fk_relation_column_id_index admin
+4282; 1259 17223 INDEX public nc_col_lookup_v2_oldpk_idx admin
+4285; 1259 17224 INDEX public nc_col_qrcode_v2_base_id_fk_workspace_id_index admin
+4286; 1259 17225 INDEX public nc_col_qrcode_v2_fk_column_id_index admin
+4287; 1259 17226 INDEX public nc_col_qrcode_v2_oldpk_idx admin
+4290; 1259 17227 INDEX public nc_col_relations_v2_base_id_fk_workspace_id_index admin
+4291; 1259 17228 INDEX public nc_col_relations_v2_fk_child_column_id_index admin
+4292; 1259 17229 INDEX public nc_col_relations_v2_fk_column_id_index admin
+4293; 1259 17948 INDEX public nc_col_relations_v2_fk_display_value_column_id_index admin
+4294; 1259 17230 INDEX public nc_col_relations_v2_fk_mm_child_column_id_index admin
+4295; 1259 17231 INDEX public nc_col_relations_v2_fk_mm_model_id_index admin
+4296; 1259 17232 INDEX public nc_col_relations_v2_fk_mm_parent_column_id_index admin
+4297; 1259 17233 INDEX public nc_col_relations_v2_fk_parent_column_id_index admin
+4298; 1259 17234 INDEX public nc_col_relations_v2_fk_related_model_id_index admin
+4299; 1259 17235 INDEX public nc_col_relations_v2_fk_target_view_id_index admin
+4300; 1259 17236 INDEX public nc_col_relations_v2_oldpk_idx admin
+4303; 1259 17237 INDEX public nc_col_rollup_v2_base_id_fk_workspace_id_index admin
+4304; 1259 17238 INDEX public nc_col_rollup_v2_fk_column_id_index admin
+4305; 1259 17239 INDEX public nc_col_rollup_v2_fk_relation_column_id_index admin
+4306; 1259 17240 INDEX public nc_col_rollup_v2_fk_rollup_column_id_index admin
+4307; 1259 17241 INDEX public nc_col_rollup_v2_oldpk_idx admin
+4310; 1259 17242 INDEX public nc_col_select_options_v2_base_id_fk_workspace_id_index admin
+4311; 1259 17243 INDEX public nc_col_select_options_v2_fk_column_id_index admin
+4312; 1259 17244 INDEX public nc_col_select_options_v2_oldpk_idx admin
+4315; 1259 17245 INDEX public nc_columns_v2_base_id_fk_workspace_id_index admin
+4316; 1259 17246 INDEX public nc_columns_v2_fk_model_id_index admin
+4317; 1259 17247 INDEX public nc_columns_v2_oldpk_idx admin
+4320; 1259 17248 INDEX public nc_comment_reactions_base_id_fk_workspace_id_index admin
+4321; 1259 17249 INDEX public nc_comment_reactions_comment_id_index admin
+4322; 1259 17251 INDEX public nc_comment_reactions_oldpk_idx admin
+4325; 1259 17250 INDEX public nc_comment_reactions_row_id_index admin
+4326; 1259 17252 INDEX public nc_comments_base_id_fk_workspace_id_index admin
+4327; 1259 17800 INDEX public nc_comments_doc_idx admin
+4328; 1259 17254 INDEX public nc_comments_oldpk_idx admin
+4331; 1259 17253 INDEX public nc_comments_row_id_fk_model_id_index admin
+4332; 1259 17255 INDEX public nc_custom_urls_context admin
+4333; 1259 17256 INDEX public nc_custom_urls_v2_custom_path_index admin
+4334; 1259 17257 INDEX public nc_custom_urls_v2_fk_dashboard_id_index admin
+4335; 1259 17258 INDEX public nc_custom_urls_v2_oldpk_idx admin
+4338; 1259 17158 INDEX public nc_dashboards_context admin
+4339; 1259 17159 INDEX public nc_dashboards_v2_oldpk_idx admin
+4348; 1259 17259 INDEX public nc_data_reflection_fk_workspace_id_index admin
+4785; 1259 17816 INDEX public nc_date_dep_context_idx admin
+4786; 1259 17817 INDEX public nc_date_dep_model_idx admin
+4666; 1259 17453 INDEX public nc_dependency_tracker_context_idx admin
+4667; 1259 17455 INDEX public nc_dependency_tracker_dependent_idx admin
+4668; 1259 17496 INDEX public nc_dependency_tracker_oldpk_idx admin
+4671; 1259 17458 INDEX public nc_dependency_tracker_queryable_field_0_idx admin
+4672; 1259 17459 INDEX public nc_dependency_tracker_queryable_field_1_idx admin
+4673; 1259 17472 INDEX public nc_dependency_tracker_queryable_field_2_idx admin
+4674; 1259 17454 INDEX public nc_dependency_tracker_source_idx admin
+4353; 1259 17260 INDEX public nc_disabled_models_for_role_v2_base_id_fk_workspace_id_index admin
+4354; 1259 17261 INDEX public nc_disabled_models_for_role_v2_fk_view_id_index admin
+4355; 1259 17262 INDEX public nc_disabled_models_for_role_v2_oldpk_idx admin
+4784; 1259 17792 INDEX public nc_doc_content_v2_tenant_idx admin
+4780; 1259 17781 INDEX public nc_docs_v2_tenant_idx admin
+4781; 1259 17782 INDEX public nc_docs_v2_tree_idx admin
+4358; 1259 17263 INDEX public nc_extensions_base_id_fk_workspace_id_index admin
+4359; 1259 17264 INDEX public nc_extensions_oldpk_idx admin
+4368; 1259 17661 INDEX public nc_filter_exp_rls_policy_idx admin
+4369; 1259 17265 INDEX public nc_filter_exp_v2_base_id_fk_workspace_id_index admin
+4370; 1259 17698 INDEX public nc_filter_exp_v2_fk_button_col_id_index admin
+4371; 1259 17266 INDEX public nc_filter_exp_v2_fk_column_id_index admin
+4372; 1259 17267 INDEX public nc_filter_exp_v2_fk_hook_id_index admin
+4373; 1259 17697 INDEX public nc_filter_exp_v2_fk_level_id_index admin
+4374; 1259 17268 INDEX public nc_filter_exp_v2_fk_link_col_id_index admin
+4375; 1259 17269 INDEX public nc_filter_exp_v2_fk_parent_column_id_index admin
+4376; 1259 17270 INDEX public nc_filter_exp_v2_fk_parent_id_index admin
+4377; 1259 17271 INDEX public nc_filter_exp_v2_fk_value_col_id_index admin
+4378; 1259 17272 INDEX public nc_filter_exp_v2_fk_view_id_index admin
+4379; 1259 17273 INDEX public nc_filter_exp_v2_fk_widget_id_index admin
+4380; 1259 17274 INDEX public nc_filter_exp_v2_oldpk_idx admin
+4383; 1259 17275 INDEX public nc_follower_fk_follower_id_index admin
+4384; 1259 17276 INDEX public nc_follower_fk_user_id_index admin
+4388; 1259 17277 INDEX public nc_form_view_columns_v2_base_id_fk_workspace_id_index admin
+4389; 1259 17278 INDEX public nc_form_view_columns_v2_fk_column_id_index admin
+4390; 1259 17279 INDEX public nc_form_view_columns_v2_fk_view_id_fk_column_id_index admin
+4391; 1259 17280 INDEX public nc_form_view_columns_v2_fk_view_id_index admin
+4392; 1259 17281 INDEX public nc_form_view_columns_v2_oldpk_idx admin
+4395; 1259 17282 INDEX public nc_form_view_v2_base_id_fk_workspace_id_index admin
+4396; 1259 17283 INDEX public nc_form_view_v2_fk_view_id_index admin
+4397; 1259 17284 INDEX public nc_form_view_v2_oldpk_idx admin
+4364; 1259 17285 INDEX public nc_fr_context admin
+4365; 1259 17801 INDEX public nc_fr_doc_idx admin
+4366; 1259 17949 INDEX public nc_fr_row_idx admin
+4367; 1259 17802 INDEX public nc_fr_session_idx admin
+4400; 1259 17286 INDEX public nc_gallery_view_columns_v2_base_id_fk_workspace_id_index admin
+4401; 1259 17287 INDEX public nc_gallery_view_columns_v2_fk_column_id_index admin
+4402; 1259 17288 INDEX public nc_gallery_view_columns_v2_fk_view_id_fk_column_id_index admin
+4403; 1259 17289 INDEX public nc_gallery_view_columns_v2_fk_view_id_index admin
+4404; 1259 17290 INDEX public nc_gallery_view_columns_v2_oldpk_idx admin
+4407; 1259 17291 INDEX public nc_gallery_view_v2_base_id_fk_workspace_id_index admin
+4408; 1259 17292 INDEX public nc_gallery_view_v2_fk_view_id_index admin
+4409; 1259 17293 INDEX public nc_gallery_view_v2_oldpk_idx admin
+4805; 1259 17860 INDEX public nc_gcp_mp_accounts_link_token_idx admin
+4806; 1259 17859 INDEX public nc_gcp_mp_accounts_user_idx admin
+4811; 1259 17873 INDEX public nc_gcp_mp_ent_account_idx admin
+4812; 1259 17874 INDEX public nc_gcp_mp_ent_install_idx admin
+4412; 1259 17294 INDEX public nc_grid_view_columns_v2_base_id_fk_workspace_id_index admin
+4413; 1259 17295 INDEX public nc_grid_view_columns_v2_fk_column_id_index admin
+4414; 1259 17296 INDEX public nc_grid_view_columns_v2_fk_view_id_fk_column_id_index admin
+4415; 1259 17297 INDEX public nc_grid_view_columns_v2_fk_view_id_index admin
+4416; 1259 17298 INDEX public nc_grid_view_columns_v2_oldpk_idx admin
+4419; 1259 17299 INDEX public nc_grid_view_v2_base_id_fk_workspace_id_index admin
+4420; 1259 17300 INDEX public nc_grid_view_v2_fk_view_id_index admin
+4421; 1259 17301 INDEX public nc_grid_view_v2_oldpk_idx admin
+4424; 1259 17741 INDEX public nc_hook_logs_error_notify_idx admin
+4425; 1259 17302 INDEX public nc_hook_logs_v2_base_id_fk_workspace_id_index admin
+4426; 1259 17303 INDEX public nc_hook_logs_v2_oldpk_idx admin
+4431; 1259 17304 INDEX public nc_hooks_v2_base_id_fk_workspace_id_index admin
+4432; 1259 17305 INDEX public nc_hooks_v2_fk_model_id_index admin
+4433; 1259 17306 INDEX public nc_hooks_v2_oldpk_idx admin
+4795; 1259 17843 INDEX public nc_il_integration_idx admin
+4796; 1259 17842 INDEX public nc_il_ws_base_idx admin
+4675; 1259 17845 INDEX public nc_installations_fk_user_id_idx admin
+4676; 1259 17471 INDEX public nc_installations_license_key_idx admin
+4436; 1259 17307 INDEX public nc_integrations_store_v2_fk_integration_id_index admin
+4439; 1259 17308 INDEX public nc_integrations_v2_created_by_index admin
+4440; 1259 17309 INDEX public nc_integrations_v2_fk_workspace_id_index admin
+4443; 1259 17310 INDEX public nc_integrations_v2_type_index admin
+4444; 1259 17311 INDEX public nc_jobs_context admin
+4447; 1259 17312 INDEX public nc_kanban_view_columns_v2_base_id_fk_workspace_id_index admin
+4448; 1259 17313 INDEX public nc_kanban_view_columns_v2_fk_column_id_index admin
+4449; 1259 17314 INDEX public nc_kanban_view_columns_v2_fk_view_id_fk_column_id_index admin
+4450; 1259 17315 INDEX public nc_kanban_view_columns_v2_fk_view_id_index admin
+4451; 1259 17316 INDEX public nc_kanban_view_columns_v2_oldpk_idx admin
+4454; 1259 17317 INDEX public nc_kanban_view_v2_base_id_fk_workspace_id_index admin
+4455; 1259 17318 INDEX public nc_kanban_view_v2_fk_grp_col_id_index admin
+4456; 1259 17319 INDEX public nc_kanban_view_v2_fk_view_id_index admin
+4457; 1259 17320 INDEX public nc_kanban_view_v2_oldpk_idx admin
+4838; 1259 17992 INDEX public nc_mail_sends_dedupe_uq admin
+4839; 1259 17989 INDEX public nc_mail_sends_dispatch_idx admin
+4840; 1259 17991 INDEX public nc_mail_sends_message_idx admin
+4843; 1259 17990 INDEX public nc_mail_sends_user_idx admin
+4706; 1259 17565 INDEX public nc_managed_app_deployment_logs_managed_app_id_idx admin
+4696; 1259 17562 INDEX public nc_managed_app_versions_managed_app_id_idx admin
+4699; 1259 17564 INDEX public nc_managed_app_versions_ordering_idx admin
+4700; 1259 17563 INDEX public nc_managed_app_versions_status_idx admin
+4460; 1259 17321 INDEX public nc_map_view_columns_v2_base_id_fk_workspace_id_index admin
+4461; 1259 17322 INDEX public nc_map_view_columns_v2_fk_column_id_index admin
+4462; 1259 17323 INDEX public nc_map_view_columns_v2_fk_view_id_fk_column_id_index admin
+4463; 1259 17324 INDEX public nc_map_view_columns_v2_fk_view_id_index admin
+4464; 1259 17325 INDEX public nc_map_view_columns_v2_oldpk_idx admin
+4467; 1259 17326 INDEX public nc_map_view_v2_base_id_fk_workspace_id_index admin
+4468; 1259 17327 INDEX public nc_map_view_v2_fk_geo_data_col_id_index admin
+4469; 1259 17328 INDEX public nc_map_view_v2_fk_view_id_index admin
+4470; 1259 17329 INDEX public nc_map_view_v2_oldpk_idx admin
+4473; 1259 17330 INDEX public nc_mc_tokens_context admin
+4474; 1259 17331 INDEX public nc_mcp_tokens_oldpk_idx admin
+4477; 1259 17332 INDEX public nc_model_stats_v2_base_id_fk_workspace_id_index admin
+4478; 1259 17333 INDEX public nc_model_stats_v2_fk_workspace_id_index admin
+4479; 1259 17334 INDEX public nc_model_stats_v2_oldpk_idx admin
+4482; 1259 17335 INDEX public nc_models_v2_base_id_fk_workspace_id_index admin
+4483; 1259 17337 INDEX public nc_models_v2_oldpk_idx admin
+4486; 1259 17336 INDEX public nc_models_v2_source_id_index admin
+4487; 1259 17889 INDEX public nc_models_v2_tree_idx admin
+4488; 1259 17339 INDEX public nc_models_v2_type_index admin
+4489; 1259 17338 INDEX public nc_models_v2_uuid_index admin
+4493; 1259 17171 INDEX public nc_oauth_authorization_codes_code_index admin
+4494; 1259 17172 INDEX public nc_oauth_authorization_codes_expires_at_index admin
+4495; 1259 17174 INDEX public nc_oauth_authorization_codes_fk_client_id_fk_user_id_index admin
+4496; 1259 17169 INDEX public nc_oauth_authorization_codes_fk_client_id_index admin
+4497; 1259 17170 INDEX public nc_oauth_authorization_codes_fk_user_id_index admin
+4498; 1259 17173 INDEX public nc_oauth_authorization_codes_is_used_index admin
+4490; 1259 17168 INDEX public nc_oauth_clients_fk_user_id_index admin
+4501; 1259 17179 INDEX public nc_oauth_tokens_access_token_expires_at_index admin
+4502; 1259 17177 INDEX public nc_oauth_tokens_access_token_index admin
+4503; 1259 17183 INDEX public nc_oauth_tokens_fk_client_id_fk_user_id_index admin
+4504; 1259 17175 INDEX public nc_oauth_tokens_fk_client_id_index admin
+4505; 1259 17176 INDEX public nc_oauth_tokens_fk_user_id_index admin
+4506; 1259 17184 INDEX public nc_oauth_tokens_is_revoked_access_token_expires_at_index admin
+4507; 1259 17181 INDEX public nc_oauth_tokens_is_revoked_index admin
+4508; 1259 17182 INDEX public nc_oauth_tokens_last_used_at_index admin
+4511; 1259 17180 INDEX public nc_oauth_tokens_refresh_token_expires_at_index admin
+4512; 1259 17178 INDEX public nc_oauth_tokens_refresh_token_index admin
+4844; 1259 18005 INDEX public nc_op_logs_cleanup_due_at_idx admin
+4845; 1259 18004 INDEX public nc_op_logs_user_tab_scope_status_seq_idx admin
+4517; 1259 17340 INDEX public nc_org_domain_domain_index admin
+4518; 1259 17341 INDEX public nc_org_domain_fk_org_id_index admin
+4519; 1259 17342 INDEX public nc_org_domain_fk_user_id_index admin
+4513; 1259 17344 INDEX public nc_org_fk_user_id_index admin
+4516; 1259 17345 INDEX public nc_org_slug_index admin
+4523; 1259 17877 INDEX public nc_org_users_fk_user_id_index admin
+4526; 1259 17884 INDEX public nc_org_users_scim_external_id_idx admin
+4527; 1259 17885 INDEX public nc_org_users_scim_managed_idx admin
+4746; 1259 17691 INDEX public nc_outline_view_columns_v2_base_id_fk_workspace_id_index admin
+4747; 1259 17692 INDEX public nc_outline_view_columns_v2_fk_view_id_fk_column_id_index admin
+4748; 1259 17693 INDEX public nc_outline_view_columns_v2_fk_view_id_index admin
+4751; 1259 17694 INDEX public nc_outline_view_levels_v2_base_id_fk_workspace_id_index admin
+4752; 1259 17695 INDEX public nc_outline_view_levels_v2_fk_view_id_index admin
+4742; 1259 17689 INDEX public nc_outline_view_v2_base_id_fk_workspace_id_index admin
+4743; 1259 17690 INDEX public nc_outline_view_v2_fk_view_id_index admin
+4533; 1259 17166 INDEX public nc_permission_subjects_context admin
+4534; 1259 17167 INDEX public nc_permission_subjects_oldpk_idx admin
+4528; 1259 17163 INDEX public nc_permissions_context admin
+4529; 1259 17164 INDEX public nc_permissions_entity admin
+4530; 1259 17165 INDEX public nc_permissions_oldpk_idx admin
+4626; 1259 17185 INDEX public nc_plans_stripe_product_idx admin
+4652; 1259 17411 INDEX public nc_principal_assignments_principal_idx admin
+4653; 1259 17413 INDEX public nc_principal_assignments_principal_resource_idx admin
+4654; 1259 17412 INDEX public nc_principal_assignments_resource_idx admin
+4655; 1259 17414 INDEX public nc_principal_assignments_resource_principal_type_idx admin
+4234; 1259 17197 INDEX public nc_project_users_v2_fk_user_id_index admin
+4229; 1259 16421 INDEX public nc_record_audit_v2_tenant_idx admin
+4730; 1259 17635 INDEX public nc_record_templates_base_id_index admin
+4731; 1259 17637 INDEX public nc_record_templates_fk_model_id_index admin
+4732; 1259 17636 INDEX public nc_record_templates_fk_workspace_id_index admin
+4735; 1259 17650 INDEX public nc_rls_policies_model_default_idx admin
+4736; 1259 17649 INDEX public nc_rls_policies_model_enabled_idx admin
+4739; 1259 17660 INDEX public nc_rls_policy_subjects_context_idx admin
+4627; 1259 17187 INDEX public nc_row_color_conditions_fk_view_id_index admin
+4628; 1259 17186 INDEX public nc_row_color_conditions_fk_workspace_id_base_id_index admin
+4629; 1259 17188 INDEX public nc_row_color_conditions_oldpk_idx admin
+4707; 1259 17554 INDEX public nc_sandbox_deployment_logs_base_created_idx admin
+4708; 1259 17552 INDEX public nc_sandbox_deployment_logs_base_id_idx admin
+4709; 1259 17556 INDEX public nc_sandbox_deployment_logs_from_version_idx admin
+4712; 1259 17555 INDEX public nc_sandbox_deployment_logs_status_idx admin
+4713; 1259 17557 INDEX public nc_sandbox_deployment_logs_to_version_idx admin
+4714; 1259 17551 INDEX public nc_sandbox_deployment_logs_workspace_id_idx admin
+4705; 1259 17532 INDEX public nc_sandbox_versions_workspace_id_idx admin
+4686; 1259 17513 INDEX public nc_sandboxes_base_id_idx admin
+4689; 1259 17515 INDEX public nc_sandboxes_category_idx admin
+4690; 1259 17512 INDEX public nc_sandboxes_created_by_idx admin
+4691; 1259 17516 INDEX public nc_sandboxes_deleted_idx admin
+4721; 1259 17597 INDEX public nc_sandboxes_v2_created_by_idx admin
+4724; 1259 17945 INDEX public nc_sandboxes_v2_production_base_id_idx admin
+4725; 1259 17596 INDEX public nc_sandboxes_v2_sandbox_base_id_idx admin
+4726; 1259 17594 INDEX public nc_sandboxes_v2_workspace_id_idx admin
+4694; 1259 17514 INDEX public nc_sandboxes_visibility_idx admin
+4695; 1259 17511 INDEX public nc_sandboxes_workspace_id_idx admin
+4727; 1259 17880 INDEX public nc_scim_config_org_idx admin
+4826; 1259 17941 INDEX public nc_scl_base_id_index admin
+4827; 1259 17942 INDEX public nc_scl_entity_type_id_index admin
+4828; 1259 17940 INDEX public nc_scl_sandbox_seq_index admin
+4539; 1259 17346 INDEX public nc_scripts_context admin
+4540; 1259 17347 INDEX public nc_scripts_oldpk_idx admin
+4543; 1259 17348 INDEX public nc_snapshot_context admin
+4546; 1259 17349 INDEX public nc_sort_v2_base_id_fk_workspace_id_index admin
+4547; 1259 17350 INDEX public nc_sort_v2_fk_column_id_index admin
+4548; 1259 17696 INDEX public nc_sort_v2_fk_level_id_index admin
+4549; 1259 17351 INDEX public nc_sort_v2_fk_view_id_index admin
+4550; 1259 17352 INDEX public nc_sort_v2_oldpk_idx admin
+4555; 1259 17353 INDEX public nc_source_v2_base_id_fk_workspace_id_index admin
+4556; 1259 17354 INDEX public nc_source_v2_fk_integration_id_index admin
+4557; 1259 17355 INDEX public nc_source_v2_fk_sql_executor_id_index admin
+4558; 1259 17356 INDEX public nc_sources_v2_oldpk_idx admin
+4561; 1259 17357 INDEX public nc_sso_client_domain_name_index admin
+4562; 1259 17358 INDEX public nc_sso_client_fk_user_id_index admin
+4563; 1259 17359 INDEX public nc_sso_client_fk_workspace_id_index admin
+4569; 1259 17361 INDEX public nc_store_key_index admin
+4632; 1259 17190 INDEX public nc_subscriptions_org_idx admin
+4635; 1259 17191 INDEX public nc_subscriptions_stripe_subscription_idx admin
+4636; 1259 17189 INDEX public nc_subscriptions_ws_idx admin
+4572; 1259 17362 INDEX public nc_sync_configs_context admin
+4573; 1259 17365 INDEX public nc_sync_configs_oldpk_idx admin
+4574; 1259 17364 INDEX public nc_sync_configs_parent_idx admin
+4578; 1259 17366 INDEX public nc_sync_logs_v2_base_id_fk_workspace_id_index admin
+4579; 1259 17367 INDEX public nc_sync_logs_v2_oldpk_idx admin
+4582; 1259 17368 INDEX public nc_sync_mappings_context admin
+4583; 1259 17370 INDEX public nc_sync_mappings_oldpk_idx admin
+4586; 1259 17369 INDEX public nc_sync_mappings_sync_config_idx admin
+4587; 1259 17371 INDEX public nc_sync_source_v2_base_id_fk_workspace_id_index admin
+4588; 1259 17373 INDEX public nc_sync_source_v2_oldpk_idx admin
+4591; 1259 17372 INDEX public nc_sync_source_v2_source_id_index admin
+4640; 1259 17400 INDEX public nc_teams_created_by_idx admin
+4641; 1259 17401 INDEX public nc_teams_org_idx admin
+4642; 1259 17743 INDEX public nc_teams_parent_idx admin
+4645; 1259 17622 INDEX public nc_teams_scim_external_id_idx admin
+4648; 1259 17623 INDEX public nc_teams_scim_managed_idx admin
+4649; 1259 17402 INDEX public nc_teams_workspace_idx admin
+4763; 1259 17729 INDEX public nc_timeline_view_columns_v2_base_id_fk_workspace_id_index admin
+4764; 1259 17730 INDEX public nc_timeline_view_columns_v2_fk_view_id_fk_column_id_index admin
+4765; 1259 17731 INDEX public nc_timeline_view_columns_v2_oldpk_idx admin
+4768; 1259 17739 INDEX public nc_timeline_view_range_v2_base_id_fk_workspace_id_index admin
+4769; 1259 17740 INDEX public nc_timeline_view_range_v2_oldpk_idx admin
+4759; 1259 17720 INDEX public nc_timeline_view_v2_base_id_fk_workspace_id_index admin
+4760; 1259 17721 INDEX public nc_timeline_view_v2_oldpk_idx admin
+4813; 1259 17912 INDEX public nc_trash_base_id_fk_workspace_id_index admin
+4816; 1259 17913 INDEX public nc_trash_cleanup_due_at_index admin
+4639; 1259 17192 INDEX public nc_usage_stats_ws_period_idx admin
+4592; 1259 17374 INDEX public nc_user_comment_notifications_preference_base_id_fk_workspace_i admin
+4596; 1259 17376 INDEX public nc_user_refresh_tokens_expires_at_index admin
+4597; 1259 17377 INDEX public nc_user_refresh_tokens_fk_user_id_index admin
+4598; 1259 17378 INDEX public nc_user_refresh_tokens_token_index admin
+4599; 1259 17583 INDEX public nc_users_v2_canonical_email_index admin
+4600; 1259 17379 INDEX public nc_users_v2_email_index admin
+4601; 1259 17993 INDEX public nc_users_v2_last_active_at_idx admin
+4755; 1259 17708 INDEX public nc_view_sections_context admin
+4756; 1259 17709 INDEX public nc_view_sections_model_idx admin
+4604; 1259 17380 INDEX public nc_views_v2_base_id_fk_workspace_id_index admin
+4605; 1259 17381 INDEX public nc_views_v2_created_by_index admin
+4606; 1259 17382 INDEX public nc_views_v2_fk_custom_url_id_index admin
+4607; 1259 17383 INDEX public nc_views_v2_fk_model_id_index admin
+4608; 1259 17385 INDEX public nc_views_v2_oldpk_idx admin
+4609; 1259 17384 INDEX public nc_views_v2_owned_by_index admin
+4343; 1259 17160 INDEX public nc_widgets_context admin
+4344; 1259 17161 INDEX public nc_widgets_dashboard_idx admin
+4345; 1259 17162 INDEX public nc_widgets_v2_oldpk_idx admin
+4664; 1259 17444 INDEX public nc_workflow_executions_context_idx admin
+4665; 1259 17445 INDEX public nc_workflow_executions_workflow_idx admin
+4656; 1259 17433 INDEX public nc_workflows_context_idx admin
+4619; 1259 17620 INDEX public nc_workspace_user_scim_external_id_idx admin
+4620; 1259 17621 INDEX public nc_workspace_user_scim_managed_idx admin
+4612; 1259 17386 INDEX public notification_created_at_index admin
+4613; 1259 17387 INDEX public notification_fk_user_id_index admin
+4522; 1259 17343 INDEX public org_domain_fk_workspace_id_idx admin
+4342; 1259 16585 INDEX public share_uuid_idx admin
+4566; 1259 17360 INDEX public sso_client_fk_workspace_id_idx admin
+4577; 1259 17363 INDEX public sync_configs_integration_model admin
+4595; 1259 17375 INDEX public user_comments_preference_index admin
+4616; 1259 17388 INDEX public workspace_fk_org_id_index admin
+4621; 1259 17389 INDEX public workspace_user_invited_by_index admin

@@ -18,15 +18,12 @@ Telegram Finance Topic
 
 Browser
   |
-  +--> dashboard_server.py 127.0.0.1:5062
-  |      +--> dashboard_service.py
-  |      +--> BI engine contracts
-  |      +--> Qwen narrative only
+  v
+receive_payment_server.py :5059
   |
-  +--> receive_payment_server.py 127.0.0.1:5059
-         +--> Payment_Receive
-         +--> farm_transection
-         +--> Sotephwar_Transection
+  +--> Payment_Receive
+  +--> farm_transection
+  +--> Sotephwar_Transection
 
 NocoDB 127.0.0.1:8080 --> PostgreSQL 127.0.0.1:5433
 ```
@@ -46,10 +43,7 @@ macOS launchd
   |             +--> telegram_bot.py
   |
   +--> com.bigshot.receive-payment (KeepAlive)
-  |      +--> receive_payment_server.py
-  |
-  +--> com.bigshot.business-dashboard (KeepAlive)
-         +--> dashboard_server.py
+         +--> receive_payment_server.py
 
 Ollama.app
   +--> qwen3:14b
@@ -75,7 +69,6 @@ macOS login
 ```
 
 The Finance bot and payment server use launchd `KeepAlive` for automatic recovery.
-The dashboard also uses launchd `KeepAlive` and is bound to localhost.
 The Finance bot also uses `/private/tmp/business-ai-finance-bot.lock` to prevent
 duplicate polling.
 
@@ -104,13 +97,6 @@ excel_import_server.py
   +--> excel_importer.py
          +--> formula_engine.py
          +--> master_relink_db.py
-
-dashboard_server.py
-  +--> dashboard_service.py
-         +--> formula_engine.py
-         +--> bi_search.py
-         +--> ollama_client.py
-         +--> bi_reports.py / chart_pdf.py for exports
 ```
 
 ## Database Diagram
@@ -241,23 +227,6 @@ Payment reporting uses:
 - `Outstanding_Balance`
 
 ## API Map
-
-### Business Dashboard — `127.0.0.1:5062`
-
-| Method | Route | Purpose |
-|---|---|---|
-| GET | `/` | Executive Dashboard |
-| GET | `/health` | Read-only service health |
-| GET | `/api/dashboard/meta` | Architecture and milestone metadata |
-| GET | `/api/dashboard/dimensions` | Global filter values |
-| POST | `/api/dashboard/executive` | Canonical Executive dataset |
-| POST | `/api/dashboard/insights/executive` | Qwen narrative from BI evidence |
-| POST | `/api/dashboard/export/pdf` | Existing PDF report renderer |
-| POST | `/api/dashboard/export/excel` | Existing Excel report renderer |
-
-The dashboard API contains no SQL. It calls existing BI functions and returns
-their validated values. Browser components perform formatting and chart
-geometry only.
 
 ### Receive Payment — `127.0.0.1:5059`
 

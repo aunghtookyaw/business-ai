@@ -1,0 +1,13 @@
+Inventory - Inventory - Current Stock
+Period: This Year
+
+1. product: Sote Phwar 1L | store: Heho Store (Home) | stock_qty: 6,800
+2. product: Sote Phwar 4L | store: Heho Store (Home) | stock_qty: 200
+3. product: Sote Phwar 500 mL | store: Heho Store (Home) | stock_qty: 460
+4. product: Sote Phwar 1L | store: Min Hla Store | stock_qty: 5,000
+5. product: Sote Phwar 4L | store: Min Hla Store | stock_qty: 80
+6. product: Sote Phwar 500 mL | store: Min Hla Store | stock_qty: 1,000
+7. product: Sote Phwar 1L | store: Naung Tayar | stock_qty: 3,000
+8. product: Sote Phwar 1L | store: Tatkone Store | stock_qty: 4,985
+9. product: Sote Phwar 4L | store: Tatkone Store | stock_qty: 493
+10. product: Sote Phwar 500 mL | store: Tatkone Store | stock_qty: 1,760

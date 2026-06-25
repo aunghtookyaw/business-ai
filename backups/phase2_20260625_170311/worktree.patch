@@ -1,0 +1,394 @@
+diff --git a/config.example.py b/config.example.py
+index bd4419f..7b0f534 100644
+--- a/config.example.py
++++ b/config.example.py
+@@ -56,6 +56,10 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "strongpassword")
+ 
+ POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5433")
+ 
++POSTGRES_CONNECT_TIMEOUT_SECONDS = int(os.getenv("POSTGRES_CONNECT_TIMEOUT_SECONDS", "5"))
++
++POSTGRES_STATEMENT_TIMEOUT_MS = int(os.getenv("POSTGRES_STATEMENT_TIMEOUT_MS", "30000"))
++
+ TRANSACTION_SCHEMA = os.getenv("TRANSACTION_SCHEMA", "pipkgfu2wr9qxyy")
+ 
+ TRANSACTION_TABLE = os.getenv("TRANSACTION_TABLE", "Transection")
+diff --git a/receive_payment_local.html b/receive_payment_local.html
+index 755e950..1025384 100644
+--- a/receive_payment_local.html
++++ b/receive_payment_local.html
+@@ -79,7 +79,7 @@
+     </section>
+   </main>
+   <script>
+-    const API = 'http://127.0.0.1:5060';
++    const API = 'http://127.0.0.1:5059';
+     let vouchers = [];
+     let selected = null;
+     const rowsEl = document.getElementById('voucherRows');
+diff --git a/scripts/receive_payment_server.py b/scripts/receive_payment_server.py
+index 27c1971..bd2fbf6 100644
+--- a/scripts/receive_payment_server.py
++++ b/scripts/receive_payment_server.py
+@@ -51,7 +51,11 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
+         COALESCE(NULLIF(TRIM(f."Customer"), ''), '') AS "Customer",
+         '' AS "Sote_Type",
+         f."Date" AS "Invoice_Date",
+-        COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total"
++        COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total",
++        COALESCE(SUM(f."Total_Received"), 0) AS "Source_Total_Received",
++        COALESCE(SUM(f."Outstanding_Balance"), 0) AS "Source_Outstanding_Balance",
++        COALESCE(MAX(f."Payment_Status"), '') AS "Source_Payment_Status",
++        COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(f."Note"), ''), ' | ' ORDER BY NULLIF(TRIM(f."Note"), '')), '') AS "Note"
+       FROM "{schema}"."farm_transection" f
+       WHERE COALESCE(f.__nc_deleted, false) = false
+         AND f."Invoice_Number" IS NOT NULL
+@@ -64,7 +68,11 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
+         COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') AS "Customer",
+         COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(s."Item"), ''), ', ' ORDER BY NULLIF(TRIM(s."Item"), '')), '') AS "Sote_Type",
+         s."Invoice_Date" AS "Invoice_Date",
+-        COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total"
++        COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total",
++        COALESCE(SUM(s."Total_Received"), 0) AS "Source_Total_Received",
++        COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Source_Outstanding_Balance",
++        COALESCE(MAX(s."Payment_Status"), '') AS "Source_Payment_Status",
++        COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(s."Note"), ''), ' | ' ORDER BY NULLIF(TRIM(s."Note"), '')), '') AS "Note"
+       FROM "{schema}"."Sotephwar_Transection" s
+       WHERE COALESCE(s.__nc_deleted, false) = false
+         AND s."Invoice_Number" IS NOT NULL
+@@ -93,13 +101,19 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
+         sv."Sote_Type",
+         sv."Invoice_Date",
+         sv."Voucher_Total",
+-        COALESCE(p."Total_Received", 0) AS "Total_Received",
+-        GREATEST(sv."Voucher_Total" - COALESCE(p."Total_Received", 0), 0) AS "Outstanding_Balance",
++        GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)) AS "Total_Received",
++        GREATEST(
++          sv."Voucher_Total" - GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)),
++          0
++        ) AS "Outstanding_Balance",
+         CASE
+-          WHEN sv."Voucher_Total" > 0 AND COALESCE(p."Total_Received", 0) >= sv."Voucher_Total" THEN 'Paid'
+-          WHEN COALESCE(p."Total_Received", 0) > 0 THEN 'Partial'
++          WHEN sv."Voucher_Total" > 0
++               AND GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)) >= sv."Voucher_Total"
++            THEN 'Paid'
++          WHEN GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)) > 0 THEN 'Partial'
+           ELSE 'Outstanding'
+-        END AS "Payment_Status"
++        END AS "Payment_Status",
++        COALESCE(sv."Note", '') AS "Note"
+       FROM source_vouchers sv
+       LEFT JOIN payments p
+         ON p."Sector" = sv."Sector"
+@@ -118,7 +132,8 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
+       vg."Total_Received" AS "New_Received",
+       vg."Total_Received",
+       vg."Outstanding_Balance",
+-      vg."Payment_Status"
++      vg."Payment_Status",
++      COALESCE(vg."Note", '') AS "Note"
+     FROM voucher_groups vg
+     {where_sql}
+     {order_sql}
+@@ -140,7 +155,8 @@ def _sotephwar_listing_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORD
+       COALESCE(s."Total_Received", 0) AS "New_Received",
+       COALESCE(s."Total_Received", 0) AS "Total_Received",
+       COALESCE(s."Outstanding_Balance", 0) AS "Outstanding_Balance",
+-      COALESCE(s."Payment_Status", '') AS "Payment_Status"
++      COALESCE(s."Payment_Status", '') AS "Payment_Status",
++      COALESCE(s."Note", '') AS "Note"
+     FROM "{schema}"."Sotephwar_Transection" s
+     WHERE COALESCE(s.__nc_deleted, false) = false
+       AND s."Invoice_Number" IS NOT NULL
+@@ -163,6 +179,7 @@ def _voucher_payload(row):
+     total_received = row.get("Total_Received")
+     outstanding_balance = row.get("Outstanding_Balance")
+     payment_status = row.get("Payment_Status") or ""
++    note = row.get("Note") or ""
+     if sector == "Sote Phwar" and "Customer_Name" in row:
+         return {
+             "sector": sector,
+@@ -176,6 +193,7 @@ def _voucher_payload(row):
+             "total_received": _money_value(total_received),
+             "outstanding_balance": _money_value(outstanding_balance),
+             "payment_status": payment_status,
++            "note": note,
+         }
+     return {
+         "sector": sector,
+@@ -189,6 +207,7 @@ def _voucher_payload(row):
+         "total_received": _money_value(total_received),
+         "outstanding_balance": _money_value(outstanding_balance),
+         "payment_status": payment_status,
++        "note": note,
+     }
+ 
+ 
+@@ -230,6 +249,33 @@ def _list_vouchers(search="", sector="", voucher_number="", invoice_date="", cus
+     formula_engine.ensure_payment_receive_table()
+     params = {}
+     sector = _normalize_sector_filter(sector)
++    if sector == "Sote Phwar":
++        conditions = ['COALESCE(s."Outstanding_Balance", 0) > 0']
++        if search:
++            conditions.append('''
++            (s."Invoice_Number"::text ILIKE %(search)s
++               OR COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') ILIKE %(search)s
++               OR COALESCE(NULLIF(TRIM(s."Item"), ''), '') ILIKE %(search)s)
++            ''')
++            params["search"] = f"%{search}%"
++        if voucher_number:
++            conditions.append('s."Invoice_Number"::text = %(voucher_number)s')
++            params["voucher_number"] = voucher_number
++        if invoice_date:
++            conditions.append('s."Invoice_Date" = %(invoice_date)s')
++            params["invoice_date"] = invoice_date
++        if customer:
++            conditions.append('COALESCE(NULLIF(TRIM(s."Customer_Name"), \'\'), \'\') ILIKE %(customer)s')
++            params["customer"] = f"%{customer}%"
++        where_sql = " AND " + " AND ".join(conditions)
++        with _connect() as conn:
++            conn.set_session(readonly=True)
++            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
++                cur.execute(_sotephwar_listing_query(where_sql=where_sql), params)
++                rows = cur.fetchall()
++                conn.rollback()
++        return [_voucher_payload(row) for row in rows]
++
+     conditions = []
+     if sector:
+         conditions.append('vg."Sector" = %(sector)s')
+@@ -378,11 +424,12 @@ def _basic_payment_page(
+             f"<td>{voucher['voucher_total']:,}</td>"
+             f"<td>{voucher['total_received']:,}</td>"
+             f"<td>{voucher['outstanding_balance']:,}</td>"
++            f"<td>{escape(voucher.get('note', ''))}</td>"
+             "</tr>"
+         )
+     if not rows:
+         rows.append(
+-            '<tr><td colspan="9" class="empty">'
++            '<tr><td colspan="10" class="empty">'
+             "No vouchers are available. Check the database connection, then refresh this page."
+             "</td></tr>"
+         )
+@@ -479,6 +526,7 @@ def _basic_payment_page(
+                       <th>Voucher Total</th>
+                       <th>Total Received</th>
+                       <th>Outstanding</th>
++                      <th>Note</th>
+                     </tr>
+                   </thead>
+                   <tbody>{"".join(rows)}</tbody>
+@@ -488,6 +536,8 @@ def _basic_payment_page(
+             <section class="side">
+               <label>Selected Voucher</label>
+               <input id="selectedVoucher" value="Click a voucher row on the left" readonly>
++              <label>Note</label>
++              <textarea id="selectedNote" rows="5" readonly></textarea>
+               <label>Receive Amount</label>
+               <input name="receive_amount" inputmode="numeric" placeholder="Enter new receive amount only" required>
+               <label>Payment Method</label>
+@@ -503,6 +553,7 @@ def _basic_payment_page(
+         <script>
+           const rows = Array.from(document.querySelectorAll('.voucher-row'));
+           const selectedVoucher = document.getElementById('selectedVoucher');
++          const selectedNote = document.getElementById('selectedNote');
+           const receiveAmount = document.querySelector('input[name="receive_amount"]');
+ 
+           function selectRow(row) {{
+@@ -511,6 +562,7 @@ def _basic_payment_page(
+             const radio = row.querySelector('input[type="radio"]');
+             radio.checked = true;
+             selectedVoucher.value = row.dataset.voucherSummary || radio.value;
++            selectedNote.value = row.cells[9] ? row.cells[9].textContent : '';
+             receiveAmount.focus();
+           }}
+ 
+diff --git a/telegram_bot.py b/telegram_bot.py
+index 9353081..abf2f47 100644
+--- a/telegram_bot.py
++++ b/telegram_bot.py
+@@ -68,6 +68,7 @@ PDF_EXPORT_DEFAULT_QUESTION = "this month kpi"
+ PDF_EXPORT_TITLE = "BigShot Finance Report"
+ CEO_PDF_EXPORT_TITLE = "BigShot CEO Management Report"
+ AUTO_DELETE_SECONDS = int(os.getenv("FINANCE_AUTO_DELETE_SECONDS", "86400"))
++TELEGRAM_WORKERS = int(os.getenv("FINANCE_TELEGRAM_WORKERS", "4"))
+ BI_STATE_KEY = "bi_wizard"
+ BI_PERSISTENCE_FILE = os.getenv("FINANCE_BI_PERSISTENCE_FILE", "/private/tmp/business-ai-bi-wizard-state.pkl")
+ MASTER_COMPARE_GRANULARITIES = [
+@@ -1488,7 +1489,12 @@ def main():
+         raise RuntimeError("TELEGRAM_ALLOWED_THREAD_ID is required.")
+ 
+     persistence = PicklePersistence(filename=BI_PERSISTENCE_FILE)
+-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True, persistence=persistence)
++    updater = Updater(
++        TELEGRAM_BOT_TOKEN,
++        use_context=True,
++        persistence=persistence,
++        workers=TELEGRAM_WORKERS,
++    )
+ 
+     dispatcher = updater.dispatcher
+ 
+@@ -1496,12 +1502,12 @@ def main():
+     dispatcher.add_handler(CommandHandler("menu", menu))
+     dispatcher.add_handler(CommandHandler("prompts", prompts))
+     dispatcher.add_handler(CommandHandler("start", menu))
+-    dispatcher.add_handler(CommandHandler("sync_obligations_calendar", sync_obligations_calendar))
+-    dispatcher.add_handler(CallbackQueryHandler(handle_bi_callback, pattern=r"^bi:"))
+-    dispatcher.add_handler(CallbackQueryHandler(handle_prompt_button, pattern=r"^finance:"))
++    dispatcher.add_handler(CommandHandler("sync_obligations_calendar", sync_obligations_calendar, run_async=True))
++    dispatcher.add_handler(CallbackQueryHandler(handle_bi_callback, pattern=r"^bi:", run_async=True))
++    dispatcher.add_handler(CallbackQueryHandler(handle_prompt_button, pattern=r"^finance:", run_async=True))
+ 
+     dispatcher.add_handler(
+-        MessageHandler(Filters.text, handle_message)
++        MessageHandler(Filters.text, handle_message, run_async=True)
+     )
+ 
+     print("Telegram AI Bot Running...")
+diff --git a/tests/test_receive_payment_server.py b/tests/test_receive_payment_server.py
+index 2460a81..c0e6aff 100644
+--- a/tests/test_receive_payment_server.py
++++ b/tests/test_receive_payment_server.py
+@@ -20,6 +20,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
+                     "new_received": 0,
+                     "total_received": 200000,
+                     "outstanding_balance": 2928000,
++                    "note": "Paid by transfer",
+                 },
+                 {
+                     "sector": "Sote Phwar",
+@@ -32,6 +33,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
+                     "new_received": 0,
+                     "total_received": 0,
+                     "outstanding_balance": 500000,
++                    "note": "",
+                 }
+             ]
+ 
+@@ -52,11 +54,14 @@ class ReceivePaymentServerTest(unittest.TestCase):
+         self.assertIn('list="customerSuggestions"', html)
+         self.assertIn("Farm||75", html)
+         self.assertIn("Sote Type / Item", html)
++        self.assertIn("<th>Note</th>", html)
+         self.assertIn('class="voucher-row"', html)
+         self.assertIn('id="selectedVoucher"', html)
++        self.assertIn('id="selectedNote"', html)
+         self.assertIn("function selectRow(row)", html)
+         self.assertIn("Enter new receive amount only", html)
+         self.assertIn("200,000", html)
++        self.assertIn("Paid by transfer", html)
+         self.assertIn("Save Payment", html)
+ 
+     def test_receive_payment_basic_shows_error_when_vouchers_fail_to_load(self):
+@@ -78,7 +83,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
+         self.assertIn("Could not load vouchers: database unavailable", html)
+         self.assertIn("No vouchers are available.", html)
+ 
+-    def test_voucher_query_groups_sotephwar_by_invoice_and_uses_payment_history(self):
++    def test_voucher_query_groups_sotephwar_for_payment_lookup_and_uses_payment_history(self):
+         sql = receive_payment_server._voucher_query(
+             where_sql='WHERE vg."Sector" = %(sector)s AND COALESCE(vg."Outstanding_Balance", 0) > 0'
+         )
+@@ -87,10 +92,32 @@ class ReceivePaymentServerTest(unittest.TestCase):
+         self.assertIn('"Sotephwar_Transection" s', sql)
+         self.assertIn('GROUP BY s."Invoice_Number"::text', sql)
+         self.assertIn('"Payment_Receive"', sql)
+-        self.assertIn('GREATEST(sv."Voucher_Total" - COALESCE(p."Total_Received", 0), 0)', sql)
++        self.assertIn('COALESCE(SUM(s."Total_Received"), 0) AS "Source_Total_Received"', sql)
++        self.assertIn('COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Source_Outstanding_Balance"', sql)
++        self.assertIn('GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0))', sql)
+         self.assertIn('COALESCE(vg."Outstanding_Balance", 0) > 0', sql)
++        self.assertNotIn('COALESCE(MAX(s."Total_Received"), 0)', sql)
++        self.assertNotIn('COALESCE(MAX(s."Outstanding_Balance"), 0)', sql)
+         self.assertNotIn('COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Outstanding_Balance"', sql)
+ 
++    def test_sotephwar_listing_query_returns_raw_rows(self):
++        sql = receive_payment_server._sotephwar_listing_query(
++            where_sql=(
++                ' AND COALESCE(s."Outstanding_Balance", 0) > 0'
++                ' AND COALESCE(NULLIF(TRIM(s."Customer_Name"), \'\'), \'\') ILIKE %(customer)s'
++            )
++        )
++
++        self.assertIn('"Sotephwar_Transection" s', sql)
++        self.assertIn('s."Item"', sql)
++        self.assertIn('s."Total_Amount"', sql)
++        self.assertIn('s."Total_Received"', sql)
++        self.assertIn('s."Outstanding_Balance"', sql)
++        self.assertIn('s."Payment_Status"', sql)
++        self.assertIn('ILIKE %(customer)s', sql)
++        self.assertNotIn('GROUP BY', sql)
++        self.assertNotIn('STRING_AGG', sql)
++
+     def test_create_payment_receive_inserts_history_and_returns_refreshed_voucher(self):
+         calls = []
+         fetch_count = {"count": 0}
+@@ -109,6 +136,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
+                 "new_received": 0,
+                 "total_received": 200000,
+                 "outstanding_balance": 2928000,
++                "note": "Paid by transfer",
+             },
+             {
+                 "sector": "Farm",
+@@ -121,6 +149,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
+                 "new_received": 100000,
+                 "total_received": 300000,
+                 "outstanding_balance": 2828000,
++                "note": "Paid by transfer",
+             },
+         ]
+ 
+@@ -166,6 +195,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
+         self.assertEqual(100000, payload["payment"]["receive_amount"])
+         self.assertEqual(300000, payload["voucher"]["total_received"])
+         self.assertEqual(2828000, payload["voucher"]["outstanding_balance"])
++        self.assertEqual("Paid by transfer", payload["voucher"]["note"])
+         self.assertEqual("insert", calls[1][0])
+         inserted = calls[1][1]
+         self.assertEqual(3128000, inserted["invoice_amount"])
+@@ -190,6 +220,7 @@ class ReceivePaymentServerTest(unittest.TestCase):
+                 "new_received": 0,
+                 "total_received": 100000,
+                 "outstanding_balance": 0,
++                "note": "Closed",
+             }
+ 
+         def fake_insert_payment_receive(**values):
+diff --git a/tools/formula_engine.py b/tools/formula_engine.py
+index 3b1e0c1..30bfe1c 100644
+--- a/tools/formula_engine.py
++++ b/tools/formula_engine.py
+@@ -238,13 +238,21 @@ def _transaction_table_parts():
+ 
+ 
+ def _connect():
+-    return psycopg2.connect(
+-        host=config.POSTGRES_HOST,
+-        database=config.POSTGRES_DB,
+-        user=config.POSTGRES_USER,
+-        password=config.POSTGRES_PASSWORD,
+-        port=config.POSTGRES_PORT,
+-    )
++    options = []
++    statement_timeout = getattr(config, "POSTGRES_STATEMENT_TIMEOUT_MS", 0)
++    if statement_timeout:
++        options.append(f"-c statement_timeout={int(statement_timeout)}")
++    kwargs = {
++        "host": config.POSTGRES_HOST,
++        "database": config.POSTGRES_DB,
++        "user": config.POSTGRES_USER,
++        "password": config.POSTGRES_PASSWORD,
++        "port": config.POSTGRES_PORT,
++        "connect_timeout": getattr(config, "POSTGRES_CONNECT_TIMEOUT_SECONDS", 5),
++    }
++    if options:
++        kwargs["options"] = " ".join(options)
++    return psycopg2.connect(**kwargs)
+ 
+ 
+ def _fetch_all(sql, params=None):
