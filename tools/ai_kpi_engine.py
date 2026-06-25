@@ -1,5 +1,5 @@
 from tools.nocodb_client import get_transactions
-from tools.openclaw_client import ask_ai
+from tools.ollama_client import ask_ai
 
 
 def calculate_sector_expense(records):

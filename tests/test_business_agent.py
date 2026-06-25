@@ -5,6 +5,68 @@ from tools import formula_engine
 
 
 class BusinessAgentRoutingTest(unittest.TestCase):
+    def test_payment_voucher_lookup_rejects_ambiguous_voucher_number(self):
+        original_fetch_all = formula_engine._fetch_all
+        formula_engine._fetch_all = lambda sql, params=None: [
+            {
+                "sector": "Sote Phwar",
+                "voucher_number": "32",
+                "invoice_date": "2026-05-10",
+                "customer": "Mya Yadanar",
+                "invoice_amount": 36400000,
+                "current_received": 36400000,
+            },
+            {
+                "sector": "Sote Phwar",
+                "voucher_number": "32",
+                "invoice_date": "2026-06-09",
+                "customer": "Mar Mar Aye",
+                "invoice_amount": 3400000,
+                "current_received": 0,
+            },
+        ]
+        try:
+            with self.assertRaisesRegex(ValueError, "Multiple vouchers match"):
+                formula_engine._payment_voucher_lookup("Sote Phwar", "32")
+        finally:
+            formula_engine._fetch_all = original_fetch_all
+
+    def test_payment_voucher_lock_uses_transaction_advisory_lock(self):
+        captured = {}
+        original_execute = formula_engine._execute_in_connection
+
+        def fake_execute(connection, sql, params=None):
+            captured["connection"] = connection
+            captured["sql"] = sql
+            captured["params"] = params
+
+        formula_engine._execute_in_connection = fake_execute
+        try:
+            connection = object()
+            formula_engine._lock_payment_voucher(
+                connection,
+                "Sote Phwar",
+                "32",
+                invoice_date="2026-05-10",
+                customer="Mya Yadanar",
+            )
+        finally:
+            formula_engine._execute_in_connection = original_execute
+
+        self.assertIs(connection, captured["connection"])
+        self.assertIn("pg_advisory_xact_lock", captured["sql"])
+        self.assertEqual(
+            "Sote Phwar|32|2026-05-10|Mya Yadanar",
+            captured["params"]["lock_key"],
+        )
+
+    def test_canonical_income_condition_excludes_sotephwar_transection_duplicates(self):
+        sql = formula_engine._canonical_transection_income_condition("source")
+
+        self.assertIn('source."Income_Expense" = \'Income\'', sql)
+        self.assertIn('source."Sector"', sql)
+        self.assertIn("'sote phwar'", sql)
+
     def test_machinary_equipment_routes_to_category_summary(self):
         self.assertEqual(
             "category_summary",
@@ -550,11 +612,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
     def test_sotephwar_payment_update_adds_received_amount_and_date_note(self):
         captured = {}
         original_fetch_all = formula_engine._fetch_all
-        original_fetch_one = formula_engine._fetch_one
-        original_execute = formula_engine._execute
-
-        def fake_execute(sql, params=None):
-            captured.setdefault("execute_sql", []).append(sql)
+        original_save_payment_receive = formula_engine.save_payment_receive
 
         def fake_fetch_all(sql, params=None):
             captured["sql"] = sql
@@ -575,31 +633,24 @@ class BusinessAgentRoutingTest(unittest.TestCase):
                 },
             ]
 
-        def fake_fetch_one(sql, params=None):
-            captured.setdefault("fetch_one_sql", []).append(sql)
-            captured["fetch_one_params"] = params
-            if "FROM" in sql and "Sotephwar_Transection" in sql:
-                return {
-                    "sector": "Sote Phwar",
-                    "voucher_number": "12",
-                    "invoice_date": "2026-06-01",
-                    "customer": "Aye Aye",
-                    "invoice_amount": 1000000,
-                    "current_received": 100000,
-                }
-            if "AS payment_received" in sql:
-                payment_calls = captured.setdefault("payment_calls", 0)
-                captured["payment_calls"] = payment_calls + 1
-                return {"payment_received": 100000 if payment_calls == 0 else 500000}
-            if "INSERT INTO" in sql:
-                captured["insert_sql"] = sql
-                captured["insert_params"] = params
-                return {"id": 10}
-            return {}
+        def fake_save_payment_receive(**values):
+            captured["save_values"] = values
+            return {
+                "payment": {
+                    "id": 10,
+                    "previous_paid": 100000,
+                    "receive_amount": values["receive_amount"],
+                },
+                "summary": {
+                    "voucher_total": 1000000,
+                    "total_received": 500000,
+                    "outstanding_balance": 500000,
+                    "payment_status": "Partial",
+                },
+            }
 
-        formula_engine._execute = fake_execute
-        formula_engine._fetch_one = fake_fetch_one
         formula_engine._fetch_all = fake_fetch_all
+        formula_engine.save_payment_receive = fake_save_payment_receive
         try:
             result = formula_engine.run_formula(
                 "sotephwar_payment_update",
@@ -607,20 +658,16 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             )
         finally:
             formula_engine._fetch_all = original_fetch_all
-            formula_engine._fetch_one = original_fetch_one
-            formula_engine._execute = original_execute
+            formula_engine.save_payment_receive = original_save_payment_receive
 
         self.assertTrue(result["updated"])
         self.assertEqual("12", result["invoice_number"])
         self.assertEqual(400000, result["payment_amount"])
         self.assertEqual("2026-06-06", result["received_date"])
-        self.assertEqual("12", captured["insert_params"]["voucher_number"])
-        self.assertEqual(400000, captured["insert_params"]["receive_amount"])
-        self.assertEqual(100000, captured["insert_params"]["previous_received"])
-        self.assertIn("INSERT INTO", captured["insert_sql"])
-        self.assertIn("Payment_Receive", captured["insert_sql"])
-        all_sql = "\n".join(captured.get("execute_sql", []) + captured.get("fetch_one_sql", []))
-        self.assertNotIn('"Amount_Received" =', all_sql)
+        self.assertEqual("12", captured["save_values"]["voucher_number"])
+        self.assertEqual(400000, captured["save_values"]["receive_amount"])
+        self.assertEqual("Sote Phwar", captured["save_values"]["sector"])
+        self.assertEqual("Business AI", captured["save_values"]["recorded_by"])
 
     def test_sotephwar_payment_update_answer_shows_received_table(self):
         answer = business_agent._fast_answer({
@@ -662,80 +709,55 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertEqual("Admin", values["recorded_by"])
 
     def test_payment_receive_insert_updates_voucher_summary_without_invoice_totals(self):
-        captured = {"sql": []}
-        original_execute = formula_engine._execute
-        original_fetch_one = formula_engine._fetch_one
+        captured = {}
+        original_save_payment_receive = formula_engine.save_payment_receive
 
-        def fake_execute(sql, params=None):
-            captured["sql"].append(sql)
-            captured.setdefault("execute_params", []).append(params)
-
-        def fake_fetch_one(sql, params=None):
-            captured["sql"].append(sql)
-            captured["params"] = params
-            if "FROM" in sql and "farm_transection" in sql:
-                return {
-                    "sector": "Farm",
-                    "voucher_number": "123",
-                    "invoice_date": "2026-06-01",
-                    "customer": "Aye Aye",
-                    "invoice_amount": 1000000,
-                    "current_received": 200000,
-                }
-            if "INSERT INTO" in sql:
-                return {
+        def fake_save_payment_receive(**values):
+            captured["values"] = values
+            return {
+                "payment": {
                     "id": 1,
                     "receive_date": "2026-06-20",
-                    "sector": params["sector"],
-                    "voucher_number": params["voucher_number"],
-                    "customer": params["customer"],
-                    "invoice_amount": params["invoice_amount"],
-                    "previous_paid": params["previous_paid"],
-                    "receive_amount": params["receive_amount"],
-                    "outstanding_balance": params["outstanding_balance"],
-                    "payment_method": params["payment_method"],
-                    "reference_number": params["reference_number"],
-                    "notes": params["notes"],
-                    "recorded_by": params["recorded_by"],
-                }
-            if "AS payment_received" in sql:
-                payment_calls = captured.setdefault("payment_calls", 0)
-                captured["payment_calls"] = payment_calls + 1
-                return {"payment_received": 0 if payment_calls == 0 else 300000}
-            return {}
+                    "sector": values["sector"],
+                    "voucher_number": values["voucher_number"],
+                    "customer": "Aye Aye",
+                    "invoice_amount": 1000000,
+                    "previous_paid": 200000,
+                    "receive_amount": values["receive_amount"],
+                    "outstanding_balance": 500000,
+                    "payment_method": values["payment_method"],
+                    "reference_number": values["reference_number"],
+                    "notes": values["notes"],
+                    "recorded_by": values["recorded_by"],
+                },
+                "summary": {
+                    "voucher_total": 1000000,
+                    "total_received": 500000,
+                    "outstanding_balance": 500000,
+                    "payment_status": "Partial",
+                },
+            }
 
-        formula_engine._execute = fake_execute
-        formula_engine._fetch_one = fake_fetch_one
+        formula_engine.save_payment_receive = fake_save_payment_receive
         try:
             result = formula_engine.run_formula(
                 "payment_receive_insert",
                 "receive payment sector Farm voucher 123 amount 300000 method Cash",
             )
         finally:
-            formula_engine._execute = original_execute
-            formula_engine._fetch_one = original_fetch_one
+            formula_engine.save_payment_receive = original_save_payment_receive
 
         self.assertTrue(result["inserted"])
-        self.assertEqual(0, result["payment"]["previous_paid"])
+        self.assertEqual(200000, result["payment"]["previous_paid"])
         self.assertEqual(300000, result["payment"]["receive_amount"])
-        self.assertEqual(700000, result["payment"]["outstanding_balance"])
+        self.assertEqual(500000, result["payment"]["outstanding_balance"])
         self.assertEqual(1000000, result["summary"]["voucher_total"])
-        self.assertEqual(300000, result["summary"]["total_received"])
-        self.assertEqual(700000, result["summary"]["outstanding_balance"])
+        self.assertEqual(500000, result["summary"]["total_received"])
+        self.assertEqual(500000, result["summary"]["outstanding_balance"])
         self.assertEqual("Partial", result["summary"]["payment_status"])
-        sql_text = "\n".join(captured["sql"])
-        self.assertIn("INSERT INTO", sql_text)
-        self.assertIn("Payment_Receive", sql_text)
-        self.assertIn("UPDATE", sql_text)
-        self.assertIn('"Total_Received" = allocated.row_received', sql_text)
-        self.assertIn('"Outstanding_Balance" = GREATEST(COALESCE(target."Total_Amount", 0) - allocated.row_received, 0)', sql_text)
-        self.assertIn('"Payment_Status" = CASE', sql_text)
-        self.assertIn("WHEN GREATEST(COALESCE(target.\"Total_Amount\", 0) - allocated.row_received, 0) = 0", sql_text)
-        self.assertIn("WHEN allocated.row_received > 0 THEN 'Partial'", sql_text)
-        self.assertNotIn('"Paid" =', sql_text)
-        self.assertNotIn('"Amount_Received" =', sql_text)
-        self.assertNotIn('"Total_Due" =', sql_text)
-        self.assertNotIn('"Total_Amount" =', sql_text)
+        self.assertEqual("Farm", captured["values"]["sector"])
+        self.assertEqual("123", captured["values"]["voucher_number"])
+        self.assertEqual(300000, captured["values"]["receive_amount"])
 
     def test_master_name_comparison_routes_and_formats_fast_answer(self):
         self.assertEqual(
@@ -854,7 +876,7 @@ class BusinessAgentRoutingTest(unittest.TestCase):
         self.assertIn("Recommended actions:", answer)
         self.assertNotIn('"kpi"', answer)
 
-    def test_combined_kpi_uses_sotephwar_transection_without_double_counting(self):
+    def test_combined_kpi_uses_canonical_formula_totals_without_adjustment(self):
         result = business_agent._combined_kpi(
             "month:2026-05",
             {
@@ -872,13 +894,10 @@ class BusinessAgentRoutingTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual(1_300, result["total_income"])
+        self.assertEqual(1_000, result["total_income"])
         self.assertEqual(400, result["total_expense"])
-        self.assertEqual(900, result["net_profit"])
-        self.assertEqual(
-            800,
-            result["sources"]["transection_income_excluding_sotephwar"],
-        )
+        self.assertEqual(600, result["net_profit"])
+        self.assertEqual(60, result["profit_margin_percent"])
         self.assertEqual(
             500,
             result["sources"]["sotephwar_transection_total_amount"],

@@ -1,4 +1,5 @@
 import csv
+import json
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -367,6 +368,8 @@ def write_excel_report(payload, output_path):
         sheet.append(["Metric", "Value"])
         for key, value in payload["result"].items():
             if key != "formula":
+                if isinstance(value, (dict, list, tuple)):
+                    value = json.dumps(value, default=str, sort_keys=True)
                 sheet.append([key, value])
 
     workbook.save(output_path)

@@ -8,7 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from business_agent import FAST_FORMULAS, choose_formula
-from tools.openclaw_client import ask_ai
+from tools.ollama_client import ask_ai
 from tools.formula_engine import (
     cash_flow,
     category_summary,

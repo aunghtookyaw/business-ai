@@ -238,13 +238,21 @@ def _transaction_table_parts():
 
 
 def _connect():
-    return psycopg2.connect(
-        host=config.POSTGRES_HOST,
-        database=config.POSTGRES_DB,
-        user=config.POSTGRES_USER,
-        password=config.POSTGRES_PASSWORD,
-        port=config.POSTGRES_PORT,
-    )
+    options = []
+    statement_timeout = getattr(config, "POSTGRES_STATEMENT_TIMEOUT_MS", 0)
+    if statement_timeout:
+        options.append(f"-c statement_timeout={int(statement_timeout)}")
+    kwargs = {
+        "host": config.POSTGRES_HOST,
+        "database": config.POSTGRES_DB,
+        "user": config.POSTGRES_USER,
+        "password": config.POSTGRES_PASSWORD,
+        "port": config.POSTGRES_PORT,
+        "connect_timeout": getattr(config, "POSTGRES_CONNECT_TIMEOUT_SECONDS", 5),
+    }
+    if options:
+        kwargs["options"] = " ".join(options)
+    return psycopg2.connect(**kwargs)
 
 
 def _fetch_all(sql, params=None):
@@ -270,6 +278,12 @@ def _fetch_one_in_connection(connection, sql, params=None):
         cursor.execute(sql, params or {})
         row = cursor.fetchone()
     return dict(row) if row else {}
+
+
+def _fetch_all_in_connection(connection, sql, params=None):
+    with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+        cursor.execute(sql, params or {})
+        return [dict(row) for row in cursor.fetchall()]
 
 
 def _execute_in_connection(connection, sql, params=None):
@@ -982,6 +996,15 @@ def _include_sotephwar_income(filters):
 def _include_transaction_rows(filters):
     filters = filters or {}
     return not filters.get("farm_customer")
+
+
+def _canonical_transection_income_condition(alias="t"):
+    return f'''
+      NOT (
+        {alias}."Income_Expense" = 'Income'
+        AND LOWER(TRIM(COALESCE({alias}."Sector", ''))) IN ('sote phwar', 'sotephwar')
+      )
+    '''
 
 
 def _farm_filter(period, filters):
@@ -1908,6 +1931,7 @@ def sales_total(period="all_time", filters=None):
             {_transaction_category_link_join("t")}
             WHERE COALESCE(t.__nc_deleted, false) = false
               AND t."Income_Expense" = 'Income'
+              AND {_canonical_transection_income_condition("t")}
               {filter_sql}
               {date_sql}
             ''',
@@ -1987,7 +2011,14 @@ def gross_profit(period="all_time", filters=None):
         row = _fetch_one(
             f'''
             SELECT
-              COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS income,
+              COALESCE(SUM(
+                CASE
+                  WHEN t."Income_Expense" = 'Income'
+                       AND {_canonical_transection_income_condition("t")}
+                    THEN t."Amount"
+                  ELSE 0
+                END
+              ), 0) AS income,
               COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS expense
             FROM {_table_ref()} t
             {_transaction_category_link_join("t")}
@@ -2031,6 +2062,7 @@ def kpi_overview(period="all_time", filters=None):
         "total_expense": expense,
         "net_profit": profit,
         "profit_margin_percent": margin,
+        "sources": totals.get("sources") or {},
     }, filters)
 
 
@@ -2044,7 +2076,14 @@ def cash_flow(period="all_time", filters=None):
             f'''
             SELECT
               COALESCE(t."Payment_Method", 'Unknown') AS payment_method,
-              COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS inflow,
+              COALESCE(SUM(
+                CASE
+                  WHEN t."Income_Expense" = 'Income'
+                       AND {_canonical_transection_income_condition("t")}
+                    THEN t."Amount"
+                  ELSE 0
+                END
+              ), 0) AS inflow,
               COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS outflow
             FROM {_table_ref()} t
             {_transaction_category_link_join("t")}
@@ -2113,7 +2152,14 @@ def sector_summary(period="all_time", filters=None):
             f'''
             SELECT
               COALESCE(t."Sector", 'Unknown') AS sector,
-              COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS income,
+              COALESCE(SUM(
+                CASE
+                  WHEN t."Income_Expense" = 'Income'
+                       AND {_canonical_transection_income_condition("t")}
+                    THEN t."Amount"
+                  ELSE 0
+                END
+              ), 0) AS income,
               COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS expense
             FROM {_table_ref()} t
             {_transaction_category_link_join("t")}
@@ -2186,7 +2232,14 @@ def category_summary(period="all_time", filters=None):
             SELECT
               COALESCE(t."Sector", 'Unknown') AS sector,
               COALESCE({category_expr}, 'Unknown') AS category,
-              COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Income' THEN t."Amount" ELSE 0 END), 0) AS income,
+              COALESCE(SUM(
+                CASE
+                  WHEN t."Income_Expense" = 'Income'
+                       AND {_canonical_transection_income_condition("t")}
+                    THEN t."Amount"
+                  ELSE 0
+                END
+              ), 0) AS income,
               COALESCE(SUM(CASE WHEN t."Income_Expense" = 'Expense' THEN t."Amount" ELSE 0 END), 0) AS expense,
               COUNT(*) AS transaction_count
             FROM {_table_ref()} t
@@ -2371,6 +2424,7 @@ def top_income(period="all_time", filters=None, limit=5):
             {_transaction_category_link_join("t")}
             WHERE COALESCE(t.__nc_deleted, false) = false
               AND t."Income_Expense" = 'Income'
+              AND {_canonical_transection_income_condition("t")}
               AND t."Amount" IS NOT NULL
               {filter_sql}
               {date_sql}
@@ -2714,10 +2768,17 @@ def sotephwar_payment_update(question):
         date=values["received_date"].isoformat(),
         amount=values["amount"],
     )
-    ensure_payment_receive_table()
-    ensure_voucher_summary_fields()
-    invoice = _payment_voucher_lookup("Sote Phwar", values["invoice_number"])
-    if not invoice:
+    try:
+        saved = save_payment_receive(
+            sector="Sote Phwar",
+            voucher_number=values["invoice_number"],
+            receive_amount=values["amount"],
+            payment_method="Sote Phwar Receive",
+            notes=note,
+            recorded_by="Business AI",
+            receive_date=values["received_date"],
+        )
+    except LookupError:
         return {
             "formula": "sotephwar_payment_update",
             "period": "all_time",
@@ -2728,48 +2789,19 @@ def sotephwar_payment_update(question):
             "received_date": values["received_date"].isoformat(),
             "invoices": [],
         }
-    invoice_amount = int(invoice.get("invoice_amount") or 0)
-    previous_received = _payment_receive_total("Sote Phwar", values["invoice_number"])
-    receive_amount = int(values["amount"] or 0)
-    outstanding_balance = invoice_amount - previous_received - receive_amount
-    if outstanding_balance < 0:
+    except ValueError as exc:
         return {
             "formula": "sotephwar_payment_update",
             "period": "all_time",
             "updated": False,
-            "error": "Outstanding_Balance cannot be negative.",
+            "error": str(exc),
             "invoice_number": values["invoice_number"],
             "payment_amount": values["amount"],
             "received_date": values["received_date"].isoformat(),
             "invoices": [],
         }
-    _fetch_one(
-        f'''
-        INSERT INTO {_payment_receive_table_ref()}
-          ("Receive_Date", "Sector", "Voucher_Number", "Customer", "Invoice_Amount",
-           "Previous_Paid", "Receive_Amount", "Outstanding_Balance", "Payment_Method",
-           "Reference_Number", "Notes", "Recorded_By")
-        VALUES
-          (%(receive_date)s, 'Sote Phwar', %(voucher_number)s, %(customer)s, %(invoice_amount)s,
-           %(previous_received)s, %(receive_amount)s, %(outstanding_balance)s, %(payment_method)s,
-           %(reference_number)s, %(notes)s, %(recorded_by)s)
-        RETURNING id
-        ''',
-        {
-            "receive_date": values["received_date"],
-            "voucher_number": values["invoice_number"],
-            "customer": invoice.get("customer") or "",
-            "invoice_amount": invoice_amount,
-            "previous_received": previous_received,
-            "receive_amount": receive_amount,
-            "outstanding_balance": outstanding_balance,
-            "payment_method": "Sote Phwar Receive",
-            "reference_number": "",
-            "notes": note,
-            "recorded_by": "Business AI",
-        },
-    )
-    _update_voucher_payment_summary("Sote Phwar", values["invoice_number"])
+
+    previous_received = int(saved["payment"].get("previous_paid") or 0)
     rows = sotephwar_transection_customer(
         period="all_time",
         invoice_numbers=[values["invoice_number"]],
@@ -3235,7 +3267,7 @@ def _payment_status(voucher_total, total_received):
 
 
 def _payment_voucher_lookup(sector, voucher_number, connection=None, invoice_date=None, customer=None):
-    fetch_one = _fetch_one if connection is None else lambda sql, params=None: _fetch_one_in_connection(connection, sql, params)
+    fetch_all = _fetch_all if connection is None else lambda sql, params=None: _fetch_all_in_connection(connection, sql, params)
     params = {"voucher_number": voucher_number}
     farm_filters = []
     sote_filters = []
@@ -3249,13 +3281,13 @@ def _payment_voucher_lookup(sector, voucher_number, connection=None, invoice_dat
         sote_filters.append(f"AND COALESCE({_linked_customer_expr('s')}, '') = %(customer)s")
 
     if sector == "Farm":
-        return fetch_one(
+        rows = fetch_all(
             f'''
             SELECT
               'Farm' AS sector,
               COALESCE(f."Invoice_Number"::text, '') AS voucher_number,
-              MIN(f."Date") AS invoice_date,
-              MIN(COALESCE({_linked_farm_customer_expr("f")}, '')) AS customer,
+              f."Date" AS invoice_date,
+              COALESCE({_linked_farm_customer_expr("f")}, '') AS customer,
               COALESCE(SUM(f."Total_Amount"), 0) AS invoice_amount,
               COALESCE(SUM(f."Total_Received"), 0) AS current_received
             FROM {_farm_transection_table_ref()} f
@@ -3263,19 +3295,21 @@ def _payment_voucher_lookup(sector, voucher_number, connection=None, invoice_dat
             WHERE COALESCE(f.__nc_deleted, false) = false
               AND f."Invoice_Number"::text = %(voucher_number)s
               {" ".join(farm_filters)}
-            GROUP BY f."Invoice_Number"::text
+            GROUP BY
+              f."Invoice_Number"::text,
+              f."Date",
+              COALESCE({_linked_farm_customer_expr("f")}, '')
             ''',
             params,
         )
-
-    if sector == "Sote Phwar":
-        return fetch_one(
+    elif sector == "Sote Phwar":
+        rows = fetch_all(
             f'''
             SELECT
               'Sote Phwar' AS sector,
               COALESCE(s."Invoice_Number"::text, '') AS voucher_number,
-              MIN(s."Invoice_Date") AS invoice_date,
-              MIN(COALESCE({_linked_customer_expr("s")}, '')) AS customer,
+              s."Invoice_Date" AS invoice_date,
+              COALESCE({_linked_customer_expr("s")}, '') AS customer,
               COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount,
               COALESCE(SUM(s."Total_Received"), 0) AS current_received
             FROM {_sotephwar_transection_table_ref()} s
@@ -3283,12 +3317,35 @@ def _payment_voucher_lookup(sector, voucher_number, connection=None, invoice_dat
             WHERE COALESCE(s.__nc_deleted, false) = false
               AND s."Invoice_Number"::text = %(voucher_number)s
               {" ".join(sote_filters)}
-            GROUP BY s."Invoice_Number"::text
+            GROUP BY
+              s."Invoice_Number"::text,
+              s."Invoice_Date",
+              COALESCE({_linked_customer_expr("s")}, '')
             ''',
             params,
         )
+    else:
+        return {}
 
-    return {}
+    if len(rows) > 1:
+        raise ValueError(
+            "Multiple vouchers match this voucher number. Specify invoice date and customer."
+        )
+    return rows[0] if rows else {}
+
+
+def _lock_payment_voucher(connection, sector, voucher_number, invoice_date=None, customer=None):
+    lock_key = "|".join([
+        str(sector or ""),
+        str(voucher_number or ""),
+        str(invoice_date or ""),
+        str(customer or ""),
+    ])
+    _execute_in_connection(
+        connection,
+        "SELECT pg_advisory_xact_lock(hashtextextended(%(lock_key)s, 0))",
+        {"lock_key": lock_key},
+    )
 
 
 def _payment_receive_total(sector, voucher_number, connection=None, invoice_date=None, customer=None):
@@ -3297,7 +3354,7 @@ def _payment_receive_total(sector, voucher_number, connection=None, invoice_date
     filters = []
     if invoice_date:
         params["invoice_date"] = invoice_date
-        filters.append('AND ("Invoice_Date" = %(invoice_date)s OR "Invoice_Date" IS NULL)')
+        filters.append('AND "Invoice_Date" = %(invoice_date)s')
     if customer:
         params["customer"] = customer
         filters.append('AND COALESCE("Customer", \'\') = %(customer)s')
@@ -3331,7 +3388,14 @@ def _payment_balance_status(total_amount, total_received):
     return outstanding_balance, "Partial"
 
 
-def _update_voucher_payment_summary(sector, voucher_number, connection=None, invoice_date=None, customer=None):
+def _update_voucher_payment_summary(
+    sector,
+    voucher_number,
+    connection=None,
+    invoice_date=None,
+    customer=None,
+    total_received=None,
+):
     ensure_voucher_summary_fields()
     voucher = _payment_voucher_lookup(
         sector,
@@ -3341,13 +3405,15 @@ def _update_voucher_payment_summary(sector, voucher_number, connection=None, inv
         customer=customer,
     )
     voucher_total = int(voucher.get("invoice_amount") or 0)
-    total_received = _payment_receive_total(
-        sector,
-        voucher_number,
-        connection=connection,
-        invoice_date=invoice_date,
-        customer=customer,
-    )
+    if total_received is None:
+        total_received = _payment_receive_total(
+            sector,
+            voucher_number,
+            connection=connection,
+            invoice_date=invoice_date,
+            customer=customer,
+        )
+    total_received = int(total_received or 0)
     outstanding_balance, payment_status = _payment_balance_status(voucher_total, total_received)
     if outstanding_balance < 0:
         logger.error(
@@ -3517,6 +3583,13 @@ def save_payment_receive(
     with _connect() as connection:
         try:
             with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                _lock_payment_voucher(
+                    connection,
+                    sector,
+                    voucher_number,
+                    invoice_date=invoice_date,
+                    customer=customer,
+                )
                 voucher = _payment_voucher_lookup(
                     sector,
                     voucher_number,
@@ -3527,12 +3600,16 @@ def save_payment_receive(
                 if not voucher:
                     raise LookupError("Voucher not found")
                 invoice_amount = int(voucher.get("invoice_amount") or 0)
-                previous_paid = _payment_receive_total(
+                history_received = _payment_receive_total(
                     sector,
                     voucher_number,
                     connection=connection,
                     invoice_date=invoice_date,
                     customer=customer,
+                )
+                previous_paid = max(
+                    history_received,
+                    int(voucher.get("current_received") or 0),
                 )
                 outstanding_balance = invoice_amount - (previous_paid + receive_amount)
                 if outstanding_balance < 0:
@@ -3596,6 +3673,7 @@ def save_payment_receive(
                     connection=connection,
                     invoice_date=invoice_date,
                     customer=customer,
+                    total_received=previous_paid + receive_amount,
                 )
             connection.commit()
         except Exception:
@@ -3675,72 +3753,21 @@ def payment_receive_insert(question):
         }
 
     try:
-        ensure_payment_receive_table()
-        ensure_voucher_summary_fields()
-        invoice = _payment_voucher_lookup(values["sector"], values["voucher_number"])
-        if not invoice:
-            return {
-                "formula": "payment_receive_insert",
-                "period": "all_time",
-                "inserted": False,
-                "missing": ["matching voucher"],
-                "values": values,
-            }
-        invoice_amount = int(invoice.get("invoice_amount") or 0)
-        previous_paid = _payment_previous_paid(values["sector"], values["voucher_number"])
-        receive_amount = int(values["receive_amount"] or 0)
-        outstanding_balance = invoice_amount - previous_paid - receive_amount
-        if outstanding_balance < 0:
-            return {
-                "formula": "payment_receive_insert",
-                "period": "all_time",
-                "inserted": False,
-                "error": "Outstanding_Balance cannot be negative.",
-                "values": values,
-            }
-        row = _fetch_one(
-            f'''
-            INSERT INTO {_payment_receive_table_ref()}
-              ("Receive_Date", "Sector", "Voucher_Number", "Customer", "Invoice_Amount",
-               "Previous_Paid", "Receive_Amount", "Outstanding_Balance", "Payment_Method",
-               "Reference_Number", "Notes", "Recorded_By")
-            VALUES
-              (%(receive_date)s, %(sector)s, %(voucher_number)s, %(customer)s, %(invoice_amount)s,
-               %(previous_paid)s, %(receive_amount)s, %(outstanding_balance)s, %(payment_method)s,
-               %(reference_number)s, %(notes)s, %(recorded_by)s)
-            RETURNING
-              id,
-              "Receive_Date" AS receive_date,
-              "Sector" AS sector,
-              "Voucher_Number" AS voucher_number,
-              "Customer" AS customer,
-              "Invoice_Amount" AS invoice_amount,
-              "Previous_Paid" AS previous_paid,
-              "Receive_Amount" AS receive_amount,
-              "Outstanding_Balance" AS outstanding_balance,
-              "Payment_Method" AS payment_method,
-              "Reference_Number" AS reference_number,
-              "Notes" AS notes,
-              "Recorded_By" AS recorded_by
-            ''',
-            {
-                **values,
-                "customer": invoice.get("customer") or "",
-                "invoice_amount": invoice_amount,
-                "previous_paid": previous_paid,
-                "receive_amount": receive_amount,
-                "outstanding_balance": outstanding_balance,
-            },
+        saved = save_payment_receive(
+            sector=values["sector"],
+            voucher_number=values["voucher_number"],
+            receive_amount=values["receive_amount"],
+            payment_method=values.get("payment_method") or "",
+            reference_number=values.get("reference_number") or "",
+            notes=values.get("notes") or "",
+            recorded_by=values.get("recorded_by") or "Telegram Finance Bot",
+            receive_date=values.get("receive_date"),
         )
-        for field in ("invoice_amount", "previous_paid", "receive_amount", "outstanding_balance"):
-            row[field] = int(row.get(field) or 0)
-        summary = _update_voucher_payment_summary(values["sector"], values["voucher_number"])
         return {
             "formula": "payment_receive_insert",
             "period": "all_time",
             "inserted": True,
-            "payment": row,
-            "summary": summary,
+            **saved,
         }
     except LookupError:
         return {

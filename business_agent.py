@@ -11,7 +11,7 @@ from tools.formula_engine import (
     normalize_period,
     run_formula,
 )
-from tools.openclaw_client import ask_ai
+from tools.ollama_client import ask_ai
 
 
 FAST_FORMULAS = {
@@ -856,18 +856,12 @@ def _sotephwar_sector_row(sector_summary):
 
 
 def _combined_kpi(period, kpi, sector_summary, sotephwar_summary):
-    sotephwar_sector = _sotephwar_sector_row(sector_summary)
-    main_sotephwar_income = _number(sotephwar_sector.get("income", 0))
-    sotephwar_invoice_income = _number(sotephwar_summary.get("total_amount", 0))
-
-    total_income = (
-        _number(kpi.get("total_income", 0))
-        - main_sotephwar_income
-        + sotephwar_invoice_income
-    )
+    total_income = _number(kpi.get("total_income", 0))
     total_expense = _number(kpi.get("total_expense", 0))
-    net_profit = total_income - total_expense
-    margin = round((net_profit / total_income) * 100, 2) if total_income else 0
+    net_profit = _number(kpi.get("net_profit", total_income - total_expense))
+    margin = kpi.get("profit_margin_percent")
+    if margin is None:
+        margin = round((net_profit / total_income) * 100, 2) if total_income else 0
 
     return {
         "formula": "combined_kpi_overview",
@@ -877,13 +871,12 @@ def _combined_kpi(period, kpi, sector_summary, sotephwar_summary):
         "net_profit": net_profit,
         "profit_margin_percent": margin,
         "sources": {
-            "transection_income_excluding_sotephwar": _number(kpi.get("total_income", 0)) - main_sotephwar_income,
-            "sotephwar_transection_total_amount": sotephwar_invoice_income,
-            "transection_expense": total_expense,
+            **(kpi.get("sources") or {}),
+            "sotephwar_transection_total_amount": _number(sotephwar_summary.get("total_amount", 0)),
         },
         "note": (
-            "Sote Phwar income comes from Sotephwar_Transection, so it does not need "
-            "to be duplicated in Transection."
+            "KPI totals use the canonical formula engine. Sote Phwar income is sourced "
+            "from Sotephwar_Transection and excluded from duplicated Transection income."
         ),
     }
 

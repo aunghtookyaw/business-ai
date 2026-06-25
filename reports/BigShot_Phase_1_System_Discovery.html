@@ -1,0 +1,341 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BigShot AI Business OS — Phase 1 System Discovery</title>
+<style>
+  @page { margin: 0.75in; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10.5pt; line-height: 1.35; }
+  h1 { color: #123b5d; font-size: 25pt; margin-bottom: 4pt; }
+  h2 { color: #123b5d; font-size: 17pt; border-bottom: 2px solid #d6a84b; padding-bottom: 4pt; margin-top: 24pt; }
+  h3 { color: #245c7c; font-size: 13pt; margin-top: 18pt; }
+  .subtitle { color: #52606d; font-size: 14pt; margin: 0 0 24pt; }
+  .meta { background: #eef4f7; border-left: 5px solid #d6a84b; padding: 10pt 14pt; margin: 16pt 0 22pt; }
+  .callout { background: #fff7e6; border: 1px solid #e3bd69; padding: 10pt 14pt; margin: 12pt 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10pt 0 18pt; }
+  th { background: #123b5d; color: white; text-align: left; padding: 7pt; border: 1px solid #9aa6b2; }
+  td { padding: 6pt 7pt; border: 1px solid #c7d0d9; vertical-align: top; }
+  tr:nth-child(even) td { background: #f6f8fa; }
+  pre { font-family: Menlo, Consolas, monospace; font-size: 8.5pt; background: #f3f5f7; border: 1px solid #ccd4dc; padding: 10pt; white-space: pre-wrap; }
+  .critical { color: #a61b1b; font-weight: bold; }
+  .high { color: #b35c00; font-weight: bold; }
+  .medium { color: #7a6500; font-weight: bold; }
+  .page-break { page-break-before: always; }
+  .footer-note { color: #697684; font-size: 8.5pt; margin-top: 24pt; }
+</style>
+</head>
+<body>
+
+<h1>BigShot AI Business OS</h1>
+<p class="subtitle">Phase 1 — Actual System Discovery Report</p>
+
+<div class="meta">
+  <strong>Assessment snapshot:</strong> June 25, 2026<br>
+  <strong>Scope:</strong> Architecture, modules, APIs, database, payment flow, KPI flow, runtime and logs<br>
+  <strong>Change status:</strong> Read-only discovery. No files, services, or database records were changed during this phase.
+</div>
+
+<h2>Executive Conclusion</h2>
+
+<p>BigShot AI Business OS is operational but not yet production-stable. The current system supports finance reporting, payment receipt processing, NocoDB data management, local AI analysis, and Telegram delivery. Its principal risks arise from duplicated payment state, overlapping KPI paths, weak database enforcement, development-grade service hosting, and deployment of uncommitted code.</p>
+
+<p>The largest architectural risks are:</p>
+<ol>
+  <li>Payment truth is duplicated between <code>Payment_Receive</code> and transaction summary columns.</li>
+  <li>The deployed runtime executes uncommitted working-tree code.</li>
+  <li>KPI calculations have multiple overlapping entry paths and adjustment layers.</li>
+  <li>Database relationships are not protected by foreign keys.</li>
+  <li>The payment application runs Flask’s development server.</li>
+  <li>Startup and restart controls depend on broad process-name termination.</li>
+  <li>Existing backups predate the current code and database state.</li>
+</ol>
+
+<h2>1. Architecture Diagram</h2>
+
+<pre>
+Telegram Finance Topic
+        │
+        ▼
+ telegram_bot.py ───────────────┐
+        │                       │
+        ├─ business_agent.py    ├─ BI/report generation
+        ├─ bi_executor.py       ├─ PDF/Excel reporting
+        ├─ executive_agent.py   └─ Ollama qwen3:14b
+        └─ formula_engine.py
+                   │
+                   ▼
+          PostgreSQL :5433
+                   │
+                 NocoDB
+                 :8080
+
+Browser / Local UI
+        │
+        ▼
+receive_payment_server.py :5059
+        │
+        ├─ Payment_Receive
+        ├─ farm_transection
+        └─ Sotephwar_Transection
+
+Other available entry points
+        ├─ telegram_kpi_bot.py — legacy KPI bot
+        ├─ family_ai_bot.py — currently not running
+        ├─ excel_import_server.py :5055 — currently not running
+        └─ claw_server.py :5001 — currently not running
+</pre>
+
+<h3>Live Services</h3>
+
+<table>
+<tr><th>Service</th><th>State</th><th>Evidence</th></tr>
+<tr><td>Finance Telegram bot</td><td>Running, PID 857</td><td>launchd KeepAlive=true</td></tr>
+<tr><td>Receive Payment server</td><td>Running, PID 1975</td><td>127.0.0.1:5059</td></tr>
+<tr><td>PostgreSQL Docker service</td><td>Running</td><td>Host port 5433</td></tr>
+<tr><td>NocoDB</td><td>Running</td><td>Host port 8080</td></tr>
+<tr><td>Ollama</td><td>Running</td><td>127.0.0.1:11434, model qwen3:14b</td></tr>
+<tr><td>Legacy KPI bot</td><td>Not running</td><td>No live process</td></tr>
+<tr><td>Family bot</td><td>Not running</td><td>No live process</td></tr>
+<tr><td>Excel import API</td><td>Not running</td><td>No listener on 5055</td></tr>
+<tr><td>Claw tool API</td><td>Not running</td><td>No listener on 5001</td></tr>
+</table>
+
+<h2>2. Module Dependency Map</h2>
+
+<pre>
+telegram_bot.py
+ ├─ business_agent.py
+ │   ├─ formula_engine.py
+ │   └─ openclaw_client.py → Ollama
+ ├─ bi_executor.py
+ │   └─ formula_engine.py
+ ├─ executive_agent.py
+ │   ├─ executive_tools.py → formula_engine.py
+ │   └─ openclaw_client.py
+ ├─ chart_pdf.py
+ └─ google_calendar_client.py
+
+receive_payment_server.py
+ ├─ formula_engine.py
+ └─ PostgreSQL
+
+telegram_kpi_bot.py
+ ├─ kpi_engine.py
+ └─ nocodb_client.py → NocoDB
+
+excel_import_server.py
+ └─ excel_importer.py
+     ├─ formula_engine.py
+     └─ master_relink_db.py
+</pre>
+
+<p>Key evidence:</p>
+<ul>
+  <li>Preferred bot entry point: <code>telegram_bot.py</code></li>
+  <li>Legacy KPI entry point: <code>telegram_kpi_bot.py</code></li>
+  <li>Central SQL/calculation module: <code>tools/formula_engine.py</code></li>
+  <li>Payment server: <code>scripts/receive_payment_server.py</code></li>
+</ul>
+
+<h2>3. API Map</h2>
+
+<h3>Receive Payment Server — 127.0.0.1:5059</h3>
+<table>
+<tr><th>Method</th><th>Route</th><th>Purpose</th></tr>
+<tr><td>GET</td><td>/</td><td>Full payment page</td></tr>
+<tr><td>GET</td><td>/receive-payment</td><td>Full payment page</td></tr>
+<tr><td>GET</td><td>/receive-payment-basic</td><td>Basic payment page</td></tr>
+<tr><td>POST</td><td>/receive-payment-basic</td><td>Submit payment</td></tr>
+<tr><td>GET</td><td>/api/vouchers</td><td>Search and list vouchers</td></tr>
+<tr><td>GET</td><td>/api/voucher</td><td>Fetch one grouped voucher</td></tr>
+<tr><td>POST</td><td>/api/payment-receive</td><td>Record payment</td></tr>
+<tr><td>GET</td><td>/health</td><td>Health check</td></tr>
+<tr><td>GET</td><td>/debug, /visible, /plain</td><td>Diagnostic pages</td></tr>
+</table>
+
+<h3>Other APIs</h3>
+<table>
+<tr><th>Service</th><th>Method</th><th>Route</th></tr>
+<tr><td>Excel import</td><td>GET</td><td>/health</td></tr>
+<tr><td>Excel import</td><td>POST</td><td>/import</td></tr>
+<tr><td>Excel import</td><td>POST</td><td>/import-vba</td></tr>
+<tr><td>Claw server</td><td>POST</td><td>/tool</td></tr>
+</table>
+
+<div class="callout"><strong>Initial API risk:</strong> The payment API has no authentication and sends <code>Access-Control-Allow-Origin: *</code>. Localhost binding reduces external exposure but does not eliminate local-origin abuse risk.</div>
+
+<h2>4. Database Relationship Map</h2>
+
+<p><strong>Schema:</strong> pipkgfu2wr9qxyy</p>
+
+<pre>
+customer_master
+   │ application-managed junction
+   ├── _nc_m2m_Sotephwar_Trans_customer_master
+   │          └── Sotephwar_Transection
+   │
+   └── _nc_m2m_farm_transectio_customer_master
+              └── farm_transection
+
+category_master
+   │
+   └── _nc_m2m_Transection_category_master
+              └── Transection
+
+Payment_Receive
+   └── Logical voucher reference only:
+       Sector + Voucher_Number + Invoice_Date + Customer
+
+Sotephwar_Inventory
+   └── No declared relationship to sales rows
+
+fixed_assests
+   └── Standalone, currently empty
+</pre>
+
+<p>There are zero declared foreign-key constraints. Every relationship depends on application logic and matching IDs or text values.</p>
+
+<h3>Row Counts</h3>
+<table>
+<tr><th>Table</th><th>Rows</th></tr>
+<tr><td>Transection</td><td>1,763</td></tr>
+<tr><td>Sotephwar_Transection</td><td>710</td></tr>
+<tr><td>farm_transection</td><td>76</td></tr>
+<tr><td>Payment_Receive</td><td>237</td></tr>
+<tr><td>Sotephwar_Inventory</td><td>31</td></tr>
+<tr><td>customer_master</td><td>275</td></tr>
+<tr><td>category_master</td><td>66</td></tr>
+<tr><td>Financial_Obligations</td><td>8</td></tr>
+<tr><td>fixed_assests</td><td>0</td></tr>
+<tr><td>Sote/customer junction</td><td>686</td></tr>
+<tr><td>Farm/customer junction</td><td>76</td></tr>
+<tr><td>Transaction/category junction</td><td>1,763</td></tr>
+<tr><td>Status backup table</td><td>708</td></tr>
+</table>
+
+<h2>5. Payment Flow Diagram</h2>
+
+<pre>
+User searches vouchers
+        │
+        ▼
+receive_payment_server._list_vouchers()
+        │
+        ├─ Sote Phwar listing → raw Sotephwar_Transection rows
+        └─ Voucher lookup → grouped source rows + Payment_Receive
+                                  │
+                                  ▼
+User submits receive amount
+        │
+        ▼
+save_payment_receive()
+        │
+        ├─ Re-read voucher total
+        ├─ Sum prior Payment_Receive rows
+        ├─ Reject negative outstanding balance
+        ├─ Insert Payment_Receive history row
+        ├─ Allocate received amount over transaction rows
+        ├─ Update Total_Received
+        ├─ Update Outstanding_Balance
+        ├─ Update Payment_Status
+        └─ Commit or rollback transaction
+</pre>
+
+<h3>Payment Architecture Finding</h3>
+<p>Payment data exists in two forms:</p>
+<ul>
+  <li><strong>Event/history source:</strong> Payment_Receive.Receive_Amount</li>
+  <li><strong>Materialized summary state:</strong> Total_Received, Outstanding_Balance and Payment_Status</li>
+</ul>
+
+<p>This synchronization supports faster reporting but creates stale-value risk because history and summaries can be queried independently. A second legacy insertion path, <code>payment_receive_insert()</code>, performs similar calculations separately and requires Phase 2 investigation.</p>
+
+<h3>Log Evidence</h3>
+<p>Logs contain controlled rejection of overpayment attempts:</p>
+<ul>
+  <li>Voucher 77: calculated outstanding −6,800,000</li>
+  <li>Voucher 45: calculated outstanding −6,600,000</li>
+</ul>
+<p>The requests returned controlled responses. Available evidence does not show these attempts crashing the payment service.</p>
+
+<h2>6. KPI Flow Diagram</h2>
+
+<pre>
+Telegram question
+       │
+       ├─ Guided BI route
+       │      └─ bi_executor → formula_engine
+       │
+       ├─ Formula route
+       │      └─ business_agent → formula_engine
+       │
+       └─ Executive route
+              ├─ executive_tools → formula_engine
+              └─ Ollama narrative layer
+
+formula_engine KPI sources
+       ├─ Transection
+       │    ├─ Income
+       │    └─ Expense
+       ├─ farm_transection.Total_Amount
+       └─ Sotephwar_Transection.Total_Amount
+
+Cash-flow sources
+       ├─ Transection.Amount
+       ├─ farm_transection.Total_Received
+       └─ Sotephwar_Transection.Total_Received
+</pre>
+
+<h3>Hidden KPI Transformation</h3>
+<p><code>business_agent._combined_kpi()</code> starts with <code>kpi_overview</code>, removes Sote Phwar income found in <code>Transection</code>, and adds Sote Phwar invoice income from <code>Sotephwar_Transection</code>. This prevents duplication but means executive KPI values can differ from direct <code>kpi_overview()</code> output.</p>
+
+<h3>Dual KPI Architecture</h3>
+<p>The legacy <code>telegram_kpi_bot.py</code> uses NocoDB-based KPI modules, while the preferred bot uses PostgreSQL <code>formula_engine</code>. If both bots run with the same token, they can conflict operationally and return differently calculated KPIs.</p>
+
+<div class="page-break"></div>
+<h2>Critical Phase 1 Findings</h2>
+
+<table>
+<tr><th>Priority</th><th>Finding</th><th>Evidence</th></tr>
+<tr><td class="critical">Critical</td><td>Runtime executes uncommitted code</td><td>Six modified tracked files; branch ahead 12 commits</td></tr>
+<tr><td class="critical">Critical</td><td>Payment truth is duplicated</td><td>History plus transaction summary columns</td></tr>
+<tr><td class="high">High</td><td>No database foreign keys</td><td>Zero declared foreign-key constraints</td></tr>
+<tr><td class="high">High</td><td>Two finance/KPI bot implementations</td><td>telegram_bot.py and telegram_kpi_bot.py</td></tr>
+<tr><td class="high">High</td><td>Payment server uses Flask development server</td><td>Repeated warning in live logs</td></tr>
+<tr><td class="high">High</td><td>Payment API has no authentication</td><td>No authentication middleware; wildcard CORS</td></tr>
+<tr><td class="high">High</td><td>Broad force-kill restart logic</td><td>pkill -9 -f in start_bot.sh</td></tr>
+<tr><td class="medium">Medium</td><td>KPI contains hidden replacement logic</td><td>_combined_kpi() subtract/add transformation</td></tr>
+<tr><td class="medium">Medium</td><td>Payment queries lack business-key indexes</td><td>Payment_Receive has only its primary-key index</td></tr>
+<tr><td class="medium">Medium</td><td>Startup database race appears in bot log</td><td>PostgreSQL “system is starting up”</td></tr>
+<tr><td class="medium">Medium</td><td>Existing backups are not current</td><td>Latest database dumps: June 21, 2026</td></tr>
+</table>
+
+<h2>Expected Remediation Scope</h2>
+<p>No files were changed. Later phases are expected to affect:</p>
+<ul>
+  <li>scripts/receive_payment_server.py</li>
+  <li>tools/formula_engine.py</li>
+  <li>telegram_bot.py</li>
+  <li>telegram_kpi_bot.py</li>
+  <li>start_bot.sh</li>
+  <li>business_agent.py</li>
+  <li>KPI and reporting modules under tools/</li>
+  <li>Docker and launchd deployment configuration</li>
+  <li>Database indexes and constraints</li>
+</ul>
+
+<h2>Change-Control Gate</h2>
+<p>Before Phase 2 or later implementation:</p>
+<ol>
+  <li>Create a fresh PostgreSQL custom-format dump.</li>
+  <li>Capture the current dirty working-tree patch.</li>
+  <li>Record the running commit and file checksums.</li>
+  <li>Validate backup restoration.</li>
+  <li>Complete Phase 2 findings before modifying payment behavior.</li>
+</ol>
+
+<div class="callout"><strong>Phase 1 status:</strong> Complete. No remediation was applied as part of the discovery phase.</div>
+
+<p class="footer-note">Prepared for BigShot AI Business OS Phase 1 Stabilization &amp; Remediation Program.</p>
+</body>
+</html>

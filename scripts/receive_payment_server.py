@@ -31,13 +31,7 @@ def add_cors_headers(response):
 
 
 def _connect():
-    return psycopg2.connect(
-        host=config.POSTGRES_HOST,
-        port=config.POSTGRES_PORT,
-        database=config.POSTGRES_DB,
-        user=config.POSTGRES_USER,
-        password=config.POSTGRES_PASSWORD,
-    )
+    return formula_engine._connect()
 
 
 def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Invoice_Date" DESC NULLS LAST, "Sector", "Invoice_Number"'):
@@ -51,7 +45,11 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
         COALESCE(NULLIF(TRIM(f."Customer"), ''), '') AS "Customer",
         '' AS "Sote_Type",
         f."Date" AS "Invoice_Date",
-        COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total"
+        COALESCE(SUM(f."Total_Amount"), 0) AS "Voucher_Total",
+        COALESCE(SUM(f."Total_Received"), 0) AS "Source_Total_Received",
+        COALESCE(SUM(f."Outstanding_Balance"), 0) AS "Source_Outstanding_Balance",
+        COALESCE(MAX(f."Payment_Status"), '') AS "Source_Payment_Status",
+        COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(f."Note"), ''), ' | ' ORDER BY NULLIF(TRIM(f."Note"), '')), '') AS "Note"
       FROM "{schema}"."farm_transection" f
       WHERE COALESCE(f.__nc_deleted, false) = false
         AND f."Invoice_Number" IS NOT NULL
@@ -64,7 +62,11 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
         COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') AS "Customer",
         COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(s."Item"), ''), ', ' ORDER BY NULLIF(TRIM(s."Item"), '')), '') AS "Sote_Type",
         s."Invoice_Date" AS "Invoice_Date",
-        COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total"
+        COALESCE(SUM(s."Total_Amount"), 0) AS "Voucher_Total",
+        COALESCE(SUM(s."Total_Received"), 0) AS "Source_Total_Received",
+        COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Source_Outstanding_Balance",
+        COALESCE(MAX(s."Payment_Status"), '') AS "Source_Payment_Status",
+        COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(s."Note"), ''), ' | ' ORDER BY NULLIF(TRIM(s."Note"), '')), '') AS "Note"
       FROM "{schema}"."Sotephwar_Transection" s
       WHERE COALESCE(s.__nc_deleted, false) = false
         AND s."Invoice_Number" IS NOT NULL
@@ -93,13 +95,19 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
         sv."Sote_Type",
         sv."Invoice_Date",
         sv."Voucher_Total",
-        COALESCE(p."Total_Received", 0) AS "Total_Received",
-        GREATEST(sv."Voucher_Total" - COALESCE(p."Total_Received", 0), 0) AS "Outstanding_Balance",
+        GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)) AS "Total_Received",
+        GREATEST(
+          sv."Voucher_Total" - GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)),
+          0
+        ) AS "Outstanding_Balance",
         CASE
-          WHEN sv."Voucher_Total" > 0 AND COALESCE(p."Total_Received", 0) >= sv."Voucher_Total" THEN 'Paid'
-          WHEN COALESCE(p."Total_Received", 0) > 0 THEN 'Partial'
+          WHEN sv."Voucher_Total" > 0
+               AND GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)) >= sv."Voucher_Total"
+            THEN 'Paid'
+          WHEN GREATEST(sv."Source_Total_Received", COALESCE(p."Total_Received", 0)) > 0 THEN 'Partial'
           ELSE 'Outstanding'
-        END AS "Payment_Status"
+        END AS "Payment_Status",
+        COALESCE(sv."Note", '') AS "Note"
       FROM source_vouchers sv
       LEFT JOIN payments p
         ON p."Sector" = sv."Sector"
@@ -118,7 +126,8 @@ def _voucher_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORDER BY "Inv
       vg."Total_Received" AS "New_Received",
       vg."Total_Received",
       vg."Outstanding_Balance",
-      vg."Payment_Status"
+      vg."Payment_Status",
+      COALESCE(vg."Note", '') AS "Note"
     FROM voucher_groups vg
     {where_sql}
     {order_sql}
@@ -140,7 +149,8 @@ def _sotephwar_listing_query(where_sql="", limit_sql="LIMIT 100", order_sql='ORD
       COALESCE(s."Total_Received", 0) AS "New_Received",
       COALESCE(s."Total_Received", 0) AS "Total_Received",
       COALESCE(s."Outstanding_Balance", 0) AS "Outstanding_Balance",
-      COALESCE(s."Payment_Status", '') AS "Payment_Status"
+      COALESCE(s."Payment_Status", '') AS "Payment_Status",
+      COALESCE(s."Note", '') AS "Note"
     FROM "{schema}"."Sotephwar_Transection" s
     WHERE COALESCE(s.__nc_deleted, false) = false
       AND s."Invoice_Number" IS NOT NULL
@@ -163,6 +173,7 @@ def _voucher_payload(row):
     total_received = row.get("Total_Received")
     outstanding_balance = row.get("Outstanding_Balance")
     payment_status = row.get("Payment_Status") or ""
+    note = row.get("Note") or ""
     if sector == "Sote Phwar" and "Customer_Name" in row:
         return {
             "sector": sector,
@@ -176,6 +187,7 @@ def _voucher_payload(row):
             "total_received": _money_value(total_received),
             "outstanding_balance": _money_value(outstanding_balance),
             "payment_status": payment_status,
+            "note": note,
         }
     return {
         "sector": sector,
@@ -189,6 +201,7 @@ def _voucher_payload(row):
         "total_received": _money_value(total_received),
         "outstanding_balance": _money_value(outstanding_balance),
         "payment_status": payment_status,
+        "note": note,
     }
 
 
@@ -230,6 +243,33 @@ def _list_vouchers(search="", sector="", voucher_number="", invoice_date="", cus
     formula_engine.ensure_payment_receive_table()
     params = {}
     sector = _normalize_sector_filter(sector)
+    if sector == "Sote Phwar":
+        conditions = ['COALESCE(s."Outstanding_Balance", 0) > 0']
+        if search:
+            conditions.append('''
+            (s."Invoice_Number"::text ILIKE %(search)s
+               OR COALESCE(NULLIF(TRIM(s."Customer_Name"), ''), '') ILIKE %(search)s
+               OR COALESCE(NULLIF(TRIM(s."Item"), ''), '') ILIKE %(search)s)
+            ''')
+            params["search"] = f"%{search}%"
+        if voucher_number:
+            conditions.append('s."Invoice_Number"::text = %(voucher_number)s')
+            params["voucher_number"] = voucher_number
+        if invoice_date:
+            conditions.append('s."Invoice_Date" = %(invoice_date)s')
+            params["invoice_date"] = invoice_date
+        if customer:
+            conditions.append('COALESCE(NULLIF(TRIM(s."Customer_Name"), \'\'), \'\') ILIKE %(customer)s')
+            params["customer"] = f"%{customer}%"
+        where_sql = " AND " + " AND ".join(conditions)
+        with _connect() as conn:
+            conn.set_session(readonly=True)
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(_sotephwar_listing_query(where_sql=where_sql), params)
+                rows = cur.fetchall()
+                conn.rollback()
+        return [_voucher_payload(row) for row in rows]
+
     conditions = []
     if sector:
         conditions.append('vg."Sector" = %(sector)s')
@@ -378,11 +418,12 @@ def _basic_payment_page(
             f"<td>{voucher['voucher_total']:,}</td>"
             f"<td>{voucher['total_received']:,}</td>"
             f"<td>{voucher['outstanding_balance']:,}</td>"
+            f"<td>{escape(voucher.get('note', ''))}</td>"
             "</tr>"
         )
     if not rows:
         rows.append(
-            '<tr><td colspan="9" class="empty">'
+            '<tr><td colspan="10" class="empty">'
             "No vouchers are available. Check the database connection, then refresh this page."
             "</td></tr>"
         )
@@ -479,6 +520,7 @@ def _basic_payment_page(
                       <th>Voucher Total</th>
                       <th>Total Received</th>
                       <th>Outstanding</th>
+                      <th>Note</th>
                     </tr>
                   </thead>
                   <tbody>{"".join(rows)}</tbody>
@@ -494,8 +536,8 @@ def _basic_payment_page(
               <input name="payment_method" placeholder="Cash, KPay, Bank...">
               <label>Reference Number</label>
               <input name="reference_number">
-              <label>Notes</label>
-              <textarea name="notes" rows="5"></textarea>
+              <label>Note</label>
+              <textarea id="paymentNote" name="notes" rows="5"></textarea>
               <button type="submit">Save Payment</button>
             </section>
           </form>
@@ -503,6 +545,7 @@ def _basic_payment_page(
         <script>
           const rows = Array.from(document.querySelectorAll('.voucher-row'));
           const selectedVoucher = document.getElementById('selectedVoucher');
+          const paymentNote = document.getElementById('paymentNote');
           const receiveAmount = document.querySelector('input[name="receive_amount"]');
 
           function selectRow(row) {{
@@ -511,6 +554,7 @@ def _basic_payment_page(
             const radio = row.querySelector('input[type="radio"]');
             radio.checked = true;
             selectedVoucher.value = row.dataset.voucherSummary || radio.value;
+            paymentNote.value = row.cells[9] ? row.cells[9].textContent : '';
             receiveAmount.focus();
           }}
 
@@ -678,18 +722,13 @@ def receive_payment_basic_page():
     if not voucher:
         return _basic_payment_page("Voucher not found.", error=True, **filter_values)
 
-    previous_paid = voucher["total_received"]
-    outstanding_after_payment = max(voucher["voucher_total"] - previous_paid - receive_amount, 0)
     try:
         _insert_payment_receive(
             sector=sector,
             voucher_number=invoice_number,
             invoice_date=voucher["invoice_date"],
             customer=voucher["customer"],
-            invoice_amount=voucher["voucher_total"],
-            previous_paid=previous_paid,
             receive_amount=receive_amount,
-            outstanding_balance=outstanding_after_payment,
             payment_method=payment_method,
             reference_number=reference_number,
             notes=notes,
@@ -759,18 +798,13 @@ def create_payment_receive():
     if not voucher:
         return jsonify({"ok": False, "error": "Voucher not found"}), 404
 
-    previous_paid = voucher["total_received"]
-    outstanding_after_payment = max(voucher["voucher_total"] - previous_paid - receive_amount, 0)
     try:
         row = _insert_payment_receive(
             sector=sector,
             voucher_number=invoice_number,
             invoice_date=voucher["invoice_date"],
             customer=voucher["customer"],
-            invoice_amount=voucher["voucher_total"],
-            previous_paid=previous_paid,
             receive_amount=receive_amount,
-            outstanding_balance=outstanding_after_payment,
             payment_method=payment_method,
             reference_number=reference_number,
             notes=notes,
@@ -1137,4 +1171,6 @@ PAGE_HTML = r'''<!doctype html>
 
 
 if __name__ == "__main__":
-    app.run(host=DEFAULT_HOST, port=DEFAULT_PORT)
+    from waitress import serve
+
+    serve(app, host=DEFAULT_HOST, port=DEFAULT_PORT, threads=4)

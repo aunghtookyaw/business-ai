@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 
 import business_agent
@@ -65,6 +67,18 @@ class FakeContext:
 
 
 class FinanceBotFilterTest(unittest.TestCase):
+    def test_finance_bot_single_instance_lock_rejects_second_holder(self):
+        original_lock = telegram_bot._INSTANCE_LOCK
+        with tempfile.TemporaryDirectory() as directory:
+            lock_path = os.path.join(directory, "finance.lock")
+            first_lock = telegram_bot._acquire_instance_lock(lock_path)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "already running"):
+                    telegram_bot._acquire_instance_lock(lock_path)
+            finally:
+                first_lock.close()
+                telegram_bot._INSTANCE_LOCK = original_lock
+
     def setUp(self):
         self.telegram_original_chat_id = telegram_bot.TELEGRAM_ALLOWED_CHAT_ID
         self.telegram_original_thread_id = telegram_bot.TELEGRAM_ALLOWED_THREAD_ID
@@ -326,6 +340,78 @@ class FinanceBotFilterTest(unittest.TestCase):
         finally:
             telegram_bot.search_categories = original_search_categories
             telegram_bot.master_name_comparison = original_master_name_comparison
+
+    def test_direct_same_group_compare_resets_stale_customer_state(self):
+        original_search_categories = telegram_bot.search_categories
+
+        def fake_search_categories(text, **kwargs):
+            self.assertEqual("fuel", text)
+            return [
+                {"value": "Fuel", "score": 1.0},
+                {"value": "Fuel (Diesel)", "score": 0.95},
+            ]
+
+        telegram_bot.search_categories = fake_search_categories
+        try:
+            message = FakeMessage(
+                -1003850232296,
+                5,
+                "compare, same group, fuel month by month",
+            )
+            context = FakeContext()
+            context.user_data[telegram_bot.BI_STATE_KEY] = {
+                "awaiting": "customer",
+                "customer": "Mya Yadanar",
+                "output": "pdf",
+            }
+
+            telegram_bot.handle_message(FakeUpdate(message), context)
+
+            state = context.user_data[telegram_bot.BI_STATE_KEY]
+            self.assertEqual("same", state["master_compare_mode"])
+            self.assertEqual("month", state["master_requested_granularity"])
+            self.assertEqual("master_category", state["awaiting"])
+            self.assertNotIn("customer", state)
+            self.assertNotIn("output", state)
+            self.assertEqual("Select category:", message.replies[-1]["text"])
+            buttons = message.replies[-1]["kwargs"]["reply_markup"].inline_keyboard
+            self.assertEqual("Fuel", buttons[0][0].text)
+            self.assertEqual("Fuel (Diesel)", buttons[1][0].text)
+            self.assertFalse(any(reply["type"] == "document" for reply in message.replies))
+        finally:
+            telegram_bot.search_categories = original_search_categories
+
+    def test_compare_wizard_accepts_fuel_month_by_month_at_category_step(self):
+        original_search_categories = telegram_bot.search_categories
+        telegram_bot.search_categories = lambda text, **kwargs: [
+            {"value": "Fuel", "score": 1.0}
+        ]
+        try:
+            message = FakeMessage(-1003850232296, 5)
+            context = FakeContext()
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:prompt_enquiry")),
+                context,
+            )
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:master_mode:same")),
+                context,
+            )
+
+            search_message = FakeMessage(-1003850232296, 5, "fuel month by month")
+            telegram_bot.handle_message(FakeUpdate(search_message), context)
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, "bi:select_master_category:0")),
+                context,
+            )
+
+            state = context.user_data[telegram_bot.BI_STATE_KEY]
+            self.assertEqual(["Fuel"], state["master_categories"])
+            self.assertEqual("month", state["master_granularity"])
+            self.assertEqual("master_period", state["step"])
+            self.assertEqual("Choose period:", message.replies[-1]["text"])
+        finally:
+            telegram_bot.search_categories = original_search_categories
 
     def test_bi_wizard_builds_financial_obligation_intent(self):
         original_execute_intent = telegram_bot.execute_intent

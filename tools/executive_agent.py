@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tools.executive_reports import format_executive_report
 from tools.executive_tools import build_default_plan, execute_plan, validate_plan
-from tools.openclaw_client import ask_ai
+from tools.ollama_client import ask_ai
 
 
 KPI_FRAMEWORK_PATH = Path(__file__).resolve().parents[1] / "knowledge" / "bigshot_kpi_framework.md"

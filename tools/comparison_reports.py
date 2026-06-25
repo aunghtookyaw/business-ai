@@ -2,7 +2,7 @@ import json
 
 from tools.bi_periods import legacy_period, period_label, relative_period
 from tools.formula_engine import category_summary
-from tools.openclaw_client import ask_ai
+from tools.ollama_client import ask_ai
 
 
 def _money(value):

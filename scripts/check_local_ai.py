@@ -11,7 +11,7 @@ try:
 except ImportError:
     config = None
 
-from tools.openclaw_client import ask_ai
+from tools.ollama_client import ask_ai
 
 
 def setting(name, default=None):
@@ -27,7 +27,7 @@ def setting(name, default=None):
 
 def main():
     url = setting("OLLAMA_URL", "http://localhost:11434/api/generate")
-    model = setting("FAMILY_AI_MODEL", setting("AI_MODEL", "qwen3:14b"))
+    model = setting("AI_MODEL", "qwen3:14b")
 
     print(f"Ollama URL: {url}")
     print(f"Model: {model}")

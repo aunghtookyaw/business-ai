@@ -1,3 +1,5 @@
+import fcntl
+import logging
 import os
 import re
 import subprocess
@@ -56,6 +58,13 @@ from tools.executive_reports import write_executive_excel_report
 from tools.formula_engine import master_name_comparison
 from tools.google_calendar_client import sync_financial_obligations_to_calendar
 
+logging.basicConfig(
+    level=os.getenv("FINANCE_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("bigshot.finance_bot")
+_INSTANCE_LOCK = None
+
 SOTEPHWAR_PAYMENT_TEMPLATE = (
     "Use this format and edit values:\n"
     "Sote Phwar voucher NUMBER got 400000 kyats received date YYYY-MM-DD"
@@ -68,8 +77,10 @@ PDF_EXPORT_DEFAULT_QUESTION = "this month kpi"
 PDF_EXPORT_TITLE = "BigShot Finance Report"
 CEO_PDF_EXPORT_TITLE = "BigShot CEO Management Report"
 AUTO_DELETE_SECONDS = int(os.getenv("FINANCE_AUTO_DELETE_SECONDS", "86400"))
+TELEGRAM_WORKERS = int(os.getenv("FINANCE_TELEGRAM_WORKERS", "4"))
 BI_STATE_KEY = "bi_wizard"
 BI_PERSISTENCE_FILE = os.getenv("FINANCE_BI_PERSISTENCE_FILE", "/private/tmp/business-ai-bi-wizard-state.pkl")
+INSTANCE_LOCK_FILE = os.getenv("FINANCE_INSTANCE_LOCK_FILE", "/private/tmp/business-ai-finance-bot.lock")
 MASTER_COMPARE_GRANULARITIES = [
     ("day", "Day by Day"),
     ("week", "Week by Week"),
@@ -219,7 +230,31 @@ def _delete_message_job(context: CallbackContext):
             message_id=data["message_id"],
         )
     except Exception as exc:
-        print(f"Auto-delete skipped: {exc.__class__.__name__}: {exc}", flush=True)
+        logger.warning("Auto-delete skipped: %s: %s", exc.__class__.__name__, exc)
+
+
+def _acquire_instance_lock(path=INSTANCE_LOCK_FILE):
+    global _INSTANCE_LOCK
+    lock_file = open(path, "a+")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        raise RuntimeError("Another finance Telegram bot instance is already running.")
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+    _INSTANCE_LOCK = lock_file
+    return lock_file
+
+
+def _telegram_error_handler(update, context):
+    logger.error(
+        "Unhandled Telegram update error update=%r",
+        update,
+        exc_info=context.error,
+    )
 
 
 def _schedule_auto_delete(context, message):
@@ -785,6 +820,81 @@ def _show_comparison_output_menu(message, context, question):
     )
 
 
+def _master_compare_granularity(text):
+    normalized = " ".join(str(text or "").lower().split())
+    for granularity in ("day", "week", "month", "year"):
+        if (
+            f"{granularity} by {granularity}" in normalized
+            or f"{granularity} to {granularity}" in normalized
+            or f"{granularity}ly" in normalized
+        ):
+            return granularity
+    return ""
+
+
+def _master_compare_mode(text):
+    normalized = " ".join(str(text or "").lower().split())
+    if any(phrase in normalized for phrase in ("same group", "same category", "same categories")):
+        return "same"
+    if any(phrase in normalized for phrase in ("different group", "different category", "different categories")):
+        return "different"
+    return ""
+
+
+def _master_compare_search_text(text):
+    normalized = re.sub(r"[,;:]+", " ", str(text or "").lower())
+    removable = (
+        "compare",
+        "comparison",
+        "enquiry",
+        "inquiry",
+        "same group",
+        "same category",
+        "same categories",
+        "different group",
+        "different category",
+        "different categories",
+        "day by day",
+        "day to day",
+        "daily",
+        "week by week",
+        "week to week",
+        "weekly",
+        "month by month",
+        "month to month",
+        "monthly",
+        "year by year",
+        "year to year",
+        "yearly",
+    )
+    for phrase in removable:
+        normalized = normalized.replace(phrase, " ")
+    return " ".join(normalized.split())
+
+
+def _start_master_compare_from_text(message, context, text):
+    normalized = " ".join(str(text or "").lower().split())
+    mode = _master_compare_mode(normalized)
+    granularity = _master_compare_granularity(normalized)
+    if "compare" not in normalized or not mode:
+        return False
+
+    search_text = _master_compare_search_text(normalized)
+    if not search_text:
+        return False
+
+    state = _bi_state(context)
+    state.clear()
+    state.update({
+        "master_compare_mode": mode,
+        "master_categories": [],
+        "master_requested_granularity": granularity,
+        "awaiting": "master_category",
+        "step": "master_select_category",
+    })
+    return _handle_search_text(message, context, search_text)
+
+
 def _start_custom_calendar(message, context, kind):
     state = _bi_state(context)
     state["calendar_kind"] = kind
@@ -888,7 +998,11 @@ def _handle_search_text(message, context, text):
     elif awaiting == "master_category":
         matches = []
         seen = set()
-        terms = [line.strip() for line in text.splitlines() if line.strip()] or [text]
+        requested_granularity = _master_compare_granularity(text)
+        if requested_granularity:
+            state["master_requested_granularity"] = requested_granularity
+        search_text = _master_compare_search_text(text) or text
+        terms = [line.strip() for line in search_text.splitlines() if line.strip()] or [search_text]
         for term in terms:
             for match in search_categories(term):
                 if match["value"] in seen:
@@ -1256,7 +1370,13 @@ def handle_bi_callback(update: Update, context: CallbackContext):
         state.pop("candidates", None)
         if state.get("master_compare_mode") == "same":
             state.pop("awaiting", None)
-            _show_master_granularity_menu(message, context)
+            requested_granularity = state.pop("master_requested_granularity", "")
+            if requested_granularity:
+                state["master_granularity"] = requested_granularity
+                state["step"] = "master_period"
+                _show_period_menu(message, context)
+            else:
+                _show_master_granularity_menu(message, context)
             return
         rows = [[InlineKeyboardButton("Done", callback_data="bi:master_category_done")]]
         selected_text = "\n".join(f"- {value}" for value in selected)
@@ -1273,7 +1393,13 @@ def handle_bi_callback(update: Update, context: CallbackContext):
             return
         state.pop("awaiting", None)
         state.pop("candidates", None)
-        _show_master_granularity_menu(message, context)
+        requested_granularity = state.pop("master_requested_granularity", "")
+        if requested_granularity:
+            state["master_granularity"] = requested_granularity
+            state["step"] = "master_period"
+            _show_period_menu(message, context)
+        else:
+            _show_master_granularity_menu(message, context)
         return
     if data.startswith("bi:master_granularity:"):
         state["master_granularity"] = data.rsplit(":", 1)[1]
@@ -1436,7 +1562,7 @@ def handle_prompt_button(update: Update, context: CallbackContext):
         return
 
     query.answer("Running finance question...")
-    print(f"Finance prompt button: {question}", flush=True)
+    logger.info("Finance prompt button: %s", question)
 
     try:
         _answer_finance_question(message, question, context=context)
@@ -1455,7 +1581,10 @@ def handle_message(update: Update, context: CallbackContext):
 
     _schedule_auto_delete(context, update.message)
     user_text = update.message.text
-    print(f"Finance text: {user_text}", flush=True)
+    logger.info("Finance text: %s", user_text)
+
+    if _start_master_compare_from_text(update.message, context, user_text):
+        return
 
     if _handle_search_text(update.message, context, user_text):
         return
@@ -1487,28 +1616,36 @@ def main():
     if not TELEGRAM_ALLOWED_THREAD_ID:
         raise RuntimeError("TELEGRAM_ALLOWED_THREAD_ID is required.")
 
+    _acquire_instance_lock()
     persistence = PicklePersistence(filename=BI_PERSISTENCE_FILE)
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True, persistence=persistence)
+    updater = Updater(
+        TELEGRAM_BOT_TOKEN,
+        use_context=True,
+        persistence=persistence,
+        workers=TELEGRAM_WORKERS,
+    )
 
     dispatcher = updater.dispatcher
+    dispatcher.add_error_handler(_telegram_error_handler)
 
     dispatcher.add_handler(CommandHandler("whereami", whereami))
     dispatcher.add_handler(CommandHandler("menu", menu))
     dispatcher.add_handler(CommandHandler("prompts", prompts))
     dispatcher.add_handler(CommandHandler("start", menu))
-    dispatcher.add_handler(CommandHandler("sync_obligations_calendar", sync_obligations_calendar))
-    dispatcher.add_handler(CallbackQueryHandler(handle_bi_callback, pattern=r"^bi:"))
-    dispatcher.add_handler(CallbackQueryHandler(handle_prompt_button, pattern=r"^finance:"))
+    dispatcher.add_handler(CommandHandler("sync_obligations_calendar", sync_obligations_calendar, run_async=True))
+    dispatcher.add_handler(CallbackQueryHandler(handle_bi_callback, pattern=r"^bi:", run_async=True))
+    dispatcher.add_handler(CallbackQueryHandler(handle_prompt_button, pattern=r"^finance:", run_async=True))
 
     dispatcher.add_handler(
-        MessageHandler(Filters.text, handle_message)
+        MessageHandler(Filters.text, handle_message, run_async=True)
     )
 
-    print("Telegram AI Bot Running...")
-
-    updater.start_polling()
-
-    updater.idle()
+    logger.info("Telegram AI Bot starting polling")
+    try:
+        updater.start_polling()
+        updater.idle()
+    finally:
+        logger.info("Telegram AI Bot stopped")
 
 
 if __name__ == "__main__":

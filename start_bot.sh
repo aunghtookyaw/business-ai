@@ -8,11 +8,6 @@ export SSL_CERT_FILE="$("$PYTHON_BIN" -c 'import certifi; print(certifi.where())
 export TELEGRAM_ALLOWED_CHAT_ID="-1003850232296"
 export TELEGRAM_ALLOWED_THREAD_ID="5"
 
-pkill -9 -f telegram_kpi_bot.py || true
-pkill -9 -f telegram_bot.py || true
-
-sleep 2
-
 cd ~/ai-automation/business-ai
 
 for i in {1..120}; do
@@ -32,6 +27,7 @@ PY
   then
     exec "$PYTHON_BIN" telegram_bot.py
   fi
+  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') PostgreSQL not ready; retry $i/120" >&2
   sleep 5
 done
 
