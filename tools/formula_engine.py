@@ -46,6 +46,7 @@ MONTH_PATTERN = "|".join(sorted(MONTH_ALIASES, key=len, reverse=True))
 
 SECTOR_ALIASES = {
     "farm": "Farm",
+    "frarm": "Farm",
     "sp extension": "SP Extension",
     "extension": "SP Extension",
     "sp production": "SP Production",
@@ -786,9 +787,9 @@ def _extract_transaction_text_search(question, filters):
 
 
 FARM_CUSTOMER_STOP_WORDS = (
-    "show|find|tell|me|please|customer|from|for|by|farm|section|sections|"
+    "show|find|tell|me|please|customer|from|for|by|in|on|farm|frarm|section|sections|"
     "sale|sales|income|revenue|total|summary|summaries|report|reports|"
-    "top|biggest|largest|highest|this|last|year|month|week|today|yesterday"
+    "detail|details|top|biggest|largest|highest|this|last|year|month|week|today|yesterday"
 )
 
 
@@ -1011,10 +1012,14 @@ def _include_sotephwar_income(filters):
 
 def _include_transaction_rows(filters):
     filters = filters or {}
+    if filters.get("farm_invoice_only"):
+        return False
     return not filters.get("farm_customer") and not filters.get("customer")
 
 
-def _canonical_transection_income_condition(alias="t"):
+def _canonical_transection_income_condition(alias="t", filters=None):
+    if (filters or {}).get("sector") == "Sote Phwar":
+        return "TRUE"
     return f'''
       NOT (
         {alias}."Income_Expense" = 'Income'
@@ -1056,7 +1061,7 @@ def _farm_sales_summary(period, filters=None):
           COUNT(*) AS invoice_count,
           COALESCE(SUM(f."Total_Amount"), 0) AS total_amount,
           COALESCE(SUM(f."Total_Received"), 0) AS amount_received,
-          COALESCE(SUM(f."Outstanding_Balance"), 0) AS outstanding_amount
+          COALESCE(SUM(GREATEST(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0), 0)), 0) AS outstanding_amount
         FROM {_farm_transection_table_ref()} f
         {_farm_customer_link_join("f")}
         WHERE COALESCE(f.__nc_deleted, false) = false
@@ -1092,7 +1097,7 @@ def _sotephwar_income_summary(period, filters=None):
               COUNT(*) AS invoice_count,
               COALESCE(SUM(s."Total_Amount"), 0) AS total_amount,
               COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
-              COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_amount
+              COALESCE(SUM(GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0)), 0) AS outstanding_amount
             FROM {_sotephwar_transection_table_ref()} s
             {_sotephwar_customer_link_join("s")}
             WHERE COALESCE(s.__nc_deleted, false) = false
@@ -1137,7 +1142,7 @@ def _farm_sales_rows(period, filters=None, limit=5):
           COALESCE(SUM(f."Total_Amount"), 0) AS amount,
           COALESCE(SUM(f."Total_Amount"), 0) AS total_amount,
           COALESCE(SUM(f."Total_Received"), 0) AS amount_received,
-          COALESCE(SUM(f."Outstanding_Balance"), 0) AS outstanding_amount,
+          COALESCE(SUM(GREATEST(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0), 0)), 0) AS outstanding_amount,
           COUNT(*) AS invoice_count,
           'Farm_Transection' AS payment_method
         FROM {_farm_transection_table_ref()} f
@@ -1161,12 +1166,15 @@ def _farm_sales_rows(period, filters=None, limit=5):
     return rows
 
 
-def farm_transection_customer(period="all_time", customer=None, limit=50):
+def farm_transection_customer(period="all_time", customer=None, limit=50, unpaid_only=False):
     filters = {}
     if customer:
         filters["farm_customer"] = customer
     farm_filter_sql, date_sql, params = _farm_filter(period, filters)
     params["limit"] = limit
+    unpaid_sql = ""
+    if unpaid_only:
+        unpaid_sql = 'AND GREATEST(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0), 0) > 0'
 
     rows = _fetch_all(
         f'''
@@ -1177,11 +1185,12 @@ def farm_transection_customer(period="all_time", customer=None, limit=50):
           COALESCE(f."Note", '') AS note,
           COALESCE(f."Total_Amount", 0) AS total_amount,
           COALESCE(f."Total_Received", 0) AS amount_received,
-          COALESCE(f."Outstanding_Balance", 0) AS outstanding_amount
+          GREATEST(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0), 0) AS outstanding_amount
         FROM {_farm_transection_table_ref()} f
         {_farm_customer_link_join("f")}
         WHERE COALESCE(f.__nc_deleted, false) = false
           AND f."Total_Amount" IS NOT NULL
+          {unpaid_sql}
           {farm_filter_sql}
           {date_sql}
         ORDER BY f."Date" DESC NULLS LAST, f."Invoice_Number" DESC NULLS LAST, f.id DESC
@@ -1207,6 +1216,7 @@ def farm_transection_customer(period="all_time", customer=None, limit=50):
         "formula": "farm_transection_customer",
         "period": period,
         "customer": customer,
+        "unpaid_only": unpaid_only,
         "invoice_count": len(rows),
         "total_sales": total_amount,
         "amount_received": amount_received,
@@ -1238,7 +1248,7 @@ def _sotephwar_income_rows(period, filters=None, limit=5):
           COALESCE(SUM(s."Total_Amount"), 0) AS amount,
           COALESCE(SUM(s."Total_Amount"), 0) AS total_amount,
           COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
-          COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_amount,
+          COALESCE(SUM(GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0)), 0) AS outstanding_amount,
           COUNT(*) AS invoice_count,
           'Sotephwar_Transection' AS payment_method
         FROM {_sotephwar_transection_table_ref()} s
@@ -1980,7 +1990,7 @@ def sales_total(period="all_time", filters=None):
             {_transaction_category_link_join("t")}
             WHERE COALESCE(t.__nc_deleted, false) = false
               AND t."Income_Expense" = 'Income'
-              AND {_canonical_transection_income_condition("t")}
+              AND {_canonical_transection_income_condition("t", filters)}
               {filter_sql}
               {date_sql}
             ''',
@@ -2063,7 +2073,7 @@ def gross_profit(period="all_time", filters=None):
               COALESCE(SUM(
                 CASE
                   WHEN t."Income_Expense" = 'Income'
-                       AND {_canonical_transection_income_condition("t")}
+                       AND {_canonical_transection_income_condition("t", filters)}
                     THEN t."Amount"
                   ELSE 0
                 END
@@ -2128,7 +2138,7 @@ def cash_flow(period="all_time", filters=None):
               COALESCE(SUM(
                 CASE
                   WHEN t."Income_Expense" = 'Income'
-                       AND {_canonical_transection_income_condition("t")}
+                       AND {_canonical_transection_income_condition("t", filters)}
                     THEN t."Amount"
                   ELSE 0
                 END
@@ -2204,7 +2214,7 @@ def sector_summary(period="all_time", filters=None):
               COALESCE(SUM(
                 CASE
                   WHEN t."Income_Expense" = 'Income'
-                       AND {_canonical_transection_income_condition("t")}
+                       AND {_canonical_transection_income_condition("t", filters)}
                     THEN t."Amount"
                   ELSE 0
                 END
@@ -2284,7 +2294,7 @@ def category_summary(period="all_time", filters=None):
               COALESCE(SUM(
                 CASE
                   WHEN t."Income_Expense" = 'Income'
-                       AND {_canonical_transection_income_condition("t")}
+                       AND {_canonical_transection_income_condition("t", filters)}
                     THEN t."Amount"
                   ELSE 0
                 END
@@ -2473,7 +2483,7 @@ def top_income(period="all_time", filters=None, limit=5):
             {_transaction_category_link_join("t")}
             WHERE COALESCE(t.__nc_deleted, false) = false
               AND t."Income_Expense" = 'Income'
-              AND {_canonical_transection_income_condition("t")}
+              AND {_canonical_transection_income_condition("t", filters)}
               AND t."Amount" IS NOT NULL
               {filter_sql}
               {date_sql}
@@ -2557,7 +2567,7 @@ def sotephwar_transection_summary(period="all_time", include_customers=True):
           COUNT(*) AS invoice_count,
           COALESCE(SUM("Total_Amount"), 0) AS total_amount,
           COALESCE(SUM("Total_Received"), 0) AS amount_received,
-          COALESCE(SUM("Outstanding_Balance"), 0) AS outstanding_amount
+          COALESCE(SUM(GREATEST(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0), 0)), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           {date_sql}
@@ -2587,7 +2597,7 @@ def sotephwar_transection_monthly_summary(period="this_year"):
           COUNT(*) AS invoice_count,
           COALESCE(SUM("Total_Amount"), 0) AS total_amount,
           COALESCE(SUM("Total_Received"), 0) AS amount_received,
-          COALESCE(SUM("Outstanding_Balance"), 0) AS outstanding_amount
+          COALESCE(SUM(GREATEST(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0), 0)), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           AND "Invoice_Date" IS NOT NULL
@@ -2625,7 +2635,7 @@ def sotephwar_transection_top(period="all_time", limit=5):
           s."Quantity" AS quantity,
           s."Total_Amount" AS total_amount,
           s."Total_Received" AS amount_received,
-          COALESCE(s."Outstanding_Balance", 0) AS outstanding_amount
+          GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()} s
         {_sotephwar_customer_link_join("s")}
         WHERE COALESCE(s.__nc_deleted, false) = false
@@ -2655,7 +2665,7 @@ def sotephwar_transection_list(period="all_time", limit=20, unpaid_only=False):
     params["limit"] = limit
     unpaid_sql = ""
     if unpaid_only:
-        unpaid_sql = 'AND COALESCE("Outstanding_Balance", 0) > 0'
+        unpaid_sql = 'AND GREATEST(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0), 0) > 0'
 
     rows = _fetch_all(
         f'''
@@ -2668,7 +2678,7 @@ def sotephwar_transection_list(period="all_time", limit=20, unpaid_only=False):
           s."Quantity" AS quantity,
           s."Total_Amount" AS total_amount,
           s."Total_Received" AS amount_received,
-          COALESCE(s."Outstanding_Balance", 0) AS outstanding_amount
+          GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()} s
         {_sotephwar_customer_link_join("s")}
         WHERE COALESCE(s.__nc_deleted, false) = false
@@ -2709,7 +2719,7 @@ def sotephwar_transection_quantity(period="all_time", item=None):
           COALESCE(SUM("Quantity"), 0) AS quantity,
           COALESCE(SUM("Total_Amount"), 0) AS total_amount,
           COALESCE(SUM("Total_Received"), 0) AS amount_received,
-          COALESCE(SUM("Outstanding_Balance"), 0) AS outstanding_amount
+          COALESCE(SUM(GREATEST(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0), 0)), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()}
         WHERE COALESCE(__nc_deleted, false) = false
           {item_sql}
@@ -2752,7 +2762,7 @@ def sotephwar_product_ranking(period="all_time", product=None, limit=10):
           COALESCE(SUM(s."Quantity"), 0) AS quantity,
           COALESCE(SUM(s."Total_Amount"), 0) AS total_amount,
           COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
-          COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_amount
+          COALESCE(SUM(GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0)), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()} s
         WHERE COALESCE(s.__nc_deleted, false) = false
           AND s."Total_Amount" IS NOT NULL
@@ -2927,7 +2937,7 @@ def sotephwar_transection_customer(
         params["customer_normalized"] = normalize_name(customer)
     unpaid_sql = ""
     if unpaid_only:
-        unpaid_sql = 'AND COALESCE("Outstanding_Balance", 0) > 0'
+        unpaid_sql = 'AND GREATEST(COALESCE("Total_Amount", 0) - COALESCE("Total_Received", 0), 0) > 0'
     invoice_sql = ""
     if invoice_numbers:
         invoice_sql = 'AND "Invoice_Number"::text = ANY(%(invoice_numbers)s)'
@@ -2944,7 +2954,7 @@ def sotephwar_transection_customer(
           s."Quantity" AS quantity,
           s."Total_Amount" AS total_amount,
           s."Total_Received" AS amount_received,
-          COALESCE(s."Outstanding_Balance", 0) AS outstanding_amount
+          GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0) AS outstanding_amount
         FROM {_sotephwar_transection_table_ref()} s
         {_sotephwar_customer_link_join("s")}
         WHERE COALESCE(s.__nc_deleted, false) = false
@@ -4122,7 +4132,7 @@ def payment_receive_summary(
             COALESCE({_linked_farm_customer_expr("f")}, '') AS customer,
             COALESCE(SUM(f."Total_Amount"), 0) AS invoice_amount,
             COALESCE(SUM(f."Total_Received"), 0) AS received_amount,
-            COALESCE(SUM(f."Outstanding_Balance"), 0) AS outstanding_balance
+            COALESCE(SUM(GREATEST(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0), 0)), 0) AS outstanding_balance
           FROM {_farm_transection_table_ref()} f
           {_farm_customer_link_join("f")}
           WHERE COALESCE(f.__nc_deleted, false) = false
@@ -4140,7 +4150,7 @@ def payment_receive_summary(
             COALESCE({_linked_customer_expr("s")}, '') AS customer,
             COALESCE(SUM(s."Total_Amount"), 0) AS invoice_amount,
             COALESCE(SUM(s."Total_Received"), 0) AS received_amount,
-            COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_balance
+            COALESCE(SUM(GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0)), 0) AS outstanding_balance
           FROM {_sotephwar_transection_table_ref()} s
           {_sotephwar_customer_link_join("s")}
           WHERE COALESCE(s.__nc_deleted, false) = false
@@ -4325,7 +4335,7 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
               'Farm' AS sector,
               COALESCE(SUM(f."Total_Amount"), 0) AS amount,
               COALESCE(SUM(f."Total_Received"), 0) AS amount_received,
-              COALESCE(SUM(f."Outstanding_Balance"), 0) AS outstanding_amount,
+              COALESCE(SUM(GREATEST(COALESCE(f."Total_Amount", 0) - COALESCE(f."Total_Received", 0), 0)), 0) AS outstanding_amount,
               COUNT(*) AS row_count,
               COUNT(cust."customer_name") AS linked_count
             FROM {_farm_transection_table_ref()} f
@@ -4351,7 +4361,7 @@ def master_name_comparison(period="this_year", scope="both", granularity="month"
               'Sote Phwar' AS sector,
               COALESCE(SUM(s."Total_Amount"), 0) AS amount,
               COALESCE(SUM(s."Total_Received"), 0) AS amount_received,
-              COALESCE(SUM(s."Outstanding_Balance"), 0) AS outstanding_amount,
+              COALESCE(SUM(GREATEST(COALESCE(s."Total_Amount", 0) - COALESCE(s."Total_Received", 0), 0)), 0) AS outstanding_amount,
               COUNT(*) AS row_count,
               COUNT(cust."customer_name") AS linked_count
             FROM {_sotephwar_transection_table_ref()} s
@@ -4535,9 +4545,6 @@ def choose_formula_by_keywords(question):
     ):
         return "sotephwar_transection_customer"
 
-    if farm_customer:
-        return "sales_total"
-
     if "subgroup" in text or "sub group" in text or "transaction group" in text or "transection group" in text:
         return "category_summary"
     if period.startswith("date:") and (
@@ -4550,6 +4557,8 @@ def choose_formula_by_keywords(question):
         return "list_transactions"
     if _detail_requested(question):
         return "list_transactions"
+    if farm_customer:
+        return "sales_total"
     if "cash" in text or "cash flow" in text:
         return "cash_flow"
     if (
@@ -4624,6 +4633,17 @@ def run_formula(formula_name, question):
                 filters["income_expense"] = "Expense"
             elif any(_contains_phrase(text, word) for word in ("income", "sale", "sales", "revenue")):
                 filters["income_expense"] = "Income"
+        if (
+            filters.get("sector") == "Farm"
+            and filters.get("income_expense") == "Income"
+            and not filters.get("category")
+            and not filters.get("categories")
+        ):
+            return farm_transection_customer(
+                period,
+                customer=filters.get("farm_customer"),
+                limit=extract_top_limit(question, default=200, maximum=200),
+            )
         default_limit = 50 if _detail_requested(question) else 20
         return formula(period, filters, limit=extract_top_limit(question, default=default_limit))
     if formula_name in ("sotephwar_transection_top", "sotephwar_transection_list"):

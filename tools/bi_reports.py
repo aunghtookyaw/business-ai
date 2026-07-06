@@ -62,6 +62,17 @@ def _is_income_detail_payload(payload):
     )
 
 
+def _is_farm_income_detail_payload(payload):
+    intent = payload.get("intent") or {}
+    result = payload.get("result") or {}
+    return (
+        result.get("formula") == "farm_transection_customer"
+        and intent.get("business") == "farm"
+        and intent.get("module") == "income"
+        and intent.get("report") in {"income_detail", "income_transactions", "outstanding_balance"}
+    )
+
+
 def _fixed_income_detail_lines(result):
     rows = result.get("transactions") or []
     lines = [
@@ -83,6 +94,34 @@ def _fixed_income_detail_lines(result):
             row.get("payment_method") or row.get("payment") or "-",
             _money(int(row.get("amount") or 0)),
         ]))
+    return lines
+
+
+def _farm_income_detail_lines(result):
+    rows = result.get("invoices") or []
+    lines = [
+        "Farm Transection Vouchers",
+        f"Total Sales: {_money(int(result.get('total_sales') or 0))}",
+        f"Total Received: {_money(int(result.get('amount_received') or 0))}",
+        f"Total Outstanding: {_money(int(result.get('outstanding_amount') or 0))}",
+        "",
+        "Date | Voucher | Customer | Total Sales | Received | Outstanding",
+    ]
+    if not rows:
+        lines.append("No Farm_Transection income rows found.")
+        return lines
+
+    for row in rows[:50]:
+        lines.append(
+            "{date} | {voucher} | {customer} | {total} | {received} | {outstanding}".format(
+                date=row.get("invoice_date") or "-",
+                voucher=row.get("invoice_number") or "-",
+                customer=row.get("customer_name") or "-",
+                total=_money(int(row.get("total_amount") or 0)),
+                received=_money(int(row.get("amount_received") or 0)),
+                outstanding=_money(int(row.get("outstanding_amount") or 0)),
+            )
+        )
     return lines
 
 
@@ -267,7 +306,7 @@ def format_text_report(payload):
     elif formula == "category_summary":
         intent = payload.get("intent") or result.get("_bi_intent") or {}
         if (
-            intent.get("business") == "farm"
+            intent.get("business") in {"farm", "sote_phwar"}
             and intent.get("module") == "income"
             and intent.get("report") in {"income_summary", "total_income"}
         ):
@@ -291,6 +330,8 @@ def format_text_report(payload):
                 lines.append("No matching data found.")
             for index, row in enumerate(rows[:20], start=1):
                 lines.append(_format_row(index, row))
+    elif _is_farm_income_detail_payload(payload):
+        lines.extend(_farm_income_detail_lines(result))
     elif _is_income_detail_payload(payload):
         lines.extend(_fixed_income_detail_lines(result))
     else:
