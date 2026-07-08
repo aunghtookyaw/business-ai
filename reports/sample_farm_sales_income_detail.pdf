@@ -1,0 +1,151 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 4067 >>
+stream
+0.067 0.094 0.153 rg
+BT /F2 18 Tf 50.00 795.00 Td (Farm - Income - Income Detail) Tj ET
+0.067 0.094 0.153 rg
+BT /F1 10 Tf 50.00 772.00 Td (Question: Farm - Income - Income Detail) Tj ET
+0.067 0.094 0.153 rg
+BT /F1 8 Tf 50.00 748.00 Td (Generated: 2026-07-07 20:04) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 13.5 Tf 50.00 720.00 Td (Farm - Income - Income Detail) Tj ET
+0.949 0.965 0.984 rg 0.949 0.965 0.984 RG
+50.00 646.00 165.00 46.00 re f
+0.706 0.745 0.800 RG
+50.00 646.00 165.00 46.00 re S
+0.294 0.333 0.388 rg
+BT /F2 8.8 Tf 60.00 676.00 Td (Total Income) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 13.2 Tf 60.00 656.00 Td (1,200,000) Tj ET
+0.886 0.949 0.914 rg 0.886 0.949 0.914 RG
+215.00 646.00 165.00 46.00 re f
+0.706 0.745 0.800 RG
+215.00 646.00 165.00 46.00 re S
+0.294 0.333 0.388 rg
+BT /F2 8.8 Tf 225.00 676.00 Td (Total Received) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 13.2 Tf 225.00 656.00 Td (900,000) Tj ET
+0.976 0.914 0.914 rg 0.976 0.914 0.914 RG
+380.00 646.00 165.00 46.00 re f
+0.706 0.745 0.800 RG
+380.00 646.00 165.00 46.00 re S
+0.294 0.333 0.388 rg
+BT /F2 8.8 Tf 390.00 676.00 Td (Outstanding) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 13.2 Tf 390.00 656.00 Td (300,000) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 12.5 Tf 50.00 610.00 Td (Transaction Detail) Tj ET
+0.859 0.886 0.922 rg 0.859 0.886 0.922 RG
+50.00 563.00 495.00 28.00 re f
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 54.00 582.00 Td (Date) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 108.00 582.00 Td (Voucher) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 160.00 582.00 Td (Customer) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 242.00 582.00 Td (Source) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 318.00 582.00 Td (Description) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 413.00 582.00 Td (Total) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 461.00 582.00 Td (Received) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 509.00 582.00 Td (Outstandi) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 509.00 574.00 Td (ng) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 54.00 554.00 Td (2026-01-02) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 108.00 554.00 Td (F-1) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 160.00 554.00 Td (KK) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 242.00 554.00 Td (farm_transection) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 318.00 554.00 Td (Farm Sales) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 413.00 554.00 Td (1,000,000) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 461.00 554.00 Td (700,000) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 509.00 554.00 Td (300,000) Tj ET
+0.957 0.969 0.984 rg 0.957 0.969 0.984 RG
+50.00 515.00 495.00 24.00 re f
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 54.00 530.00 Td (2026-01-03) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 108.00 530.00 Td (-) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 160.00 530.00 Td (-) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 242.00 530.00 Td (Transection) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 318.00 530.00 Td (Additional farm income) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 413.00 530.00 Td (200,000) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 461.00 530.00 Td (200,000) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 6.4 Tf 509.00 530.00 Td (0) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 11.5 Tf 50.00 484.00 Td (Footer Summary) Tj ET
+0.859 0.886 0.922 rg 0.859 0.886 0.922 RG
+50.00 443.00 495.00 22.00 re f
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 54.00 456.00 Td (Metric) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 314.00 456.00 Td (Amount) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 54.00 434.00 Td (Total Transactions) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 314.00 434.00 Td (2) Tj ET
+0.957 0.969 0.984 rg 0.957 0.969 0.984 RG
+50.00 399.00 495.00 22.00 re f
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 54.00 412.00 Td (Total Income) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 314.00 412.00 Td (1,200,000) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 54.00 390.00 Td (Total Received) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 314.00 390.00 Td (900,000) Tj ET
+0.957 0.969 0.984 rg 0.957 0.969 0.984 RG
+50.00 355.00 495.00 22.00 re f
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 54.00 368.00 Td (Outstanding) Tj ET
+0.067 0.094 0.153 rg
+BT /F2 8 Tf 314.00 368.00 Td (300,000) Tj ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000185 00000 n 
+0000000260 00000 n 
+0000000396 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+4515
+%%EOF

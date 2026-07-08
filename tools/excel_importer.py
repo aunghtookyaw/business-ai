@@ -179,10 +179,9 @@ def _normalise_row(table_config, row):
         total_amount = cleaned.get("Total_Amount") or 0
         total_received = cleaned.get("Total_Received") or 0
         expected_balance = total_amount - total_received
-        if cleaned.get("Outstanding_Balance") is None:
-            cleaned["Outstanding_Balance"] = expected_balance
-        elif cleaned["Outstanding_Balance"] != expected_balance:
-            raise ValueError("Outstanding_Balance must equal Total_Amount - Total_Received")
+        if expected_balance < 0:
+            raise ValueError("Total_Received cannot be greater than Total_Amount")
+        cleaned["Outstanding_Balance"] = expected_balance
 
     return cleaned
 

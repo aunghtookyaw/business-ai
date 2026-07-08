@@ -2,13 +2,18 @@ from tools.bi_catalog import BUSINESS_SECTOR, PRODUCT_BY_MODULE, STORE_BY_MODULE
 from tools.bi_intents import validate_intent
 from tools.bi_periods import legacy_period, period_label
 from tools.formula_engine import (
+    business_cash_flow,
+    business_kpi_overview,
+    calculate_inventory_value,
     cash_flow,
     category_summary,
     expense_total,
+    farm_product_ranking,
     farm_transection_customer,
     financial_obligation_due,
     financial_obligation_list,
     financial_obligation_summary,
+    get_income_detail,
     gross_profit,
     kpi_overview,
     list_transactions,
@@ -16,6 +21,7 @@ from tools.formula_engine import (
     sotephwar_inventory_list,
     sotephwar_inventory_movement_summary,
     sotephwar_inventory_stock,
+    sotephwar_product_ranking,
     sotephwar_transection_customer,
     sotephwar_transection_list,
     sotephwar_transection_quantity,
@@ -59,72 +65,6 @@ def _voucher_limit(intent):
     return 200 if intent.output == "pdf" else 50
 
 
-def _sotephwar_income_expense_balance(period):
-    income = sotephwar_transection_summary(period)
-    expense = expense_total(period, {"sector": "Sote Phwar", "income_expense": "Expense"})
-    total_income = int(income.get("total_amount") or 0)
-    total_expense = int(expense.get("total_expense") or 0)
-    net_profit = total_income - total_expense
-    margin = round((net_profit / total_income) * 100, 2) if total_income else 0
-    return {
-        "formula": "kpi_overview",
-        "period": period,
-        "total_income": total_income,
-        "total_expense": total_expense,
-        "net_profit": net_profit,
-        "profit_margin_percent": margin,
-        "invoice_count": income.get("invoice_count", 0),
-        "amount_received": income.get("amount_received", 0),
-        "outstanding_amount": income.get("outstanding_amount", 0),
-        "expense_count": expense.get("expense_count", 0),
-        "sources": {
-            "sotephwar_transection_total_amount": total_income,
-            "sotephwar_sector_expense": total_expense,
-        },
-        "note": "Sote Phwar income comes from Sotephwar_Transection; expenses come from Transection sector Sote Phwar.",
-    }
-
-
-def _sotephwar_overview(period):
-    balance = _sotephwar_income_expense_balance(period)
-    return {
-        **balance,
-        "formula": "gross_profit",
-        "income": balance["total_income"],
-        "expense": balance["total_expense"],
-        "gross_profit": balance["net_profit"],
-    }
-
-
-def _sotephwar_cash_flow(period):
-    income = sotephwar_transection_summary(period)
-    expense_flow = cash_flow(period, {"sector": "Sote Phwar", "income_expense": "Expense"})
-    inflow = int(income.get("amount_received") or 0)
-    outflow = int(expense_flow.get("total_outflow") or 0)
-    methods = [
-        {
-            "payment_method": "Sotephwar_Transection received",
-            "inflow": inflow,
-            "outflow": 0,
-            "net_cash_flow": inflow,
-        }
-    ]
-    methods.extend(row for row in expense_flow.get("by_payment_method", []) if row.get("outflow"))
-    return {
-        "formula": "cash_flow",
-        "period": period,
-        "total_inflow": inflow,
-        "total_outflow": outflow,
-        "net_cash_flow": inflow - outflow,
-        "by_payment_method": methods,
-        "sources": {
-            "sotephwar_transection_total_received": inflow,
-            "sotephwar_sector_expense_outflow": outflow,
-        },
-        "note": "Sote Phwar cash inflow uses Total_Received from Sotephwar_Transection; outflow uses Transection sector Sote Phwar expenses.",
-    }
-
-
 def execute_intent(intent):
     missing = validate_intent(intent)
     if missing:
@@ -136,14 +76,17 @@ def execute_intent(intent):
     if intent.business == "sote_phwar" and report == "total_income":
         result = sales_total(period, _filters(intent, "Income"))
     elif intent.business == "sote_phwar" and report == "income_summary":
+        result = top_income(period, _filters(intent, "Income"), limit=50)
+    elif intent.business == "sote_phwar" and report == "income_by_category":
         result = category_summary(period, _filters(intent, "Income"))
     elif intent.business == "farm" and report == "total_income":
         result = sales_total(period, _filters(intent, "Income"))
     elif intent.business == "farm" and report == "income_summary":
-        result = category_summary(
-            period,
-            _filters(intent, "Income"),
-        )
+        result = top_income(period, _filters(intent, "Income"), limit=50)
+    elif intent.business == "farm" and report == "income_by_category":
+        result = category_summary(period, _filters(intent, "Income"))
+    elif intent.business == "farm" and report in {"sales_by_product", "top_products"}:
+        result = farm_product_ranking(period, product=_product(intent), limit=50)
     elif report == "financial_obligation_summary":
         result = financial_obligation_summary()
     elif report == "financial_obligation_due":
@@ -152,7 +95,9 @@ def execute_intent(intent):
         result = financial_obligation_list(limit=50)
     elif report == "total_income":
         result = sales_total(period, _filters(intent, "Income"))
-    elif report in {"income_summary", "income_by_category"}:
+    elif report == "income_summary":
+        result = top_income(period, _filters(intent, "Income"), limit=50)
+    elif report == "income_by_category":
         result = category_summary(period, _filters(intent, "Income"))
     elif intent.business == "farm" and report == "sales_by_customer":
         result = farm_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
@@ -160,10 +105,21 @@ def execute_intent(intent):
         result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent))
     elif report == "top_customers":
         result = top_income(period, _filters(intent, "Income"), limit=10)
+    elif intent.business == "sote_phwar" and report == "top_products":
+        result = sotephwar_product_ranking(period, product=_product(intent), limit=10)
+    elif intent.business == "farm" and report == "top_products":
+        result = farm_product_ranking(period, product=_product(intent), limit=10)
     elif report == "sales_by_product":
         result = sotephwar_transection_quantity(period, item=_product(intent))
-    elif intent.business == "farm" and report in {"income_detail", "income_transactions"}:
-        result = farm_transection_customer(period, customer=intent.customer, limit=200)
+    elif intent.business in {"farm", "sote_phwar"} and report in {"income_detail", "income_transactions"}:
+        result = get_income_detail(
+            BUSINESS_SECTOR[intent.business],
+            period,
+            customer=intent.customer,
+            category=intent.category,
+            categories=intent.categories,
+            limit=200 if intent.output == "pdf" else 50,
+        )
     elif report in {"income_detail", "income_transactions"}:
         result = list_transactions(period, _filters(intent, "Income"), limit=50)
     elif report == "total_expense":
@@ -185,13 +141,13 @@ def execute_intent(intent):
         result = farm_transection_customer(period, customer=intent.customer, limit=200, unpaid_only=True)
     elif report == "outstanding_balance":
         result = sotephwar_transection_customer(period, customer=intent.customer, limit=_voucher_limit(intent), unpaid_only=True)
-    elif report in {"current_stock", "low_stock", "stock_valuation"}:
+    elif report == "stock_valuation":
+        result = calculate_inventory_value(product=_product(intent), store=_store(intent))
+    elif report in {"current_stock", "low_stock"}:
         result = sotephwar_inventory_stock(product=_product(intent), store=_store(intent))
         if report == "low_stock":
             result["stock"] = [row for row in result["stock"] if row.get("stock_qty", 0) <= 10]
             result["note"] = "Low stock threshold: 10 units."
-        if report == "stock_valuation":
-            result["note"] = "Stock valuation needs product cost data; current report shows quantity only."
     elif report in {"inventory_movement", "factory_production", "crops_production"}:
         movement_type = "Production" if report in {"factory_production", "crops_production"} else None
         result = sotephwar_inventory_movement_summary(
@@ -200,12 +156,12 @@ def execute_intent(intent):
             store=_store(intent),
             movement_type=movement_type,
         )
-    elif intent.business == "sote_phwar" and report == "kpi":
-        result = _sotephwar_income_expense_balance(period)
-    elif intent.business == "sote_phwar" and report == "cash_flow":
-        result = _sotephwar_cash_flow(period)
-    elif intent.business == "sote_phwar" and report == "overview":
-        result = _sotephwar_overview(period)
+    elif intent.business in {"farm", "sote_phwar"} and report == "kpi":
+        result = business_kpi_overview(period, business=intent.business, filters=_filters(intent))
+    elif intent.business in {"farm", "sote_phwar"} and report == "cash_flow":
+        result = business_cash_flow(period, business=intent.business, filters=_filters(intent))
+    elif intent.business in {"farm", "sote_phwar"} and report == "overview":
+        result = gross_profit(period, _filters(intent))
     elif report == "kpi":
         result = kpi_overview(period, _filters(intent))
     elif report == "cash_flow":

@@ -18,7 +18,7 @@ def _rows_from_result(result):
         return result.get("categories") or []
     for key in (
         "transactions", "expenses", "income", "categories", "sectors", "invoices",
-        "customers", "stock", "movements", "months", "summary", "obligations", "rows",
+        "customers", "products", "stock", "movements", "months", "summary", "obligations", "rows",
     ):
         rows = result.get(key)
         if rows:
@@ -353,7 +353,7 @@ def _format_row(index, row):
         "creditor", "item", "category", "subcategory", "sector", "product",
         "store", "type", "frequency", "status", "amount", "total_amount",
         "amount_received", "outstanding_amount", "stock_qty", "quantity",
-        "days_until_due", "notes",
+        "qty", "unit_cost", "inventory_value", "days_until_due", "notes",
     ]
     parts = []
     for key in preferred:

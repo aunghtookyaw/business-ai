@@ -48,6 +48,36 @@ class ExcelImporterTest(unittest.TestCase):
         self.assertEqual("partial payment", cleaned["Note"])
         self.assertIsNone(cleaned["AI_Analysis"])
 
+    def test_farm_transection_zero_received_recalculates_outstanding_balance(self):
+        cleaned = _normalise_row(
+            TABLES["farm_transection"],
+            {
+                "Date": "2026-07-03",
+                "Customer": "Good Food",
+                "Invoice_Number": "71",
+                "Total_Amount": "466000",
+                "Total_Received": "0",
+                "Outstanding_Balance": "0",
+            },
+        )
+
+        self.assertEqual(466000, cleaned["Total_Amount"])
+        self.assertEqual(0, cleaned["Total_Received"])
+        self.assertEqual(466000, cleaned["Outstanding_Balance"])
+
+    def test_farm_transection_rejects_over_received_amount(self):
+        with self.assertRaisesRegex(ValueError, "Total_Received cannot be greater"):
+            _normalise_row(
+                TABLES["farm_transection"],
+                {
+                    "Date": "2026-07-03",
+                    "Customer": "Good Food",
+                    "Invoice_Number": "71",
+                    "Total_Amount": "466000",
+                    "Total_Received": "466001",
+                },
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

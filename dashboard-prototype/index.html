@@ -8,16 +8,42 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="prototype-banner">
+  <section class="login-screen" id="loginScreen" aria-label="Dashboard login">
+    <form class="login-panel" id="loginForm">
+      <div class="login-brand">
+        <span class="brand-mark">
+          <img src="assets/bigshot-logo.jpg" alt="" aria-hidden="true">
+        </span>
+        <div>
+          <strong>BigShot Business Dashboard</strong>
+          <small>Master account access</small>
+        </div>
+      </div>
+      <label>
+        <span>Username</span>
+        <input id="loginUsername" name="username" type="text" autocomplete="username" required autofocus>
+      </label>
+      <label>
+        <span>Password</span>
+        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="button primary login-button" id="loginButton" type="submit">Sign In</button>
+      <p class="login-error" id="loginError" role="alert"></p>
+    </form>
+  </section>
+
+  <div class="prototype-banner app-authenticated">
     BigShot Business Dashboard · Read-only · Canonical Business Intelligence data
   </div>
 
-  <div class="app-shell">
+  <div class="app-shell app-authenticated" id="appShell">
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#executive" aria-label="BigShot Dashboard home">
-        <span class="brand-mark">B</span>
+        <span class="brand-mark">
+          <img src="assets/bigshot-logo.jpg" alt="" aria-hidden="true">
+        </span>
         <span>
-          <strong>BIGSHOT</strong>
+          <strong class="brand-word"><span>BIG</span><span class="brand-word-s">S</span><span>HOT</span></strong>
           <small>Business Intelligence</small>
         </span>
       </a>
@@ -35,12 +61,6 @@
         <button class="nav-item" data-page="customers">
           <span class="nav-icon">◎</span><span>Customers</span>
         </button>
-        <button class="nav-item" data-page="farm">
-          <span class="nav-icon">♧</span><span>Farm</span>
-        </button>
-        <button class="nav-item" data-page="sote-phwar">
-          <span class="nav-icon">◇</span><span>Sote Phwar</span>
-        </button>
         <button class="nav-item" data-page="financial">
           <span class="nav-icon">▥</span><span>Financial</span>
         </button>
@@ -56,7 +76,7 @@
         </div>
         <div class="user-card">
           <span class="avatar">BS</span>
-          <span><strong>Management</strong><small>Executive View</small></span>
+          <span><strong id="signedInUser">Master</strong><small id="signedInRole">Admin View</small></span>
         </div>
       </div>
     </aside>
@@ -65,7 +85,7 @@
       <header class="mobile-header">
         <button class="icon-button" id="menuButton" aria-label="Open navigation">☰</button>
         <strong>BIGSHOT</strong>
-        <button class="icon-button theme-toggle" aria-label="Toggle theme">◐</button>
+        <button class="icon-button logout-button" aria-label="Logout">↪</button>
       </header>
 
       <section class="topbar">
@@ -78,6 +98,7 @@
           <button class="button secondary" id="exportPdf">Export PDF</button>
           <button class="button secondary" id="exportExcel">Export Excel</button>
           <button class="button primary" id="saveView">Save View</button>
+          <button class="button secondary logout-button" type="button">Logout</button>
           <button class="icon-button theme-toggle" aria-label="Toggle theme">◐</button>
         </div>
       </section>
@@ -155,10 +176,10 @@
         <strong id="metricOutstanding">—</strong><small>MMK</small>
         <p class="negative">Collection focus <span>required</span></p>
       </article>
-      <article class="metric-card unavailable">
+      <article class="metric-card">
         <div class="metric-label"><span>Inventory Value</span><span class="metric-icon">□</span></div>
-        <strong id="metricInventoryValue">—</strong><small>Unit cost required</small>
-        <p class="neutral"><span>Unavailable until BI cost data exists</span></p>
+        <strong id="metricInventoryValue">—</strong><small>Total inventory value</small>
+        <p class="neutral"><span>Formula Engine valuation</span></p>
       </article>
     </div>
 

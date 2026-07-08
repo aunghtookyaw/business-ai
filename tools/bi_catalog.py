@@ -69,6 +69,7 @@ INCOME_REPORTS = [
     ("outstanding_balance", "Outstanding / Unpaid"),
     ("sales_by_product", "Sales by Product"),
     ("top_customers", "Top Customers"),
+    ("top_products", "Top Products"),
 ]
 
 EXPENSE_REPORTS = [

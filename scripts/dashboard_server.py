@@ -1,24 +1,139 @@
 import os
 import sys
 import tempfile
+import secrets
+import json
+import logging
+from datetime import timedelta
 from pathlib import Path
+from functools import wraps
+from hmac import compare_digest
+from time import time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, redirect, request, send_file, session, url_for
 from waitress import serve
+from werkzeug.exceptions import HTTPException
 
 from tools import dashboard_service
 from tools.bi_reports import write_excel_report
-from tools.chart_pdf import create_chart_pdf_report_from_result
+from tools.dashboard_pdf import write_dashboard_pdf
 
 
 STATIC_ROOT = PROJECT_ROOT / "dashboard-prototype"
+VERSION = "1.0"
+logger = logging.getLogger("bigshot.dashboard")
 app = Flask(__name__, static_folder=str(STATIC_ROOT), static_url_path="")
+app.secret_key = os.getenv("DASHBOARD_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=os.getenv("DASHBOARD_COOKIE_SECURE", "1") != "0",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=float(os.getenv("DASHBOARD_SESSION_HOURS", "10"))),
+)
 DEFAULT_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.getenv("DASHBOARD_PORT", "5062"))
+MASTER_ROLE = "Admin"
+FUTURE_ROLES = ["Manager", "Viewer", "Sales", "Extension", "Accounting", "Inventory", "Admin"]
+LOGIN_RATE_LIMIT_MAX_FAILURES = int(os.getenv("DASHBOARD_LOGIN_MAX_FAILURES", "5"))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("DASHBOARD_LOGIN_WINDOW_SECONDS", "900"))
+PUBLIC_API_PATHS = {"/api/auth/login", "/api/auth/session", "/health", "/ready"}
+DASHBOARD_PAGE_PATHS = {
+    "/executive",
+    "/payments",
+    "/customers",
+    "/inventory",
+    "/financial",
+    "/insights",
+}
+_FAILED_LOGIN_ATTEMPTS = {}
+
+
+def _log_event(level, event, **fields):
+    payload = {"event": event, **fields}
+    logger.log(level, json.dumps(payload, sort_keys=True))
+
+
+def _client_ip():
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _failed_attempts(ip_address):
+    cutoff = time() - LOGIN_RATE_LIMIT_WINDOW_SECONDS
+    attempts = [attempt for attempt in _FAILED_LOGIN_ATTEMPTS.get(ip_address, []) if attempt >= cutoff]
+    _FAILED_LOGIN_ATTEMPTS[ip_address] = attempts
+    return attempts
+
+
+def _rate_limited(ip_address):
+    return len(_failed_attempts(ip_address)) >= LOGIN_RATE_LIMIT_MAX_FAILURES
+
+
+def _record_failed_login(ip_address):
+    attempts = _failed_attempts(ip_address)
+    attempts.append(time())
+    _FAILED_LOGIN_ATTEMPTS[ip_address] = attempts
+
+
+def _clear_failed_logins(ip_address):
+    _FAILED_LOGIN_ATTEMPTS.pop(ip_address, None)
+
+
+def _auth_configured():
+    return bool(os.getenv("MASTER_USERNAME")) and bool(os.getenv("MASTER_PASSWORD"))
+
+
+def _required_env_status():
+    return {
+        "MASTER_USERNAME": bool(os.getenv("MASTER_USERNAME")),
+        "MASTER_PASSWORD": bool(os.getenv("MASTER_PASSWORD")),
+        "DASHBOARD_SECRET_KEY": bool(os.getenv("DASHBOARD_SECRET_KEY")),
+    }
+
+
+def _session_available():
+    return bool(app.secret_key) and bool(app.config.get("SESSION_COOKIE_HTTPONLY"))
+
+
+def _current_user():
+    username = session.get("username")
+    if not username:
+        return None
+    return {
+        "username": username,
+        "role": session.get("role", MASTER_ROLE),
+        "future_roles": FUTURE_ROLES,
+    }
+
+
+def _is_authenticated():
+    return _current_user() is not None
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not _is_authenticated():
+            return jsonify({"ok": False, "error": "Authentication required"}), 401
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.before_request
+def require_dashboard_auth():
+    if request.path in PUBLIC_API_PATHS or request.path.startswith("/assets/"):
+        return None
+    if request.path.startswith("/api/dashboard") and not _is_authenticated():
+        return jsonify({"ok": False, "error": "Authentication required"}), 401
+    if request.path in DASHBOARD_PAGE_PATHS and not _is_authenticated():
+        return redirect(url_for("dashboard_page", login="required"))
+    return None
 
 
 @app.after_request
@@ -34,28 +149,121 @@ def security_headers(response):
     return response
 
 
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    if isinstance(error, HTTPException):
+        return error
+    _log_event(logging.ERROR, "fatal_error", error_type=type(error).__name__)
+    return jsonify({"ok": False, "error": "Internal server error"}), 500
+
+
 @app.get("/")
 def dashboard_page():
     return app.send_static_file("index.html")
 
 
+@app.get("/executive")
+@app.get("/payments")
+@app.get("/customers")
+@app.get("/inventory")
+@app.get("/financial")
+@app.get("/insights")
+def dashboard_named_page():
+    return app.send_static_file("index.html")
+
+
 @app.get("/health")
 def health():
-    return jsonify({"ok": True, "service": "bigshot-business-dashboard", "read_only": True})
+    return jsonify({
+        "status": "healthy",
+        "version": VERSION,
+        "authenticated": False,
+    })
+
+
+@app.get("/ready")
+def ready():
+    env_status = _required_env_status()
+    checks = {
+        "server": True,
+        "environment": all(env_status.values()),
+        "session": _session_available(),
+    }
+    status = "ready" if all(checks.values()) else "not_ready"
+    return jsonify({
+        "status": status,
+        "version": VERSION,
+        "checks": checks,
+        "required_environment": env_status,
+    }), 200 if status == "ready" else 503
+
+
+@app.get("/api/auth/session")
+def auth_session():
+    return jsonify({
+        "ok": True,
+        "authenticated": _is_authenticated(),
+        "user": _current_user(),
+        "auth_configured": _auth_configured(),
+    })
+
+
+@app.post("/api/auth/login")
+def auth_login():
+    if not _auth_configured():
+        return jsonify({
+            "ok": False,
+            "error": "Dashboard master credentials are not configured.",
+        }), 503
+    ip_address = _client_ip()
+    if _rate_limited(ip_address):
+        _log_event(logging.WARNING, "login_rate_limited", ip=ip_address)
+        return jsonify({
+            "ok": False,
+            "error": "Too many failed login attempts. Try again later.",
+        }), 429
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username") or "")
+    password = str(payload.get("password") or "")
+    valid_username = compare_digest(username, os.getenv("MASTER_USERNAME", ""))
+    valid_password = compare_digest(password, os.getenv("MASTER_PASSWORD", ""))
+    if not valid_username or not valid_password:
+        session.clear()
+        _record_failed_login(ip_address)
+        _log_event(logging.WARNING, "login_failed", ip=ip_address, username=username)
+        return jsonify({"ok": False, "error": "Invalid username or password."}), 401
+    session.clear()
+    session.permanent = True
+    session["username"] = username
+    session["role"] = MASTER_ROLE
+    _clear_failed_logins(ip_address)
+    _log_event(logging.INFO, "login_success", ip=ip_address, username=username, role=MASTER_ROLE)
+    return jsonify({"ok": True, "user": _current_user()})
+
+
+@app.post("/api/auth/logout")
+def auth_logout():
+    username = session.get("username")
+    _log_event(logging.INFO, "logout", ip=_client_ip(), username=username)
+    session.clear()
+    return jsonify({"ok": True})
 
 
 @app.get("/api/dashboard/meta")
+@login_required
 def dashboard_meta():
     return jsonify({
         "ok": True,
         "read_only": True,
         "business_logic": "canonical_bi_engine",
         "milestone": 1,
-        "pages": ["executive"],
+        "pages": ["executive", "payments", "customers", "inventory", "financial", "insights"],
+        "roles_ready": FUTURE_ROLES,
     })
 
 
 @app.get("/api/dashboard/dimensions")
+@login_required
 def dimensions():
     try:
         return jsonify({"ok": True, "data": dashboard_service.dashboard_dimensions()})
@@ -71,6 +279,7 @@ def _filters_from_request():
 
 
 @app.post("/api/dashboard/executive")
+@login_required
 def executive_dashboard():
     try:
         filters = _filters_from_request()
@@ -91,6 +300,7 @@ def executive_dashboard():
 
 
 @app.post("/api/dashboard/insights/executive")
+@login_required
 def executive_insight():
     try:
         filters = _filters_from_request()
@@ -129,6 +339,7 @@ def _export_payload(filters):
 
 
 @app.post("/api/dashboard/export/excel")
+@login_required
 def export_excel():
     try:
         filters = _filters_from_request()
@@ -147,19 +358,15 @@ def export_excel():
 
 
 @app.post("/api/dashboard/export/pdf")
+@login_required
 def export_pdf():
     try:
         filters = _filters_from_request()
-        payload = _export_payload(filters)
+        data, _ = dashboard_service.executive_dashboard(filters)
         handle = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         path = Path(handle.name)
         handle.close()
-        create_chart_pdf_report_from_result(
-            payload["result"],
-            f"Executive dashboard · {payload['period_label']}",
-            path,
-            title=payload["title"],
-        )
+        write_dashboard_pdf(data, path)
         return send_file(
             path,
             as_attachment=True,
@@ -171,4 +378,6 @@ def export_pdf():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=os.getenv("DASHBOARD_LOG_LEVEL", "INFO"))
+    _log_event(logging.INFO, "server_startup", host=DEFAULT_HOST, port=DEFAULT_PORT, version=VERSION)
     serve(app, host=DEFAULT_HOST, port=DEFAULT_PORT, threads=8)

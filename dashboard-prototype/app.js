@@ -19,7 +19,7 @@ const pageConfig = {
     subtitle: "Milestone 2 — stock position and movement by location.",
     eyebrow: "STOCK & OPERATIONS",
     headline: "Inventory Dashboard is scheduled for Milestone 2.",
-    description: "Version 1 will show validated quantities. Inventory value remains unavailable until unit-cost data exists in the BI engine.",
+    description: "Version 1 shows validated quantities and Formula Engine inventory value by location.",
     kpis: ["Stock Units", "Active Locations", "Production Volume", "Near Stock Out"],
     primary: "Stock movement timeline",
     breakdown: "Stock by product",
@@ -35,28 +35,6 @@ const pageConfig = {
     primary: "Revenue by customer trend",
     breakdown: "Customer payment behaviour",
     table: "Revenue and outstanding ranking"
-  },
-  farm: {
-    title: "Farm Dashboard",
-    subtitle: "Milestone 3 — Farm financial and operating performance.",
-    eyebrow: "FARM MANAGEMENT",
-    headline: "Farm Dashboard is scheduled for Milestone 3.",
-    description: "Financial metrics will use canonical Farm BI filters.",
-    kpis: ["Farm Revenue", "Farm Expenses", "Farm Profit", "Farm Cash Flow"],
-    primary: "Farm revenue and expense trend",
-    breakdown: "Expense mix",
-    table: "Farm customer and crop performance"
-  },
-  "sote-phwar": {
-    title: "Sote Phwar Dashboard",
-    subtitle: "Milestone 3 — sales, production, inventory and dealers.",
-    eyebrow: "SOTE PHWAR MANAGEMENT",
-    headline: "Sote Phwar Dashboard is scheduled for Milestone 3.",
-    description: "Sales will use Sotephwar_Transection and inventory will use the canonical movement ledger.",
-    kpis: ["Sote Phwar Revenue", "Net Profit", "Production Units", "Outstanding"],
-    primary: "Sales, production and collection trend",
-    breakdown: "Product sales mix",
-    table: "Dealer performance"
   },
   financial: {
     title: "Financial Dashboard",
@@ -82,6 +60,12 @@ const pageConfig = {
   }
 };
 
+const loginScreen = document.getElementById("loginScreen");
+const loginForm = document.getElementById("loginForm");
+const loginUsername = document.getElementById("loginUsername");
+const loginPassword = document.getElementById("loginPassword");
+const loginButton = document.getElementById("loginButton");
+const loginError = document.getElementById("loginError");
 const content = document.getElementById("dashboardContent");
 const executiveTemplate = document.getElementById("executiveTemplate");
 const moduleTemplate = document.getElementById("moduleTemplate");
@@ -94,6 +78,8 @@ const currentYear = new Date().getFullYear();
 let activePage = "executive";
 let periodType = "year";
 let refreshTimer;
+let initializedDashboard = false;
+let authenticatedUser = null;
 
 const filterElements = {
   year: document.getElementById("yearFilter"),
@@ -127,6 +113,11 @@ function formatAmount(value) {
   if (absolute >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
   if (absolute >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
   return number.toLocaleString();
+}
+
+function formatMmk(value) {
+  if (value === null || value === undefined) return "—";
+  return `${Number(value || 0).toLocaleString()} MMK`;
 }
 
 function formatFull(value) {
@@ -224,8 +215,55 @@ function filterPayload(refresh = false) {
 async function apiJson(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json();
+  if (response.status === 401) {
+    showLogin("Please sign in to continue.");
+    throw new Error(payload.error || "Authentication required");
+  }
   if (!response.ok || !payload.ok) throw new Error(payload.error || `Request failed: ${response.status}`);
   return payload;
+}
+
+function showLogin(message = "") {
+  authenticatedUser = null;
+  initializedDashboard = false;
+  clearTimeout(refreshTimer);
+  document.querySelectorAll(".app-authenticated").forEach(element => element.classList.remove("visible"));
+  loginScreen.classList.remove("hidden");
+  loginError.textContent = message;
+  loginPassword.value = "";
+  setTimeout(() => loginUsername.focus(), 0);
+}
+
+function showDashboard(user) {
+  authenticatedUser = user;
+  document.querySelectorAll(".app-authenticated").forEach(element => element.classList.add("visible"));
+  loginScreen.classList.add("hidden");
+  document.getElementById("signedInUser").textContent = user?.username || "Master";
+  document.getElementById("signedInRole").textContent = `${user?.role || "Admin"} View`;
+}
+
+async function currentSession() {
+  const payload = await apiJson("/api/auth/session");
+  return payload;
+}
+
+async function login(username, password) {
+  const payload = await apiJson("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+  return payload.user;
+}
+
+async function logout() {
+  try {
+    await apiJson("/api/auth/logout", { method: "POST" });
+  } finally {
+    history.replaceState(null, "", location.pathname);
+    content.innerHTML = "";
+    showLogin("");
+  }
 }
 
 async function loadDimensions() {
@@ -286,7 +324,7 @@ function renderExecutiveData(data) {
   setText("metricProfit", formatAmount(metrics.net_profit));
   setText("metricCash", formatAmount(metrics.cash_received));
   setText("metricOutstanding", formatAmount(metrics.outstanding_receivables));
-  setText("metricInventoryValue", metrics.inventory_value === null ? "Unavailable" : formatAmount(metrics.inventory_value));
+  setText("metricInventoryValue", formatMmk(metrics.inventory_value));
   setText("metricMargin", metrics.profit_margin_percent === null ? "Unavailable for customer scope" : `${metrics.profit_margin_percent}% profit margin`);
   setText("metricPeriodLabel", data.filter_label);
   setText("expenseTotalPanel", formatAmount(metrics.expenses));
@@ -370,11 +408,16 @@ function renderCollections(receivables, trend) {
 function renderInventory(rows) {
   const container = document.getElementById("inventoryLocations");
   const byLocation = new Map();
-  rows.forEach(row => byLocation.set(row.store, (byLocation.get(row.store) || 0) + Number(row.stock_qty || 0)));
-  const values = [...byLocation.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const max = Math.max(...values.map(row => row[1]), 1);
-  container.innerHTML = values.length ? values.map(([store, quantity]) => `
-    <p><span>${escapeHtml(store)}</span><strong>${formatFull(quantity)}</strong><i style="--value:${quantity / max * 100}%"></i></p>
+  rows.forEach(row => {
+    const current = byLocation.get(row.store) || { quantity: 0, value: 0 };
+    current.quantity += Number(row.stock_qty || row.qty || 0);
+    current.value += Number(row.inventory_value || 0);
+    byLocation.set(row.store, current);
+  });
+  const values = [...byLocation.entries()].sort((a, b) => b[1].value - a[1].value).slice(0, 6);
+  const max = Math.max(...values.map(row => row[1].value), ...values.map(row => row[1].quantity), 1);
+  container.innerHTML = values.length ? values.map(([store, summary]) => `
+    <p><span>${escapeHtml(store)} · ${formatFull(summary.quantity)} units</span><strong>${formatMmk(summary.value)}</strong><i style="--value:${(summary.value || summary.quantity) / max * 100}%"></i></p>
   `).join("") : '<div class="empty-state">No inventory rows match the selected scope.</div>';
 }
 
@@ -497,6 +540,10 @@ async function downloadExport(kind) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(filterPayload(false))
     });
+    if (response.status === 401) {
+      showLogin("Please sign in to continue.");
+      return;
+    }
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error || "Export failed");
@@ -521,9 +568,20 @@ function updatePeriodControls() {
   if (periodType !== "year") expandedFilters.classList.add("open");
 }
 
+function initialPage() {
+  const hashPage = location.hash.replace("#", "");
+  if (pageConfig[hashPage]) return hashPage;
+  const pathPage = location.pathname.replace(/^\/+/, "");
+  if (pageConfig[pathPage]) return pathPage;
+  return "executive";
+}
+
 document.addEventListener("click", event => {
   const nav = event.target.closest("[data-page]");
-  if (nav) renderPage(nav.dataset.page);
+  if (nav) {
+    if (!authenticatedUser) return showLogin("Please sign in to continue.");
+    renderPage(nav.dataset.page);
+  }
   if (event.target.closest(".theme-toggle")) {
     const dark = document.documentElement.dataset.theme === "dark";
     document.documentElement.dataset.theme = dark ? "light" : "dark";
@@ -531,6 +589,24 @@ document.addEventListener("click", event => {
   }
 });
 
+loginForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  loginError.textContent = "";
+  loginButton.disabled = true;
+  try {
+    const user = await login(loginUsername.value.trim(), loginPassword.value);
+    showDashboard(user);
+    await initializeDashboard();
+  } catch (error) {
+    showLogin(error.message);
+  } finally {
+    loginButton.disabled = false;
+  }
+});
+
+document.querySelectorAll(".logout-button").forEach(button => {
+  button.addEventListener("click", logout);
+});
 document.getElementById("menuButton").addEventListener("click", () => sidebar.classList.toggle("open"));
 document.getElementById("moreFilters").addEventListener("click", () => expandedFilters.classList.toggle("open"));
 document.getElementById("refreshDashboard").addEventListener("click", () => loadExecutiveDashboard(true));
@@ -551,7 +627,9 @@ document.querySelectorAll(".period-chip").forEach(button => {
 });
 Object.values(filterElements).forEach(element => element.addEventListener("change", scheduleRefresh));
 
-async function initialize() {
+async function initializeDashboard() {
+  if (initializedDashboard) return;
+  initializedDashboard = true;
   const today = new Date();
   filterElements.month.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   const first = new Date(today.getFullYear(), 0, 1);
@@ -565,7 +643,22 @@ async function initialize() {
   } catch (error) {
     showToast(`Filter options unavailable: ${error.message}`);
   }
-  renderPage(location.hash.replace("#", "") || "executive");
+  renderPage(initialPage());
+}
+
+async function initialize() {
+  document.documentElement.dataset.theme = localStorage.getItem("bigshot-dashboard-theme") || "light";
+  try {
+    const session = await currentSession();
+    if (session.authenticated) {
+      showDashboard(session.user);
+      await initializeDashboard();
+    } else {
+      showLogin(new URLSearchParams(location.search).get("login") === "required" ? "Please sign in to continue." : "");
+    }
+  } catch (error) {
+    showLogin(error.message);
+  }
 }
 
 initialize();

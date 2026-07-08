@@ -1,6 +1,7 @@
 import re
 
 from tools.formula_engine import (
+    calculate_inventory_value,
     cash_flow,
     category_summary,
     expense_total,
@@ -9,7 +10,6 @@ from tools.formula_engine import (
     normalize_period,
     sales_total,
     sotephwar_inventory_movement_summary,
-    sotephwar_inventory_stock,
     top_expenses,
     top_income,
 )
@@ -190,7 +190,7 @@ def run_tool(name, args):
     if name == "inventory":
         if business and business != "sote_phwar":
             return sotephwar_inventory_movement_summary(period)
-        return sotephwar_inventory_stock()
+        return calculate_inventory_value()
     if name == "forecast":
         current = kpi_overview(period, _filters(business))
         previous = kpi_overview(previous_period(period), _filters(business))

@@ -8,6 +8,8 @@ RELATIVE_PERIODS = [
     ("last_week", "Last Week"),
     ("this_month", "This Month"),
     ("last_month", "Last Month"),
+    ("this_quarter", "This Quarter"),
+    ("last_quarter", "Last Quarter"),
     ("this_year", "This Year"),
     ("last_year", "Last Year"),
 ]
@@ -19,6 +21,10 @@ def relative_period(value):
 
 def month_period(year, month):
     return {"type": "month", "year": int(year), "month": int(month)}
+
+
+def quarter_period(year, quarter):
+    return {"type": "quarter", "year": int(year), "quarter": int(quarter)}
 
 
 def date_period(value):
@@ -40,6 +46,11 @@ def legacy_period(period):
             year=int(period["year"]),
             month=int(period["month"]),
         )
+    if kind == "quarter":
+        return "quarter:{year}-Q{quarter}".format(
+            year=int(period["year"]),
+            quarter=int(period["quarter"]),
+        )
     if kind == "date":
         return f"date:{period['date']}"
     if kind == "range":
@@ -55,6 +66,8 @@ def period_label(period):
         return dict(RELATIVE_PERIODS).get(period.get("value"), period.get("value", "All time"))
     if kind == "month":
         return date(int(period["year"]), int(period["month"]), 1).strftime("%B %Y")
+    if kind == "quarter":
+        return f"Q{int(period['quarter'])} {int(period['year'])}"
     if kind == "date":
         return period["date"]
     if kind == "range":

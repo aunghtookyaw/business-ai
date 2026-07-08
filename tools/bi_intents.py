@@ -64,20 +64,30 @@ def validate_intent(intent):
     if intent.output not in OUTPUTS:
         missing.append("output")
 
-    if intent.report in {
+    customer_required_reports = {
         "sales_by_customer",
         "customer_history",
         "customer_sales",
         "customer_profitability",
         "outstanding_balance",
-    } and not intent.customer:
+    }
+    if intent.business == "farm":
+        customer_required_reports.update({
+            "income_detail",
+            "income_transactions",
+            "outstanding_balance",
+        })
+    if intent.report in customer_required_reports and not intent.customer:
         missing.append("customer")
-    if intent.report in {
+    category_required_reports = {
         "expense_by_category",
         "expense_detail",
         "income_by_category",
         "income_detail",
-    } and not intent.category and not intent.categories:
+    }
+    if intent.business == "farm":
+        category_required_reports.discard("income_detail")
+    if intent.report in category_required_reports and not intent.category and not intent.categories:
         missing.append("category")
 
     return missing

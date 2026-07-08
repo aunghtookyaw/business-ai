@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 
 .env
+deploy/dashboard.env
 *.log
 config.py
 google_calendar_credentials.json

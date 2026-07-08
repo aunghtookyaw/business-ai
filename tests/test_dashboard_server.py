@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import re
 import unittest
 from unittest.mock import patch
@@ -8,16 +9,149 @@ from scripts import dashboard_server
 
 class DashboardServerTest(unittest.TestCase):
     def setUp(self):
+        self.env = patch.dict(os.environ, {
+            "MASTER_USERNAME": "master",
+            "MASTER_PASSWORD": "secret-password",
+            "DASHBOARD_COOKIE_SECURE": "0",
+            "DASHBOARD_SECRET_KEY": "test-session-secret",
+        })
+        self.env.start()
+        dashboard_server._FAILED_LOGIN_ATTEMPTS.clear()
         self.client = dashboard_server.app.test_client()
 
-    def test_health_declares_read_only(self):
+    def tearDown(self):
+        self.env.stop()
+
+    def login(self):
+        response = self.client.post(
+            "/api/auth/login",
+            json={"username": "master", "password": "secret-password"},
+        )
+        self.assertEqual(200, response.status_code)
+
+    def test_health_reports_public_status(self):
         response = self.client.get("/health")
         self.assertEqual(200, response.status_code)
-        self.assertTrue(response.get_json()["read_only"])
+        self.assertEqual({
+            "status": "healthy",
+            "version": "1.0",
+            "authenticated": False,
+        }, response.get_json())
         self.assertEqual("DENY", response.headers["X-Frame-Options"])
+
+    def test_ready_reports_required_runtime_checks(self):
+        response = self.client.get("/ready")
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual("ready", payload["status"])
+        self.assertTrue(payload["checks"]["server"])
+        self.assertTrue(payload["checks"]["environment"])
+        self.assertTrue(payload["checks"]["session"])
+
+    def test_ready_reports_missing_environment(self):
+        with patch.dict(os.environ, {"MASTER_PASSWORD": ""}):
+            response = self.client.get("/ready")
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("not_ready", response.get_json()["status"])
+        self.assertFalse(response.get_json()["checks"]["environment"])
+
+    def test_session_cookie_security_settings_are_active(self):
+        self.assertTrue(dashboard_server.app.config["SESSION_COOKIE_HTTPONLY"])
+        self.assertEqual("Strict", dashboard_server.app.config["SESSION_COOKIE_SAMESITE"])
+        self.assertEqual(10 * 60 * 60, dashboard_server.app.config["PERMANENT_SESSION_LIFETIME"].total_seconds())
+
+    def test_dashboard_api_requires_login(self):
+        response = self.client.post(
+            "/api/dashboard/executive",
+            json={"filters": {"period": {"type": "year", "year": 2026}}},
+        )
+
+        self.assertEqual(401, response.status_code)
+        self.assertFalse(response.get_json()["ok"])
+
+    def test_dashboard_page_redirects_to_login_when_logged_out(self):
+        response = self.client.get("/payments")
+
+        self.assertEqual(302, response.status_code)
+        self.assertIn("login=required", response.headers["Location"])
+
+    def test_dashboard_page_loads_after_login(self):
+        self.login()
+
+        response = self.client.get("/payments")
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn(b"BigShot Business Dashboard", response.data)
+
+    def test_login_rejects_wrong_password(self):
+        with self.assertLogs("bigshot.dashboard", level="WARNING") as logs:
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "master", "password": "wrong"},
+            )
+
+        self.assertEqual(401, response.status_code)
+        self.assertFalse(response.get_json()["ok"])
+        self.assertEqual("Invalid username or password.", response.get_json()["error"])
+        self.assertIn('"event": "login_failed"', logs.output[0])
+        self.assertIn('"username": "master"', logs.output[0])
+        self.assertNotIn("wrong", logs.output[0])
+        self.assertNotIn("secret-password", logs.output[0])
+
+    def test_login_rate_limits_after_five_failures_per_ip(self):
+        for _ in range(5):
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "master", "password": "wrong"},
+                headers={"X-Forwarded-For": "203.0.113.10"},
+            )
+            self.assertEqual(401, response.status_code)
+
+        with self.assertLogs("bigshot.dashboard", level="WARNING") as logs:
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "master", "password": "secret-password"},
+                headers={"X-Forwarded-For": "203.0.113.10"},
+            )
+
+        self.assertEqual(429, response.status_code)
+        self.assertIn("Too many failed login attempts", response.get_json()["error"])
+        self.assertIn('"event": "login_rate_limited"', logs.output[0])
+        self.assertNotIn("secret-password", logs.output[0])
+
+    def test_login_uses_master_environment_credentials(self):
+        with self.assertLogs("bigshot.dashboard", level="INFO") as logs:
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "master", "password": "secret-password"},
+            )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual("master", payload["user"]["username"])
+        self.assertEqual("Admin", payload["user"]["role"])
+        self.assertIn('"event": "login_success"', logs.output[0])
+        self.assertIn('"role": "Admin"', logs.output[0])
+        self.assertNotIn("secret-password", logs.output[0])
+
+    def test_logout_clears_session(self):
+        self.login()
+
+        with self.assertLogs("bigshot.dashboard", level="INFO") as logs:
+            response = self.client.post("/api/auth/logout")
+        session_response = self.client.get("/api/auth/session")
+
+        self.assertEqual(200, response.status_code)
+        self.assertFalse(session_response.get_json()["authenticated"])
+        self.assertIn('"event": "logout"', logs.output[0])
+        self.assertNotIn("secret-password", logs.output[0])
 
     @patch("scripts.dashboard_server.dashboard_service.executive_dashboard")
     def test_executive_api_returns_bi_service_payload(self, executive_dashboard):
+        self.login()
         executive_dashboard.return_value = ({"metrics": {"revenue": 123}}, False)
         response = self.client.post(
             "/api/dashboard/executive",
@@ -28,7 +162,36 @@ class DashboardServerTest(unittest.TestCase):
         self.assertEqual(123, response.get_json()["data"]["metrics"]["revenue"])
         executive_dashboard.assert_called_once()
 
+    @patch("scripts.dashboard_server.write_dashboard_pdf")
+    @patch("scripts.dashboard_server.dashboard_service.executive_dashboard")
+    def test_pdf_export_uses_full_dashboard_payload(self, executive_dashboard, write_dashboard_pdf):
+        self.login()
+        executive_dashboard.return_value = ({
+            "filter_label": "2026",
+            "metrics": {"revenue": 123, "inventory_value": 45},
+            "trend": [{"label": "Jan", "revenue": 123}],
+            "inventory": {"locations": [{"store": "Factory", "inventory_value": 45}]},
+            "top_customers": [],
+            "top_expense_categories": [],
+            "top_products": [],
+            "recent_payments": [],
+            "recent_transactions": [],
+        }, False)
+        write_dashboard_pdf.side_effect = lambda data, path: Path(path).write_bytes(b"%PDF-1.4\n% dashboard\n")
+
+        response = self.client.post(
+            "/api/dashboard/export/pdf",
+            json={"filters": {"period": {"type": "year", "year": 2026}}},
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = write_dashboard_pdf.call_args.args[0]
+        self.assertEqual(123, payload["metrics"]["revenue"])
+        self.assertEqual(45, payload["inventory"]["locations"][0]["inventory_value"])
+        self.assertEqual("application/pdf", response.mimetype)
+
     def test_invalid_filter_returns_400(self):
+        self.login()
         response = self.client.post(
             "/api/dashboard/executive",
             json={

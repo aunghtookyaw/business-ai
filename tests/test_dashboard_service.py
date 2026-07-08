@@ -36,7 +36,7 @@ class DashboardServiceTest(unittest.TestCase):
     @patch("tools.dashboard_service.formula_engine.top_expense_categories")
     @patch("tools.dashboard_service.formula_engine.sotephwar_product_ranking")
     @patch("tools.dashboard_service.formula_engine.top_income")
-    @patch("tools.dashboard_service.formula_engine.sotephwar_inventory_stock")
+    @patch("tools.dashboard_service.formula_engine.calculate_inventory_value")
     @patch("tools.dashboard_service.formula_engine.payment_receive_summary")
     @patch("tools.dashboard_service.formula_engine.sales_total")
     @patch("tools.dashboard_service.formula_engine.cash_flow")
@@ -68,7 +68,19 @@ class DashboardServiceTest(unittest.TestCase):
             "collection_rate_percent": 70,
             "total_received": 700,
         }
-        inventory.return_value = {"stock": [{"store": "A", "product": "P", "stock_qty": 5}]}
+        inventory.return_value = {
+            "total_inventory_value": 160000,
+            "stock": [
+                {
+                    "store": "A",
+                    "product": "Sote Phwar 1L",
+                    "stock_qty": 5,
+                    "unit_cost": 32000,
+                    "inventory_value": 160000,
+                }
+            ],
+            "locations": [{"store": "A", "qty": 5, "inventory_value": 160000}],
+        }
         top_customers.return_value = {"income": [{"customer_name": "C", "total_amount": 1000}]}
         top_products.return_value = {"products": [{"product": "P", "quantity": 5}]}
         expense_categories.return_value = {"categories": [{"category": "E", "amount": 400}]}
@@ -86,7 +98,8 @@ class DashboardServiceTest(unittest.TestCase):
         self.assertEqual(600, result["metrics"]["net_profit"])
         self.assertEqual(700, result["metrics"]["cash_received"])
         self.assertEqual(300, result["metrics"]["outstanding_receivables"])
-        self.assertIsNone(result["metrics"]["inventory_value"])
+        self.assertEqual(160000, result["metrics"]["inventory_value"])
+        self.assertEqual(160000, result["inventory"]["locations"][0]["inventory_value"])
         self.assertEqual(1000, result["trend"][0]["revenue"])
         self.assertEqual(300, result["trend"][0]["cash_flow"])
 

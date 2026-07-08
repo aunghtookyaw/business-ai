@@ -45,6 +45,40 @@ body {
 button, input, select { font: inherit; }
 button { color: inherit; }
 
+.login-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.login-screen.hidden { display: none; }
+.login-panel {
+  width: min(100%, 390px);
+  display: grid;
+  gap: 16px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 6px;
+}
+.login-brand strong { display: block; font-family: Georgia, serif; font-size: 22px; font-weight: 500; }
+.login-brand small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.login-panel label { display: grid; gap: 6px; }
+.login-panel label span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.login-button { width: 100%; margin-top: 4px; }
+.login-error { min-height: 18px; margin: 0; color: var(--negative); font-size: 12px; line-height: 1.45; }
+.app-authenticated { display: none; }
+.app-authenticated.visible { display: block; }
+.prototype-banner.app-authenticated.visible { display: grid; }
+
 .prototype-banner {
   position: fixed;
   z-index: 100;
@@ -72,27 +106,40 @@ button { color: inherit; }
   background: var(--surface);
 }
 .brand {
-  height: 92px;
+  height: 108px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 23px;
+  gap: 14px;
+  padding: 0 18px;
   color: var(--text);
   text-decoration: none;
   border-bottom: 1px solid var(--line);
 }
 .brand-mark {
-  width: 38px;
-  height: 38px;
+  width: 64px;
+  height: 64px;
   display: grid;
   place-items: center;
-  border-radius: 11px;
-  background: var(--brand);
-  color: white;
-  font-family: Georgia, serif;
-  font-size: 22px;
+  flex: 0 0 64px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
 }
 .brand strong { display: block; letter-spacing: .13em; font-size: 15px; }
+.brand-word {
+  line-height: 1;
+  color: #0f3f21;
+}
+.brand-word-s {
+  color: #d96d1c;
+}
 .brand small, .user-card small, .system-status small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
 .primary-nav { flex: 1; padding: 20px 12px; }
 .nav-item {

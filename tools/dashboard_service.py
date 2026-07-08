@@ -84,6 +84,34 @@ def _validate_period(period):
         if not 2000 <= year <= 2100 or not 1 <= month <= 12:
             raise ValueError("invalid month period")
         return {"type": "month", "year": year, "month": month}
+    if kind == "quarter":
+        year = int(period.get("year") or date.today().year)
+        quarter = int(period.get("quarter") or (((date.today().month - 1) // 3) + 1))
+        if not 2000 <= year <= 2100 or not 1 <= quarter <= 4:
+            raise ValueError("invalid quarter period")
+        return {"type": "quarter", "year": year, "quarter": quarter}
+    if kind == "date":
+        try:
+            value = date.fromisoformat(str(period.get("date") or ""))
+        except ValueError:
+            raise ValueError("date must use YYYY-MM-DD")
+        return {"type": "date", "date": value.isoformat()}
+    if kind == "relative":
+        value = str(period.get("value") or "").strip()
+        if value not in {
+            "today",
+            "yesterday",
+            "this_week",
+            "last_week",
+            "this_month",
+            "last_month",
+            "this_quarter",
+            "last_quarter",
+            "this_year",
+            "last_year",
+        }:
+            raise ValueError("unsupported relative period")
+        return {"type": "relative", "value": value}
     if kind == "week":
         value = str(period.get("value") or "").strip()
         try:
@@ -103,7 +131,7 @@ def _validate_period(period):
         if (end - start).days > 730:
             raise ValueError("date range cannot exceed two years")
         return {"type": "range", "start": start.isoformat(), "end": end.isoformat()}
-    raise ValueError("period type must be year, month, week, or range")
+    raise ValueError("period type must be year, quarter, month, week, date, relative, or range")
 
 
 def legacy_period(period):
@@ -112,6 +140,12 @@ def legacy_period(period):
         return f"year:{period['year']}"
     if kind == "month":
         return f"month:{period['year']}-{period['month']:02d}"
+    if kind == "quarter":
+        return f"quarter:{period['year']}-Q{period['quarter']}"
+    if kind == "date":
+        return f"date:{period['date']}"
+    if kind == "relative":
+        return period["value"]
     if kind == "week":
         start = date.fromisoformat(period["start"])
         end = start + timedelta(days=6)
@@ -125,6 +159,12 @@ def filter_label(filters):
         label = str(period["year"])
     elif period["type"] == "month":
         label = date(period["year"], period["month"], 1).strftime("%B %Y")
+    elif period["type"] == "quarter":
+        label = f"Q{period['quarter']} {period['year']}"
+    elif period["type"] == "date":
+        label = period["date"]
+    elif period["type"] == "relative":
+        label = period["value"].replace("_", " ").title()
     elif period["type"] == "week":
         label = period["value"]
     else:
@@ -207,6 +247,19 @@ def _trend_periods(period):
             current = bucket_end + timedelta(days=1)
             week += 1
         return rows
+    if period["type"] == "quarter":
+        start_month = ((period["quarter"] - 1) * 3) + 1
+        return [
+            (
+                date(period["year"], month, 1).strftime("%b"),
+                f"month:{period['year']}-{month:02d}",
+            )
+            for month in range(start_month, start_month + 3)
+        ]
+    if period["type"] == "date":
+        return [(period["date"], f"date:{period['date']}")]
+    if period["type"] == "relative":
+        return [(period["value"].replace("_", " ").title(), period["value"])]
     if period["type"] == "week":
         start = date.fromisoformat(period["start"])
         return [
@@ -282,10 +335,16 @@ def _build_executive_dashboard(filters):
             payment_status=filters.payment_status or None,
             limit=10,
         ),
-        "inventory": lambda: formula_engine.sotephwar_inventory_stock(
+        "inventory": lambda: formula_engine.calculate_inventory_value(
             product=filters.product or None,
             store=filters.location or None,
-        ) if product_allowed else {"formula": "sotephwar_inventory_stock", "stock": []},
+        ) if product_allowed else {
+            "formula": "sotephwar_inventory_value",
+            "total_inventory_value": 0,
+            "stock": [],
+            "products": [],
+            "locations": [],
+        },
         "top_customers": lambda: formula_engine.top_income(period, engine_filters, limit=10),
         "top_products": lambda: formula_engine.sotephwar_product_ranking(
             period,
@@ -334,7 +393,7 @@ def _build_executive_dashboard(filters):
             "net_profit": None if filters.customer else kpi["net_profit"],
             "cash_received": cash["total_inflow"],
             "outstanding_receivables": receivables["outstanding_receivables"],
-            "inventory_value": None,
+            "inventory_value": results["inventory"].get("total_inventory_value", 0),
             "profit_margin_percent": None if filters.customer else kpi["profit_margin_percent"],
             "collection_rate_percent": receivables["collection_rate_percent"],
             "sales_received": sales["amount_received"],
@@ -349,15 +408,10 @@ def _build_executive_dashboard(filters):
         "recent_payments": results["recent_payments"]["payments"],
         "recent_transactions": results["recent_transactions"]["transactions"],
         "data_quality": [
-            {
-                "metric": "inventory_value",
-                "status": "unavailable",
-                "message": "Inventory value requires validated unit-cost data in the BI engine.",
-            },
             *({"metric": "filters", "status": "limited", "message": message} for message in warnings),
         ],
         "sources": {
-            "metrics": ["kpi_overview", "sales_total", "cash_flow", "payment_receive_summary"],
+            "metrics": ["kpi_overview", "sales_total", "cash_flow", "payment_receive_summary", "sotephwar_inventory_value"],
             "trend": ["kpi_overview", "cash_flow", "sales_total"],
             "tables": [
                 "top_income",

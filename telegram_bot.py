@@ -953,7 +953,12 @@ def _after_report_selected(message, context):
         state["product"] = PRODUCT_BY_MODULE[module]
 
     report = state.get("report")
-    if report_needs_customer(report):
+    farm_customer_report = (
+        state.get("business") == "farm"
+        and module == "income"
+        and report in {"income_detail", "income_transactions", "outstanding_balance"}
+    )
+    if report_needs_customer(report) or farm_customer_report:
         state["awaiting"] = "customer"
         return _reply_text(
             message,
@@ -961,7 +966,12 @@ def _after_report_selected(message, context):
             "Type customer name to search.",
             reply_markup=_remove_reply_keyboard(),
         )
-    if report_needs_category(report):
+    farm_income_detail = (
+        state.get("business") == "farm"
+        and module == "income"
+        and report in {"income_detail", "income_transactions"}
+    )
+    if report_needs_category(report) and not farm_income_detail:
         state["awaiting"] = "category"
         state["categories"] = []
         category_type = "income name" if module == "income" else "expense category"

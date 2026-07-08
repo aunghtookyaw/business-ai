@@ -33,6 +33,7 @@ FAST_FORMULAS = {
     "sotephwar_transection_customer",
     "sotephwar_payment_update",
     "sotephwar_inventory_stock",
+    "sotephwar_inventory_value",
     "sotephwar_inventory_movement_summary",
     "sotephwar_inventory_list",
     "financial_obligation_summary",
@@ -615,6 +616,30 @@ def _fast_answer(result):
             lines.append(line)
         return "\n\n".join(lines)
 
+    if formula == "farm_transection_customer":
+        rows = result.get("invoices") or []
+        lines = [
+            f"Farm Transection Income Detail for {period}",
+            f"Total Sales: {int(result.get('total_sales') or 0):,}",
+            f"Total Received: {int(result.get('amount_received') or 0):,}",
+            f"Total Outstanding: {int(result.get('outstanding_amount') or 0):,}",
+            "",
+            "Date | Voucher | Customer | Total Sales | Received | Outstanding",
+        ]
+        if not rows:
+            lines.append("No Farm_Transection income rows found.")
+            return "\n".join(lines)
+        for row in rows[:50]:
+            lines.append(
+                f"{row.get('invoice_date') or '-'} | "
+                f"{row.get('invoice_number') or '-'} | "
+                f"{row.get('customer_name') or '-'} | "
+                f"{int(row.get('total_amount') or 0):,} | "
+                f"{int(row.get('amount_received') or 0):,} | "
+                f"{int(row.get('outstanding_amount') or 0):,}"
+            )
+        return "\n".join(lines)
+
     if formula == "sotephwar_payment_update":
         if not result.get("updated"):
             missing = ", ".join(result.get("missing") or [])
@@ -650,6 +675,25 @@ def _fast_answer(result):
             lines.append(f"Product: {result['product']}")
         for row in result["stock"]:
             lines.append(f"- {row['store']} / {row['product']}: {row['stock_qty']:,}")
+        return "\n".join(lines)
+
+    if formula == "sotephwar_inventory_value":
+        if not result["stock"]:
+            return "Sotephwar_Inventory value: no matching stock found."
+        lines = [
+            "Sotephwar_Inventory value",
+            f"Total inventory value: {result.get('total_inventory_value', 0):,} MMK",
+        ]
+        if result.get("store"):
+            lines.append(f"Store: {result['store']}")
+        if result.get("product"):
+            lines.append(f"Product: {result['product']}")
+        for row in result["stock"]:
+            lines.append(
+                f"- {row['store']} / {row['product']}: "
+                f"{row.get('stock_qty', row.get('qty', 0)):,} x {row.get('unit_cost', 0):,} = "
+                f"{row.get('inventory_value', 0):,} MMK"
+            )
         return "\n".join(lines)
 
     if formula == "sotephwar_inventory_movement_summary":

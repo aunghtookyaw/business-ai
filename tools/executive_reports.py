@@ -152,6 +152,7 @@ def _kpi_dashboard_lines(tool_results):
     profit_change = _change_percent(current_profit, previous_profit)
     stock_rows = inventory.get("stock") or []
     inventory_qty = sum(_number(row.get("stock_qty")) for row in stock_rows)
+    inventory_value = _number(inventory.get("total_inventory_value"))
     rows = [
         ("Revenue", _money(current_revenue), _money(previous_revenue), revenue_change, _trend_word(revenue_change)),
         ("Expenses", _money(current_expense), "-", None, "Monitor"),
@@ -160,7 +161,7 @@ def _kpi_dashboard_lines(tool_results):
         ("Revenue Growth %", f"{revenue_change}%" if revenue_change is not None else "-", "-", None, _trend_word(revenue_change)),
         ("Profit Growth %", f"{profit_change}%" if profit_change is not None else "-", "-", None, _trend_word(profit_change)),
         ("Outstanding Receivables", _money(revenue.get("outstanding_amount")), "-", None, "Collection risk" if _number(revenue.get("outstanding_amount")) else "Stable"),
-        ("Inventory Value", "0 MMK", "-", None, "Cost data needed" if stock_rows else "Not available"),
+        ("Inventory Value", _money(inventory_value), "-", None, "Valued" if stock_rows else "Not available"),
         ("Cash Position", _money(cash.get("net_cash_flow")), "-", None, "Cash pressure" if _number(cash.get("net_cash_flow")) < 0 else "Stable"),
         ("Loan Balance", "-", "-", None, "Not available"),
     ]
@@ -171,7 +172,7 @@ def _kpi_dashboard_lines(tool_results):
         f"| {name} | {current} | {previous} | {'-' if change is None else str(change) + '%'} | {trend} |"
         for name, current, previous, change, trend in rows
     ] + [
-        f"Inventory quantity signal: {inventory_qty:,} units." if stock_rows else "Potential Data Quality Issue Detected: inventory value or quantity data is not available for this report."
+        f"Inventory quantity signal: {inventory_qty:,} units. Inventory value: {_money(inventory_value)}." if stock_rows else "Potential Data Quality Issue Detected: inventory value or quantity data is not available for this report."
     ]
 
 
@@ -223,7 +224,7 @@ def _recommendations(tool_results):
     if "cash_flow" in tools:
         recommendations.append("Separate collection timing from profitability and follow up on delayed inflows before adding new cash commitments.")
     if "inventory" in tools:
-        recommendations.append("Connect inventory movement with sales and cost data so turnover and valuation can be managed at CEO level.")
+        recommendations.append("Use inventory valuation with stock movement and customer demand to manage production priority and turnover.")
     if not recommendations:
         recommendations.append("Review the underlying transactions for outliers, then set one measurable action for the next reporting period.")
     return recommendations
@@ -315,11 +316,15 @@ def _inventory_analysis_lines(tool_results):
     stock = inventory.get("stock") or []
     if not stock:
         return ["Potential Data Quality Issue Detected: inventory rows were not available for this business unit or period."]
-    lines = ["| Product | Region | Quantity | Reorder Level | Status |", "| ------- | ------ | -------- | ------------- | ------ |"]
+    lines = [
+        "| Product | Region | Quantity | Inventory Value | Reorder Level | Status |",
+        "| ------- | ------ | -------- | --------------- | ------------- | ------ |",
+    ]
     for row in stock[:10]:
         qty = _number(row.get("stock_qty"))
+        value = _number(row.get("inventory_value"))
         status = "Low stock" if qty <= 10 else "Available"
-        lines.append(f"| {row.get('product') or '-'} | {row.get('store') or row.get('region') or '-'} | {qty:,} | 10 | {status} |")
+        lines.append(f"| {row.get('product') or '-'} | {row.get('store') or row.get('region') or '-'} | {qty:,} | {_money(value)} | 10 | {status} |")
     return lines
 
 

@@ -550,6 +550,24 @@ class FinanceBotFilterTest(unittest.TestCase):
         finally:
             telegram_bot.search_customers = original_search_customers
 
+    def test_farm_outstanding_balance_uses_customer_search_before_period(self):
+        message = FakeMessage(-1003850232296, 5)
+        context = FakeContext()
+        for data in (
+            "bi:business:farm",
+            "bi:module:income",
+            "bi:report:outstanding_balance",
+        ):
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                context,
+            )
+
+        state = context.user_data[telegram_bot.BI_STATE_KEY]
+        self.assertEqual("customer", state["awaiting"])
+        self.assertEqual("period", state["step"])
+        self.assertIn("Type customer name to search.", message.replies[-1]["text"])
+
     def test_expense_detail_uses_category_search_before_period(self):
         original_search_categories = telegram_bot.search_categories
         telegram_bot.search_categories = lambda text, **kwargs: [
@@ -576,7 +594,7 @@ class FinanceBotFilterTest(unittest.TestCase):
         finally:
             telegram_bot.search_categories = original_search_categories
 
-    def test_income_detail_asks_income_name_before_period(self):
+    def test_income_by_category_asks_income_name_before_period(self):
         original_search_categories = telegram_bot.search_categories
         seen = {}
 
@@ -592,7 +610,7 @@ class FinanceBotFilterTest(unittest.TestCase):
             for data in (
                 "bi:business:farm",
                 "bi:module:income",
-                "bi:report:income_detail",
+                "bi:report:income_by_category",
             ):
                 telegram_bot.handle_bi_callback(
                     FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
@@ -612,6 +630,24 @@ class FinanceBotFilterTest(unittest.TestCase):
             self.assertEqual("Select income name:", search_message.replies[-1]["text"])
         finally:
             telegram_bot.search_categories = original_search_categories
+
+    def test_farm_income_detail_uses_customer_search_before_period(self):
+        message = FakeMessage(-1003850232296, 5)
+        context = FakeContext()
+        for data in (
+            "bi:business:farm",
+            "bi:module:income",
+            "bi:report:income_detail",
+        ):
+            telegram_bot.handle_bi_callback(
+                FakeUpdate(callback_query=FakeCallbackQuery(message, data)),
+                context,
+            )
+
+        state = context.user_data[telegram_bot.BI_STATE_KEY]
+        self.assertEqual("customer", state["awaiting"])
+        self.assertEqual("period", state["step"])
+        self.assertIn("Type customer name to search.", message.replies[-1]["text"])
 
     def test_income_reports_include_by_category_and_detail(self):
         reports = dict(reports_for("farm", "income"))

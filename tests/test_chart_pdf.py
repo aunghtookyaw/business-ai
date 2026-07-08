@@ -3,7 +3,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from tools import chart_pdf
+from tools import chart_pdf, pdf_utils
 from tools.bi_reports import format_text_report
 
 
@@ -116,6 +116,7 @@ class ChartPdfTest(unittest.TestCase):
         original_sector = chart_pdf.sector_summary
         original_category = chart_pdf.category_summary
         original_cash = chart_pdf.cash_flow
+        original_inventory_value = chart_pdf.calculate_inventory_value
         original_stock = chart_pdf.sotephwar_inventory_stock
         original_movement = chart_pdf.sotephwar_inventory_movement_summary
         original_ask_ai = chart_pdf.ask_ai
@@ -163,6 +164,25 @@ class ChartPdfTest(unittest.TestCase):
             '"recommendations":["AI recommendation one","AI recommendation two"],'
             '"management_conclusion":["AI conclusion comment"]}'
         )
+        chart_pdf.calculate_inventory_value = lambda *args, **kwargs: {
+            "total_inventory_value": 25000000,
+            "stock": [
+                {
+                    "store": "Factory",
+                    "product": "Sote Phwar 4L",
+                    "stock_qty": 120,
+                    "unit_cost": 125000,
+                    "inventory_value": 15000000,
+                },
+                {
+                    "store": "Heho",
+                    "product": "Sote Phwar 1L",
+                    "stock_qty": 80,
+                    "unit_cost": 32000,
+                    "inventory_value": 2560000,
+                },
+            ],
+        }
         chart_pdf.sotephwar_inventory_stock = lambda *args, **kwargs: {
             "stock": [
                 {"store": "Factory", "product": "Sote Phwar 4L", "stock_qty": 120},
@@ -252,6 +272,7 @@ class ChartPdfTest(unittest.TestCase):
             chart_pdf.category_summary = original_category
             chart_pdf.cash_flow = original_cash
             chart_pdf.sotephwar_inventory_stock = original_stock
+            chart_pdf.calculate_inventory_value = original_inventory_value
             chart_pdf.sotephwar_inventory_movement_summary = original_movement
             chart_pdf.ask_ai = original_ask_ai
 
@@ -261,6 +282,7 @@ class ChartPdfTest(unittest.TestCase):
         original_category = chart_pdf.category_summary
         original_cash = chart_pdf.cash_flow
         original_sote_sales = chart_pdf.sotephwar_transection_summary
+        original_inventory_value = chart_pdf.calculate_inventory_value
         original_stock = chart_pdf.sotephwar_inventory_stock
         original_movement = chart_pdf.sotephwar_inventory_movement_summary
         original_ask_ai = chart_pdf.ask_ai
@@ -325,6 +347,7 @@ class ChartPdfTest(unittest.TestCase):
         chart_pdf.category_summary = fake_category
         chart_pdf.cash_flow = fake_cash
         chart_pdf.sotephwar_transection_summary = fake_sote_sales
+        chart_pdf.calculate_inventory_value = lambda *args, **kwargs: {"total_inventory_value": 0, "stock": []}
         chart_pdf.sotephwar_inventory_stock = lambda *args, **kwargs: {"stock": []}
         chart_pdf.sotephwar_inventory_movement_summary = fake_movement
         chart_pdf.ask_ai = lambda prompt, timeout=60: '{"overall":["AI overall"]}'
@@ -358,6 +381,7 @@ class ChartPdfTest(unittest.TestCase):
             chart_pdf.category_summary = original_category
             chart_pdf.cash_flow = original_cash
             chart_pdf.sotephwar_transection_summary = original_sote_sales
+            chart_pdf.calculate_inventory_value = original_inventory_value
             chart_pdf.sotephwar_inventory_stock = original_stock
             chart_pdf.sotephwar_inventory_movement_summary = original_movement
             chart_pdf.ask_ai = original_ask_ai
@@ -668,7 +692,38 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("Sote Phwar 4L", pdf_text)
             self.assertIn("In Stock", pdf_text)
 
-    def test_farm_income_summary_pdf_uses_uniform_category_report(self):
+    def test_inventory_value_pdf_uses_stock_value_layout(self):
+        result = {
+            "formula": "sotephwar_inventory_value",
+            "period": "this_month",
+            "total_inventory_value": 4000000,
+            "stock": [
+                {
+                    "store": "Factory",
+                    "product": "Sote Phwar 4L",
+                    "stock_qty": 32,
+                    "unit_cost": 125000,
+                    "inventory_value": 4000000,
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "stock-value.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Inventory - Stock Valuation",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Stock Summary", pdf_text)
+            self.assertIn("Inventory Value", pdf_text)
+            self.assertIn("Unit Cost", pdf_text)
+            self.assertIn("Sote Phwar 4L", pdf_text)
+
+    def test_farm_income_summary_pdf_uses_standard_paid_outstanding_layout(self):
         result = {
             "formula": "category_summary",
             "period": "this_month",
@@ -716,11 +771,15 @@ class ChartPdfTest(unittest.TestCase):
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Farm Income Summary", pdf_text)
             self.assertIn("Total Income", pdf_text)
-            self.assertIn("Received", pdf_text)
+            self.assertIn("Total Received", pdf_text)
             self.assertIn("Outstanding", pdf_text)
-            self.assertIn("Income Categories", pdf_text)
+            self.assertIn("Top Income by Customer", pdf_text)
+            self.assertIn("Paid / Total Received", pdf_text)
+            self.assertIn("Outstanding Balance", pdf_text)
             self.assertIn("Data Table", pdf_text)
-            self.assertIn("Income Category Table", pdf_text)
+            self.assertIn("Income Summary Table", pdf_text)
+            self.assertIn("Category / Product", pdf_text)
+            self.assertIn("Total Amount", pdf_text)
             self.assertLess(pdf_text.find("Makro"), pdf_text.find("Bala"))
 
     def test_farm_total_income_pdf_uses_simple_pie_report(self):
@@ -744,7 +803,7 @@ class ChartPdfTest(unittest.TestCase):
                 },
                 {
                     "Date": "2026-06-11",
-                    "item": "အထွေထွေ ဝင်ငွေ",
+                    "item": "General income filling",
                     "amount": 400,
                     "payment_method": "Cash",
                 },
@@ -763,7 +822,10 @@ class ChartPdfTest(unittest.TestCase):
             pdf_bytes = output_path.read_bytes()
             pdf_text = pdf_bytes.decode("latin-1")
             self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
-            self.assertIn("Farm Total Income", pdf_text)
+            self.assertIn("Farm - Income - Total Income", pdf_text)
+            self.assertIn("Question: Farm - Income - Total Income", pdf_text)
+            self.assertIn("Generated:", pdf_text)
+            self.assertIn("Total Income", pdf_text)
             self.assertIn("Received", pdf_text)
             self.assertIn("Outstanding", pdf_text)
             self.assertIn("4,200", pdf_text)
@@ -811,7 +873,7 @@ class ChartPdfTest(unittest.TestCase):
         self.assertIn("Transection Income", report)
         self.assertIn("Old item resell", report)
 
-    def test_sotephwar_income_summary_pdf_uses_uniform_financial_report(self):
+    def test_sotephwar_income_summary_pdf_uses_standard_paid_outstanding_layout(self):
         result = {
             "formula": "sotephwar_transection_summary",
             "period": "this_month",
@@ -853,16 +915,20 @@ class ChartPdfTest(unittest.TestCase):
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Sote Phwar Income Summary", pdf_text)
             self.assertIn("Total Income", pdf_text)
-            self.assertIn("Received", pdf_text)
+            self.assertIn("Total Received", pdf_text)
             self.assertIn("Outstanding", pdf_text)
-            self.assertIn("Top Customers by Revenue", pdf_text)
+            self.assertIn("Top Income by Customer", pdf_text)
+            self.assertIn("Paid / Total Received", pdf_text)
+            self.assertIn("Outstanding Balance", pdf_text)
             self.assertIn("Data Table", pdf_text)
             self.assertIn("Income Summary Table", pdf_text)
             self.assertNotIn("Received vs Outstanding", pdf_text)
+            self.assertIn("Category / Product", pdf_text)
+            self.assertIn("Total Amount", pdf_text)
             self.assertLess(pdf_text.find("Makro"), pdf_text.find("Bala"))
             self.assertLess(pdf_text.find("Bala"), pdf_text.find("Aye"))
 
-    def test_sotephwar_total_income_pdf_uses_simple_paid_outstanding_pie(self):
+    def test_sotephwar_total_income_pdf_uses_shared_total_income_layout(self):
         result = {
             "formula": "sotephwar_transection_summary",
             "period": "this_year",
@@ -872,9 +938,9 @@ class ChartPdfTest(unittest.TestCase):
                 "report": "total_income",
             },
             "invoice_count": 3,
-            "total_amount": 4600,
-            "amount_received": 2900,
-            "outstanding_amount": 1700,
+            "Total_Amount": 4600,
+            "Total_Received": 2900,
+            "Outstanding_Balance": 1700,
             "customers": [
                 {
                     "customer_name": "Makro",
@@ -894,13 +960,24 @@ class ChartPdfTest(unittest.TestCase):
             )
 
             self.assertTrue(created)
-            pdf_text = output_path.read_bytes().decode("latin-1")
-            self.assertIn("Sote Phwar Total Income", pdf_text)
+            pdf_bytes = output_path.read_bytes()
+            pdf_text = pdf_bytes.decode("latin-1")
+            self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
+            self.assertIn("Sote Phwar - Income - Total Income", pdf_text)
+            self.assertIn("Question: Sote Phwar - Income - Total Income", pdf_text)
+            self.assertIn("Generated:", pdf_text)
+            self.assertIn("Total Income", pdf_text)
             self.assertIn("Received", pdf_text)
             self.assertIn("Outstanding", pdf_text)
             self.assertIn("4,600", pdf_text)
+            self.assertIn("Monthly Income Trend", pdf_text)
+            self.assertIn("Received vs Outstanding", pdf_text)
+            self.assertIn("Collection Status Bar", pdf_text)
+            self.assertIn("Necessary Table", pdf_text)
+            self.assertIn("Management Note", pdf_text)
             self.assertNotIn("Top Customers by Revenue", pdf_text)
             self.assertNotIn("Customer Detail Table", pdf_text)
+            self.assertNotIn("Makro", pdf_text)
 
     def test_sotephwar_income_summary_pdf_continues_revenue_bars_across_pages(self):
         customers = [
@@ -932,10 +1009,10 @@ class ChartPdfTest(unittest.TestCase):
 
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
-            self.assertIn("Top Customers by Revenue", pdf_text)
-            self.assertIn("Top Customers by Revenue \\(continued\\)", pdf_text)
+            self.assertIn("Top Income by Customer", pdf_text)
             self.assertIn("Customer 40", pdf_text)
-            self.assertLess(pdf_text.find("Customer 40"), pdf_text.find("Data Table"))
+            self.assertLess(pdf_text.find("Data Table"), pdf_text.find("Customer 40"))
+            self.assertGreaterEqual(output_path.read_bytes().count(b"/Type /Page "), 2)
 
     def test_farm_sales_by_customer_pdf_uses_income_cards(self):
         result = {
@@ -977,6 +1054,11 @@ class ChartPdfTest(unittest.TestCase):
             self.assertTrue(created)
             pdf_text = output_path.read_bytes().decode("latin-1")
             self.assertIn("Farm Income Report", pdf_text)
+            self.assertIn("Total", pdf_text)
+            self.assertIn("Paid", pdf_text)
+            self.assertIn("Outstanding", pdf_text)
+            self.assertNotIn("Average", pdf_text)
+            self.assertNotIn("Records", pdf_text)
             self.assertIn("Income Lines", pdf_text)
             self.assertIn("Voucher 12", pdf_text)
             self.assertIn("2026-06-15", pdf_text)
@@ -1137,6 +1219,8 @@ class ChartPdfTest(unittest.TestCase):
                     "expense": 0,
                     "net": 500000,
                     "transaction_count": 2,
+                    "amount_received": 350000,
+                    "outstanding_amount": 150000,
                 },
             ],
         }
@@ -1177,8 +1261,22 @@ class ChartPdfTest(unittest.TestCase):
 
             category_text = category_path.read_bytes().decode("latin-1")
             detail_text = detail_path.read_bytes().decode("latin-1")
-            self.assertIn("Income by Category", category_text)
-            self.assertIn("Data Table", category_text)
+            self.assertIn("Farm - Income - Income by Category", category_text)
+            self.assertIn("Question: Farm - Income - Income By Category", category_text)
+            self.assertIn("Generated:", category_text)
+            self.assertIn("Total Income", category_text)
+            self.assertIn("Total Received", category_text)
+            self.assertIn("Outstanding Balance", category_text)
+            self.assertIn("Monthly Collection Trend", category_text)
+            self.assertIn("Category/Product Table", category_text)
+            self.assertIn("Category/Product", category_text)
+            self.assertIn("Quantity", category_text)
+            self.assertIn("Total Amount", category_text)
+            self.assertIn("Collection %", category_text)
+            self.assertIn("500,000", category_text)
+            self.assertIn("350,000", category_text)
+            self.assertIn("150,000", category_text)
+            self.assertNotIn(" | ", category_text)
             self.assertIn("Income Detail", detail_text)
             self.assertIn("1 June 2026", detail_text)
             self.assertIn("Payment: K Pay", detail_text)
@@ -1188,6 +1286,142 @@ class ChartPdfTest(unittest.TestCase):
             self.assertNotIn("Data Table", detail_text)
             self.assertNotIn("Voucher Number", detail_text)
             self.assertNotIn("Farm Income Report", detail_text)
+
+    def test_sotephwar_income_by_category_pdf_uses_visual_product_layout(self):
+        result = {
+            "formula": "sotephwar_product_ranking",
+            "period": "this_month",
+            "_period_label": "This Month",
+            "_bi_intent": {
+                "business": "sote_phwar",
+                "module": "income",
+                "report": "income_by_category",
+            },
+            "products": [
+                {
+                    "product": "1L",
+                    "quantity": 120,
+                    "total_amount": 600000,
+                    "amount_received": 450000,
+                    "outstanding_amount": 150000,
+                },
+                {
+                    "product": "4L",
+                    "quantity": 40,
+                    "total_amount": 400000,
+                    "amount_received": 200000,
+                    "outstanding_amount": 200000,
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "sotephwar-income-by-category.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Sote Phwar - Income - Income By Category",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Sote Phwar - Income - Income by Category", pdf_text)
+            self.assertIn("Question: Sote Phwar - Income - Income By Category", pdf_text)
+            self.assertIn("Generated:", pdf_text)
+            self.assertIn("Total Income", pdf_text)
+            self.assertIn("Total Received", pdf_text)
+            self.assertIn("Outstanding Balance", pdf_text)
+            self.assertIn("Monthly Collection Trend", pdf_text)
+            self.assertIn("Total Received", pdf_text)
+            self.assertIn("Outstanding Balance", pdf_text)
+            self.assertIn("Category/Product Table", pdf_text)
+            self.assertIn("Category/Product", pdf_text)
+            self.assertIn("Quantity", pdf_text)
+            self.assertIn("Total Amount", pdf_text)
+            self.assertIn("Collection %", pdf_text)
+            self.assertIn("1L", pdf_text)
+            self.assertIn("4L", pdf_text)
+            self.assertIn("600,000", pdf_text)
+            self.assertIn("450,000", pdf_text)
+            self.assertIn("150,000", pdf_text)
+            self.assertNotIn(" | ", pdf_text)
+
+    def test_sales_income_detail_pdf_uses_visual_shared_layout(self):
+        result = {
+            "formula": "income_detail",
+            "period": "this_year",
+            "_period_label": "This Year",
+            "_report_title": "Farm - Income - Income Detail",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "income",
+                "report": "income_detail",
+            },
+            "kpis": {
+                "total_income": 1200,
+                "total_received": 900,
+                "outstanding": 300,
+            },
+            "rows": [
+                {
+                    "date": "2026-01-02",
+                    "voucher": "F-1",
+                    "customer": "KK",
+                    "source": "farm_transection",
+                    "description": "Farm Sales",
+                    "total": 1000,
+                    "received": 700,
+                    "outstanding": 300,
+                },
+                {
+                    "date": "2026-01-03",
+                    "voucher": "",
+                    "customer": "",
+                    "source": "Transection",
+                    "description": "Additional income",
+                    "total": 200,
+                    "received": 200,
+                    "outstanding": 0,
+                },
+            ],
+            "footer": {
+                "total_transactions": 2,
+                "total_income": 1200,
+                "total_received": 900,
+                "outstanding": 300,
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "sales-income-detail.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Farm - Income - Income Detail",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Farm - Income - Income Detail", pdf_text)
+            self.assertIn("Question: Farm - Income - Income Detail", pdf_text)
+            self.assertIn("Generated:", pdf_text)
+            self.assertIn("Total Income", pdf_text)
+            self.assertIn("Total Received", pdf_text)
+            self.assertIn("Outstanding", pdf_text)
+            self.assertIn("Transaction Detail", pdf_text)
+            self.assertIn("Date", pdf_text)
+            self.assertIn("Voucher", pdf_text)
+            self.assertIn("Customer", pdf_text)
+            self.assertIn("Source", pdf_text)
+            self.assertIn("Description", pdf_text)
+            self.assertIn("farm_transection", pdf_text)
+            self.assertIn("Transection", pdf_text)
+            self.assertIn("Footer Summary", pdf_text)
+            self.assertIn("Total Transactions", pdf_text)
+            self.assertIn("1,200", pdf_text)
+            self.assertIn("900", pdf_text)
+            self.assertIn("300", pdf_text)
+            self.assertNotIn(" | ", pdf_text)
 
     def test_unicode_voucher_pdf_does_not_use_ascii_question_marks(self):
         customer = "မောင်မောင်"
@@ -1211,9 +1445,17 @@ class ChartPdfTest(unittest.TestCase):
         }
         spec = chart_pdf._chart_spec(result, "Sote Phwar - Income")
         lines = chart_pdf._unicode_pdf_lines("Unicode Test", "မြန်မာ voucher", spec)
+        joined = "\n".join(lines)
 
-        self.assertIn(customer, "\n".join(lines))
-        self.assertNotIn("????", "\n".join(lines))
+        self.assertIn(customer, joined)
+        self.assertIn("SUMMARY", joined)
+        self.assertIn("Total Vouchers : 1", joined)
+        self.assertIn("Voucher 1 of 1 | No. 12", joined)
+        self.assertIn("PAYMENT SUMMARY", joined)
+        self.assertIn("Customer    :", joined)
+        self.assertIn("Outstanding : 50,000 MMK", joined)
+        self.assertNotIn(" | Date | Customer | ", joined)
+        self.assertNotIn("????", joined)
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "unicode-voucher.pdf"
 
@@ -1226,6 +1468,105 @@ class ChartPdfTest(unittest.TestCase):
 
             self.assertTrue(created)
             self.assertTrue(output_path.read_bytes().startswith(b"%PDF"))
+
+    def test_unicode_bi_reports_use_unicode_pdf_fallback(self):
+        customer = "မောင်မောင်"
+        result = {"customer": customer}
+        specs = [
+            {
+                "kind": "income_summary_report",
+                "title": "Farm Income Summary",
+                "table": [("Customer", "Total"), (customer, 100000)],
+            },
+            {
+                "kind": "income_category_report",
+                "title": "Farm Income by Category",
+                "table": [("Category", "Total"), ("ဆန်", 100000)],
+            },
+            {
+                "kind": "income_detail_report",
+                "title": "Farm Income Detail",
+                "table": [("Customer", "Description", "Total"), (customer, "ရောင်းချမှု", 100000)],
+            },
+            {
+                "kind": "financial_total_report",
+                "title": "Farm Total Income",
+                "table": [("Metric", "Amount"), ("စုစုပေါင်း", 100000)],
+            },
+        ]
+
+        for spec in specs:
+            with self.subTest(kind=spec["kind"]):
+                self.assertTrue(
+                    chart_pdf._should_use_unicode_text_pdf(
+                        result,
+                        spec,
+                        "မြန်မာ report",
+                        "Unicode Test",
+                    )
+                )
+                lines = chart_pdf._unicode_pdf_lines("Unicode Test", "မြန်မာ report", spec)
+                joined = "\n".join(lines)
+                self.assertIn("မြန်မာ", joined)
+                self.assertNotIn("????", joined)
+
+    def test_shared_pdf_font_helpers_detect_myanmar(self):
+        self.assertTrue(pdf_utils.contains_myanmar("မြရတနာ"))
+        self.assertTrue(pdf_utils.contains_myanmar("မောင်လှ"))
+        self.assertTrue(pdf_utils.contains_myanmar("စုတ်ဖွား"))
+        self.assertTrue(pdf_utils.contains_myanmar("အထွေထွေကုန်ကျစရိတ်"))
+        self.assertFalse(pdf_utils.contains_myanmar("Sote Phwar"))
+        self.assertEqual("MyanmarFont", pdf_utils.font_for_text("မြရတနာ"))
+        self.assertEqual("Helvetica", pdf_utils.font_for_text("Sote Phwar"))
+
+    def test_shared_pdf_font_helper_reports_missing_font_clearly(self):
+        original_path = pdf_utils.MYANMAR_FONT_PATH
+        original_registered = pdf_utils._MYANMAR_FONT_REGISTERED
+        try:
+            pdf_utils.MYANMAR_FONT_PATH = Path("/private/tmp/missing-NotoSansMyanmar-Regular.ttf")
+            pdf_utils._MYANMAR_FONT_REGISTERED = False
+            with self.assertRaisesRegex(FileNotFoundError, "Myanmar font file missing"):
+                pdf_utils.ensure_myanmar_font_registered()
+        finally:
+            pdf_utils.MYANMAR_FONT_PATH = original_path
+            pdf_utils._MYANMAR_FONT_REGISTERED = original_registered
+
+    def test_visual_pdf_with_myanmar_uses_registered_font_without_question_marks(self):
+        result = {
+            "formula": "category_summary",
+            "period": "this_month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "income",
+                "report": "income_by_category",
+            },
+            "total_income": 200000,
+            "categories": [
+                {
+                    "sector": "Farm",
+                    "category": "အထွေထွေကုန်ကျစရိတ်",
+                    "income": 200000,
+                    "amount_received": 120000,
+                    "outstanding_amount": 80000,
+                    "transaction_count": 1,
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "myanmar-category.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "မြရတနာ income category pdf",
+                output_path,
+                title="BigShot Myanmar Font Test",
+            )
+
+            pdf_bytes = output_path.read_bytes()
+            self.assertTrue(created)
+            self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+            self.assertIn(b"NotoSansMyanmar", pdf_bytes)
+            self.assertNotIn(b"????", pdf_bytes)
 
     def test_unicode_sotephwar_income_detail_uses_transaction_ledger(self):
         item = "အထွေထွေ ဝင်ငွေ"
@@ -1536,18 +1877,18 @@ class ChartPdfTest(unittest.TestCase):
             pdf_bytes = output_path.read_bytes()
             pdf_text = pdf_bytes.decode("latin-1")
             self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
-            self.assertIn("Sote Phwar Total Expense", pdf_text)
+            self.assertIn("Sote Phwar - Expense - Total Expense", pdf_text)
             self.assertIn("Total Expense", pdf_text)
-            self.assertIn("Received", pdf_text)
-            self.assertIn("Outstanding", pdf_text)
             self.assertIn("Monthly Expense Trend", pdf_text)
-            self.assertIn("Received vs Outstanding", pdf_text)
-            self.assertIn("Collection Status Bar", pdf_text)
+            self.assertIn("Expense Movement", pdf_text)
             self.assertIn("Necessary Table", pdf_text)
             self.assertIn("Management Note", pdf_text)
             self.assertIn("1,200,000", pdf_text)
-            self.assertIn("900,000", pdf_text)
-            self.assertIn("300,000", pdf_text)
+            self.assertNotIn("Received", pdf_text)
+            self.assertNotIn("Outstanding", pdf_text)
+            self.assertNotIn("Collection Status Bar", pdf_text)
+            self.assertNotIn("900,000", pdf_text)
+            self.assertNotIn("300,000", pdf_text)
 
     def test_total_income_pdf_trend_uses_same_business_filter(self):
         original_sales_total = chart_pdf.sales_total
@@ -1629,8 +1970,6 @@ class ChartPdfTest(unittest.TestCase):
             self.assertEqual(2, pdf_bytes.count(b"/Type /Page "))
             self.assertIn("Sote Phwar Expense Summary", pdf_text)
             self.assertIn("Total Expense", pdf_text)
-            self.assertIn("Received", pdf_text)
-            self.assertIn("Outstanding", pdf_text)
             self.assertIn("Expense Categories", pdf_text)
             self.assertIn("Expense Category Table", pdf_text)
             self.assertLess(pdf_text.find("Expense Categories"), pdf_text.find("Expense Category Table"))
@@ -1638,9 +1977,59 @@ class ChartPdfTest(unittest.TestCase):
             self.assertIn("delivery route", pdf_text)
             self.assertIn("expense", pdf_text)
             self.assertIn("1,800,000", pdf_text)
-            self.assertIn("1,500,000", pdf_text)
-            self.assertIn("300,000", pdf_text)
+            self.assertNotIn("Received", pdf_text)
+            self.assertNotIn("Outstanding", pdf_text)
+            self.assertNotIn("1,500,000", pdf_text)
+            self.assertNotIn("300,000", pdf_text)
             self.assertNotIn("...", pdf_text)
+
+    def test_farm_expense_summary_pdf_does_not_show_collection_balances(self):
+        result = {
+            "formula": "category_summary",
+            "period": "this_month",
+            "_bi_intent": {
+                "business": "farm",
+                "module": "expense",
+                "report": "expense_summary",
+            },
+            "total_income": 0,
+            "total_expense": 700000,
+            "amount_received": 600000,
+            "outstanding_amount": 100000,
+            "net_total": -700000,
+            "transaction_count": 3,
+            "categories": [
+                {
+                    "sector": "Farm",
+                    "category": "Fertilizer",
+                    "income": 0,
+                    "expense": 700000,
+                    "net": -700000,
+                    "transaction_count": 3,
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "farm-expense-summary.pdf"
+
+            created = chart_pdf.create_chart_pdf_report_from_result(
+                result,
+                "Farm - Expense - Expense Summary",
+                output_path,
+            )
+
+            self.assertTrue(created)
+            pdf_text = output_path.read_bytes().decode("latin-1")
+            self.assertIn("Farm Expense Summary", pdf_text)
+            self.assertIn("Total Expense", pdf_text)
+            self.assertIn("Categories", pdf_text)
+            self.assertIn("Rows", pdf_text)
+            self.assertIn("Fertilizer", pdf_text)
+            self.assertIn("700,000", pdf_text)
+            self.assertNotIn("Received", pdf_text)
+            self.assertNotIn("Outstanding", pdf_text)
+            self.assertNotIn("600,000", pdf_text)
+            self.assertNotIn("100,000", pdf_text)
 
     def test_category_summary_text_report_includes_totals(self):
         payload = {
