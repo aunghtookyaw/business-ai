@@ -4,6 +4,7 @@ import tempfile
 import secrets
 import json
 import logging
+import requests
 from datetime import timedelta
 from pathlib import Path
 from functools import wraps
@@ -14,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from flask import Flask, jsonify, redirect, request, send_file, session, url_for
+from flask import Flask, Response, jsonify, redirect, request, send_file, session, url_for
 from waitress import serve
 from werkzeug.exceptions import HTTPException
 
@@ -95,6 +96,73 @@ def _internal_api_token():
 
 def _internal_api_configured():
     return bool(_internal_api_token())
+
+
+def _internal_api_base_url():
+    return os.getenv("DASHBOARD_INTERNAL_API_BASE_URL", "").rstrip("/")
+
+
+def _internal_api_client_enabled():
+    return bool(_internal_api_base_url())
+
+
+def _proxy_internal_dashboard(relative_path):
+    token = _internal_api_token()
+    if not token:
+        _log_event(logging.ERROR, "internal_api_client_not_configured", path=request.path)
+        return jsonify({
+            "ok": False,
+            "error": "Dashboard data service is not configured.",
+        }), 503
+
+    upstream_url = f"{_internal_api_base_url()}/{relative_path.lstrip('/')}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": request.headers.get("Accept", "application/json"),
+    }
+    if request.content_type:
+        headers["Content-Type"] = request.content_type
+
+    try:
+        upstream = requests.request(
+            method=request.method,
+            url=upstream_url,
+            params=list(request.args.items(multi=True)),
+            data=request.get_data() if request.method not in {"GET", "HEAD"} else None,
+            headers=headers,
+            timeout=(5, float(os.getenv("DASHBOARD_INTERNAL_API_TIMEOUT_SECONDS", "120"))),
+            allow_redirects=False,
+        )
+    except requests.Timeout:
+        _log_event(logging.ERROR, "internal_api_timeout", path=request.path)
+        return jsonify({
+            "ok": False,
+            "error": "Dashboard data service timed out.",
+        }), 504
+    except requests.RequestException as exc:
+        _log_event(
+            logging.ERROR,
+            "internal_api_unavailable",
+            path=request.path,
+            error_type=type(exc).__name__,
+        )
+        return jsonify({
+            "ok": False,
+            "error": "Dashboard data service is unavailable.",
+        }), 502
+
+    response_headers = {}
+    for name in ("Content-Type", "Content-Disposition"):
+        value = upstream.headers.get(name)
+        if value:
+            response_headers[name] = value
+    _log_event(
+        logging.INFO,
+        "internal_api_response",
+        path=request.path,
+        upstream_status=upstream.status_code,
+    )
+    return Response(upstream.content, status=upstream.status_code, headers=response_headers)
 
 
 def _required_env_status():
@@ -289,6 +357,8 @@ def dashboard_meta():
 @app.get("/api/dashboard/dimensions")
 @login_required
 def dimensions():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("dimensions")
     try:
         return jsonify({"ok": True, "data": dashboard_service.dashboard_dimensions()})
     except Exception as exc:
@@ -324,6 +394,8 @@ def _executive_insight_response():
 @app.post("/api/dashboard/executive")
 @login_required
 def executive_dashboard():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("executive")
     try:
         return _executive_dashboard_response()
     except ValueError as exc:
@@ -336,6 +408,8 @@ def executive_dashboard():
 @app.post("/api/dashboard/insights/executive")
 @login_required
 def executive_insight():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("insights/executive")
     try:
         return _executive_insight_response()
     except ValueError as exc:
@@ -402,6 +476,8 @@ def _export_pdf_response():
 @app.post("/api/dashboard/export/excel")
 @login_required
 def export_excel():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("export/excel")
     try:
         return _export_excel_response()
     except ValueError as exc:
@@ -411,6 +487,8 @@ def export_excel():
 @app.post("/api/dashboard/export/pdf")
 @login_required
 def export_pdf():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("export/pdf")
     try:
         return _export_pdf_response()
     except ValueError as exc:
@@ -420,6 +498,8 @@ def export_pdf():
 @app.get("/internal/v1/dashboard/dimensions")
 @internal_api_required
 def internal_v1_dimensions():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("dimensions")
     try:
         return jsonify({"ok": True, "data": dashboard_service.dashboard_dimensions()})
     except Exception as exc:
@@ -439,6 +519,8 @@ def internal_v1_health():
 @app.post("/internal/v1/dashboard/executive")
 @internal_api_required
 def internal_v1_executive_dashboard():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("executive")
     try:
         return _executive_dashboard_response()
     except ValueError as exc:
@@ -451,6 +533,8 @@ def internal_v1_executive_dashboard():
 @app.post("/internal/v1/dashboard/insights/executive")
 @internal_api_required
 def internal_v1_executive_insight():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("insights/executive")
     try:
         return _executive_insight_response()
     except ValueError as exc:
@@ -467,6 +551,8 @@ def internal_v1_executive_insight():
 @app.post("/internal/v1/dashboard/export/excel")
 @internal_api_required
 def internal_v1_export_excel():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("export/excel")
     try:
         return _export_excel_response()
     except ValueError as exc:
@@ -476,6 +562,8 @@ def internal_v1_export_excel():
 @app.post("/internal/v1/dashboard/export/pdf")
 @internal_api_required
 def internal_v1_export_pdf():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("export/pdf")
     try:
         return _export_pdf_response()
     except ValueError as exc:

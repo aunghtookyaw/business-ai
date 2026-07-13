@@ -8,14 +8,11 @@ services:
     env_file:
       - dashboard.env
     environment:
-      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_HOST: 127.0.0.1
       DASHBOARD_PORT: 5062
       DASHBOARD_SECRET_KEY: ${SESSION_SECRET:?Set SESSION_SECRET in deploy/dashboard.env}
       DASHBOARD_COOKIE_SECURE: ${DASHBOARD_COOKIE_SECURE:-1}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "${DASHBOARD_PUBLISHED_HOST:-127.0.0.1}:${DASHBOARD_PUBLISHED_PORT:-5062}:5062"
+    network_mode: host
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5062/health', timeout=3).read()"]
       interval: 30s

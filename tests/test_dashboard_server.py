@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import re
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts import dashboard_server
 
@@ -223,6 +223,127 @@ class DashboardServerTest(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual(123, response.get_json()["data"]["metrics"]["revenue"])
         executive_dashboard.assert_called_once()
+
+    @patch("scripts.dashboard_server.dashboard_service.executive_dashboard")
+    @patch("scripts.dashboard_server.requests.request")
+    def test_executive_api_proxies_to_internal_service_server_side(self, upstream_request, executive_dashboard):
+        upstream_request.return_value = Mock(
+            status_code=200,
+            content=b'{"ok":true,"cached":false,"data":{"metrics":{"revenue":789}}}',
+            headers={"Content-Type": "application/json"},
+        )
+        self.login()
+
+        with patch.dict(os.environ, {
+            "DASHBOARD_INTERNAL_API_BASE_URL": "http://127.0.0.1:6062/internal/v1/dashboard/",
+        }):
+            response = self.client.post(
+                "/api/dashboard/executive",
+                json={"filters": {"period": {"type": "year", "year": 2026}}},
+                headers={"Authorization": "Bearer browser-supplied-token"},
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(789, response.get_json()["data"]["metrics"]["revenue"])
+        upstream_request.assert_called_once()
+        call = upstream_request.call_args
+        self.assertEqual("POST", call.kwargs["method"])
+        self.assertEqual(
+            "http://127.0.0.1:6062/internal/v1/dashboard/executive",
+            call.kwargs["url"],
+        )
+        self.assertEqual("Bearer test-internal-token", call.kwargs["headers"]["Authorization"])
+        self.assertNotIn("browser-supplied-token", str(call.kwargs))
+        executive_dashboard.assert_not_called()
+
+    @patch("scripts.dashboard_server.dashboard_service.dashboard_dimensions")
+    @patch("scripts.dashboard_server.requests.request")
+    def test_dimensions_api_proxies_get_without_local_database_call(self, upstream_request, dashboard_dimensions):
+        upstream_request.return_value = Mock(
+            status_code=200,
+            content=b'{"ok":true,"data":{"years":[2026]}}',
+            headers={"Content-Type": "application/json"},
+        )
+        self.login()
+
+        with patch.dict(os.environ, {
+            "DASHBOARD_INTERNAL_API_BASE_URL": "http://127.0.0.1:6062/internal/v1/dashboard",
+        }):
+            response = self.client.get("/api/dashboard/dimensions")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([2026], response.get_json()["data"]["years"])
+        self.assertEqual("GET", upstream_request.call_args.kwargs["method"])
+        self.assertEqual(
+            "http://127.0.0.1:6062/internal/v1/dashboard/dimensions",
+            upstream_request.call_args.kwargs["url"],
+        )
+        dashboard_dimensions.assert_not_called()
+
+    @patch("scripts.dashboard_server.dashboard_service.executive_dashboard")
+    @patch("scripts.dashboard_server.requests.request")
+    def test_proxy_does_not_fallback_to_local_logic_when_upstream_fails(self, upstream_request, executive_dashboard):
+        upstream_request.side_effect = dashboard_server.requests.ConnectionError("tunnel unavailable")
+        self.login()
+
+        with patch.dict(os.environ, {
+            "DASHBOARD_INTERNAL_API_BASE_URL": "http://127.0.0.1:6062/internal/v1/dashboard",
+        }):
+            response = self.client.post(
+                "/api/dashboard/executive",
+                json={"filters": {"period": {"type": "year", "year": 2026}}},
+            )
+
+        self.assertEqual(502, response.status_code)
+        self.assertEqual("Dashboard data service is unavailable.", response.get_json()["error"])
+        executive_dashboard.assert_not_called()
+
+    @patch("scripts.dashboard_server.requests.request")
+    def test_proxy_requires_server_side_token(self, upstream_request):
+        self.login()
+
+        with patch.dict(os.environ, {
+            "DASHBOARD_INTERNAL_API_BASE_URL": "http://127.0.0.1:6062/internal/v1/dashboard",
+            "DASHBOARD_INTERNAL_API_TOKEN": "",
+        }):
+            response = self.client.post(
+                "/api/dashboard/executive",
+                json={"filters": {"period": {"type": "year", "year": 2026}}},
+            )
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("Dashboard data service is not configured.", response.get_json()["error"])
+        upstream_request.assert_not_called()
+
+    @patch("scripts.dashboard_server.write_dashboard_pdf")
+    @patch("scripts.dashboard_server.requests.request")
+    def test_pdf_export_proxies_binary_response_and_headers(self, upstream_request, write_dashboard_pdf):
+        upstream_request.return_value = Mock(
+            status_code=200,
+            content=b"%PDF-1.4\n% upstream dashboard\n",
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": 'attachment; filename="BigShot_Executive_Dashboard.pdf"',
+            },
+        )
+        self.login()
+
+        with patch.dict(os.environ, {
+            "DASHBOARD_INTERNAL_API_BASE_URL": "http://127.0.0.1:6062/internal/v1/dashboard",
+        }):
+            response = self.client.post(
+                "/api/dashboard/export/pdf",
+                json={"filters": {"period": {"type": "year", "year": 2026}}},
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("application/pdf", response.mimetype)
+        self.assertIn("BigShot_Executive_Dashboard.pdf", response.headers["Content-Disposition"])
+        self.assertEqual(
+            "http://127.0.0.1:6062/internal/v1/dashboard/export/pdf",
+            upstream_request.call_args.kwargs["url"],
+        )
+        write_dashboard_pdf.assert_not_called()
 
     @patch("scripts.dashboard_server.write_dashboard_pdf")
     @patch("scripts.dashboard_server.dashboard_service.executive_dashboard")
