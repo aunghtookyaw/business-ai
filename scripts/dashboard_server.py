@@ -89,6 +89,14 @@ def _auth_configured():
     return bool(os.getenv("MASTER_USERNAME")) and bool(os.getenv("MASTER_PASSWORD"))
 
 
+def _internal_api_token():
+    return os.getenv("DASHBOARD_INTERNAL_API_TOKEN", "")
+
+
+def _internal_api_configured():
+    return bool(_internal_api_token())
+
+
 def _required_env_status():
     return {
         "MASTER_USERNAME": bool(os.getenv("MASTER_USERNAME")),
@@ -125,9 +133,25 @@ def login_required(view):
     return wrapped
 
 
+def internal_api_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        expected_token = _internal_api_token()
+        auth_header = request.headers.get("Authorization", "")
+        prefix = "Bearer "
+        supplied_token = auth_header[len(prefix):] if auth_header.startswith(prefix) else ""
+        if not expected_token or not supplied_token or not compare_digest(supplied_token, expected_token):
+            _log_event(logging.WARNING, "internal_api_auth_failed", ip=_client_ip(), path=request.path)
+            return jsonify({"ok": False, "error": "Internal API authentication required"}), 401
+        return view(*args, **kwargs)
+    return wrapped
+
+
 @app.before_request
 def require_dashboard_auth():
     if request.path in PUBLIC_API_PATHS or request.path.startswith("/assets/"):
+        return None
+    if request.path.startswith("/internal/"):
         return None
     if request.path.startswith("/api/dashboard") and not _is_authenticated():
         return jsonify({"ok": False, "error": "Authentication required"}), 401
@@ -278,20 +302,30 @@ def _filters_from_request():
     return dashboard_service.parse_dashboard_filters(payload)
 
 
+def _executive_dashboard_response():
+    filters = _filters_from_request()
+    refresh = bool((request.get_json(silent=True) or {}).get("refresh"))
+    if refresh:
+        dashboard_service.clear_dashboard_cache()
+    data, cached = dashboard_service.executive_dashboard(filters)
+    return jsonify({
+        "ok": True,
+        "cached": cached,
+        "data": data,
+    })
+
+
+def _executive_insight_response():
+    filters = _filters_from_request()
+    data, cached = dashboard_service.executive_insight(filters)
+    return jsonify({"ok": True, "cached": cached, "data": data})
+
+
 @app.post("/api/dashboard/executive")
 @login_required
 def executive_dashboard():
     try:
-        filters = _filters_from_request()
-        refresh = bool((request.get_json(silent=True) or {}).get("refresh"))
-        if refresh:
-            dashboard_service.clear_dashboard_cache()
-        data, cached = dashboard_service.executive_dashboard(filters)
-        return jsonify({
-            "ok": True,
-            "cached": cached,
-            "data": data,
-        })
+        return _executive_dashboard_response()
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
@@ -303,9 +337,7 @@ def executive_dashboard():
 @login_required
 def executive_insight():
     try:
-        filters = _filters_from_request()
-        data, cached = dashboard_service.executive_insight(filters)
-        return jsonify({"ok": True, "cached": cached, "data": data})
+        return _executive_insight_response()
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
@@ -338,21 +370,40 @@ def _export_payload(filters):
     }
 
 
+def _export_excel_response():
+    filters = _filters_from_request()
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    path = Path(handle.name)
+    handle.close()
+    write_excel_report(_export_payload(filters), path)
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name="BigShot_Executive_Dashboard.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def _export_pdf_response():
+    filters = _filters_from_request()
+    data, _ = dashboard_service.executive_dashboard(filters)
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    path = Path(handle.name)
+    handle.close()
+    write_dashboard_pdf(data, path)
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name="BigShot_Executive_Dashboard.pdf",
+        mimetype="application/pdf",
+    )
+
+
 @app.post("/api/dashboard/export/excel")
 @login_required
 def export_excel():
     try:
-        filters = _filters_from_request()
-        handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        path = Path(handle.name)
-        handle.close()
-        write_excel_report(_export_payload(filters), path)
-        return send_file(
-            path,
-            as_attachment=True,
-            download_name="BigShot_Executive_Dashboard.xlsx",
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        return _export_excel_response()
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 
@@ -361,18 +412,72 @@ def export_excel():
 @login_required
 def export_pdf():
     try:
-        filters = _filters_from_request()
-        data, _ = dashboard_service.executive_dashboard(filters)
-        handle = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        path = Path(handle.name)
-        handle.close()
-        write_dashboard_pdf(data, path)
-        return send_file(
-            path,
-            as_attachment=True,
-            download_name="BigShot_Executive_Dashboard.pdf",
-            mimetype="application/pdf",
-        )
+        return _export_pdf_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/internal/v1/dashboard/dimensions")
+@internal_api_required
+def internal_v1_dimensions():
+    try:
+        return jsonify({"ok": True, "data": dashboard_service.dashboard_dimensions()})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/internal/v1/dashboard/health")
+@internal_api_required
+def internal_v1_health():
+    return jsonify({
+        "ok": True,
+        "status": "healthy",
+        "version": VERSION,
+    })
+
+
+@app.post("/internal/v1/dashboard/executive")
+@internal_api_required
+def internal_v1_executive_dashboard():
+    try:
+        return _executive_dashboard_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Internal executive dashboard failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/internal/v1/dashboard/insights/executive")
+@internal_api_required
+def internal_v1_executive_insight():
+    try:
+        return _executive_insight_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Internal executive insight failed")
+        return jsonify({
+            "ok": False,
+            "error": "Executive narrative is temporarily unavailable.",
+            "detail": str(exc),
+        }), 503
+
+
+@app.post("/internal/v1/dashboard/export/excel")
+@internal_api_required
+def internal_v1_export_excel():
+    try:
+        return _export_excel_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.post("/internal/v1/dashboard/export/pdf")
+@internal_api_required
+def internal_v1_export_pdf():
+    try:
+        return _export_pdf_response()
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 

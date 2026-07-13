@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bigshot.dashboard-tunnel</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/autossh</string>
+    <string>-M</string>
+    <string>0</string>
+    <string>-i</string>
+    <string>/Users/bigshot/.ssh/bigshot_dashboard_tunnel</string>
+    <string>-N</string>
+    <string>-T</string>
+    <string>-o</string>
+    <string>ExitOnForwardFailure=yes</string>
+    <string>-o</string>
+    <string>ServerAliveInterval=30</string>
+    <string>-o</string>
+    <string>ServerAliveCountMax=3</string>
+    <string>-R</string>
+    <string>127.0.0.1:6062:127.0.0.1:5062</string>
+    <string>dashboard-tunnel@206.189.41.196</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AUTOSSH_GATETIME</key>
+    <string>0</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/bigshot/ai-automation/business-ai/logs/dashboard_tunnel.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bigshot/ai-automation/business-ai/logs/dashboard_tunnel.err.log</string>
+</dict>
+</plist>

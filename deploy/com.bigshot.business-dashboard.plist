@@ -17,6 +17,8 @@
     <string>127.0.0.1</string>
     <key>DASHBOARD_PORT</key>
     <string>5062</string>
+    <key>DASHBOARD_INTERNAL_API_TOKEN</key>
+    <string>replace-with-production-internal-api-token</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

@@ -14,6 +14,7 @@ class DashboardServerTest(unittest.TestCase):
             "MASTER_PASSWORD": "secret-password",
             "DASHBOARD_COOKIE_SECURE": "0",
             "DASHBOARD_SECRET_KEY": "test-session-secret",
+            "DASHBOARD_INTERNAL_API_TOKEN": "test-internal-token",
         })
         self.env.start()
         dashboard_server._FAILED_LOGIN_ATTEMPTS.clear()
@@ -70,6 +71,67 @@ class DashboardServerTest(unittest.TestCase):
 
         self.assertEqual(401, response.status_code)
         self.assertFalse(response.get_json()["ok"])
+
+    def test_internal_api_rejects_missing_bearer_token(self):
+        with self.assertLogs("bigshot.dashboard", level="WARNING") as logs:
+            response = self.client.post(
+                "/internal/v1/dashboard/executive",
+                json={"filters": {"period": {"type": "year", "year": 2026}}},
+            )
+
+        self.assertEqual(401, response.status_code)
+        self.assertFalse(response.get_json()["ok"])
+        self.assertIn('"event": "internal_api_auth_failed"', logs.output[0])
+        self.assertNotIn("test-internal-token", logs.output[0])
+
+    def test_internal_api_rejects_wrong_bearer_token(self):
+        with self.assertLogs("bigshot.dashboard", level="WARNING") as logs:
+            response = self.client.get(
+                "/internal/v1/dashboard/dimensions",
+                headers={"Authorization": "Bearer wrong-token"},
+            )
+
+        self.assertEqual(401, response.status_code)
+        self.assertFalse(response.get_json()["ok"])
+        self.assertIn('"event": "internal_api_auth_failed"', logs.output[0])
+        self.assertNotIn("wrong-token", logs.output[0])
+        self.assertNotIn("test-internal-token", logs.output[0])
+
+    @patch("scripts.dashboard_server.dashboard_service.dashboard_dimensions")
+    def test_internal_dimensions_accepts_valid_bearer_token(self, dashboard_dimensions):
+        dashboard_dimensions.return_value = {"years": [2026]}
+
+        response = self.client.get(
+            "/internal/v1/dashboard/dimensions",
+            headers={"Authorization": "Bearer test-internal-token"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"years": [2026]}, response.get_json()["data"])
+        dashboard_dimensions.assert_called_once()
+
+    def test_internal_health_accepts_valid_bearer_token(self):
+        response = self.client.get(
+            "/internal/v1/dashboard/health",
+            headers={"Authorization": "Bearer test-internal-token"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("healthy", response.get_json()["status"])
+
+    @patch("scripts.dashboard_server.dashboard_service.executive_dashboard")
+    def test_internal_executive_api_accepts_valid_bearer_token_without_browser_login(self, executive_dashboard):
+        executive_dashboard.return_value = ({"metrics": {"revenue": 456}}, False)
+
+        response = self.client.post(
+            "/internal/v1/dashboard/executive",
+            json={"filters": {"period": {"type": "year", "year": 2026}}},
+            headers={"Authorization": "Bearer test-internal-token"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(456, response.get_json()["data"]["metrics"]["revenue"])
+        executive_dashboard.assert_called_once()
 
     def test_dashboard_page_redirects_to_login_when_logged_out(self):
         response = self.client.get("/payments")
