@@ -147,6 +147,30 @@ class DashboardServerTest(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertIn(b"BigShot Business Dashboard", response.data)
 
+    def test_pwa_manifest_and_icons_are_public(self):
+        expected_assets = {
+            "/static/manifest.webmanifest": "application/manifest+json",
+            "/static/icons/apple-touch-icon.png": "image/png",
+            "/static/icons/bigshot-192.png": "image/png",
+            "/static/icons/bigshot-512.png": "image/png",
+        }
+
+        for path, content_type in expected_assets.items():
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(200, response.status_code)
+                self.assertTrue(response.content_type.startswith(content_type))
+
+    def test_dashboard_html_contains_pwa_and_apple_links(self):
+        response = self.client.get("/")
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn(b'rel="manifest" href="/static/manifest.webmanifest"', response.data)
+        self.assertIn(
+            b'rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png"',
+            response.data,
+        )
+
     def test_login_rejects_wrong_password(self):
         with self.assertLogs("bigshot.dashboard", level="WARNING") as logs:
             response = self.client.post(
