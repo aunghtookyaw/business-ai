@@ -16,7 +16,11 @@ import config
 from tools import formula_engine
 
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder=os.path.join(PROJECT_ROOT, "static"),
+    static_url_path="/static",
+)
 DEFAULT_HOST = os.environ.get("RECEIVE_PAYMENT_HOST", "127.0.0.1")
 # Chromium blocks 5060 as an unsafe SIP port, so default to a nearby browser-safe port.
 DEFAULT_PORT = int(os.environ.get("RECEIVE_PAYMENT_PORT", "5059"))
@@ -578,7 +582,6 @@ def _basic_payment_page(
     ''', 200, {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
 
-@app.get("/")
 @app.get("/receive-payment")
 def receive_payment_page():
     vouchers = _list_vouchers()
@@ -869,6 +872,12 @@ def _insert_payment_receive(**values):
     if row.get("invoice_date") and hasattr(row["invoice_date"], "isoformat"):
         row["invoice_date"] = row["invoice_date"].isoformat()
     return row
+
+
+from tools.business_os_portal import register_business_os, root_redirect
+
+app.add_url_rule("/", "business_os_root", root_redirect, methods=["GET"])
+register_business_os(app, _connect)
 
 
 PAGE_HTML = r'''<!doctype html>

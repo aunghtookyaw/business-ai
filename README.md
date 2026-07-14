@@ -2,6 +2,14 @@
 
 Local business automation and Telegram AI assistant project.
 
+## BigShot Business OS
+
+The integrated local browser portal, route map, architecture, and troubleshooting
+guide are documented in [`docs/BUSINESS_OS_PORTAL.md`](docs/BUSINESS_OS_PORTAL.md).
+
+Start it with `python3 scripts/receive_payment_server.py`, then open
+`http://127.0.0.1:5059/business-os`.
+
 ## Veggies Production
 
 Daily vegetable production browser portal, normalized database migration,
