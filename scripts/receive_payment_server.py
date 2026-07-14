@@ -21,6 +21,10 @@ DEFAULT_HOST = os.environ.get("RECEIVE_PAYMENT_HOST", "127.0.0.1")
 # Chromium blocks 5060 as an unsafe SIP port, so default to a nearby browser-safe port.
 DEFAULT_PORT = int(os.environ.get("RECEIVE_PAYMENT_PORT", "5059"))
 
+from tools.veggies_production_portal import register_routes as register_veggies_production_routes
+
+register_veggies_production_routes(app)
+
 
 @app.after_request
 def add_cors_headers(response):

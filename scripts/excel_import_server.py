@@ -46,7 +46,11 @@ IMPORT_PAGE = """<!doctype html>
 </head>
 <body><main><section class="card">
   <h1>BigShot Business Data Import</h1>
-  <p>Preview and validate a workbook before inserting any production records.</p>
+  <p>The existing Excel macro import workflow remains available through its established API endpoints.</p>
+  <p>Daily vegetable production is entered directly in <strong>Veggies Production Basic</strong>, not through Excel.</p>
+  <div class="actions"><a class="button secondary" href="http://127.0.0.1:5059/veggies-production">Open Veggies Production Basic</a></div>
+  <!-- Optional legacy utilities below are intentionally not part of the normal production workflow. -->
+  <div hidden>
   <label>Import type
     <select id="importType">
       <option value="veggies_production">Veggies Production</option>
@@ -62,7 +66,7 @@ IMPORT_PAGE = """<!doctype html>
     <button id="importButton" type="button" disabled>Confirm Import</button>
     <a class="button secondary" id="errorsButton" hidden>Download Rejected Rows</a>
   </div>
-  <div id="result" role="status">Select a workbook to preview.</div>
+  <div id="result" role="status">Select a workbook to preview.</div></div>
 </section></main>
 <script>
 let previewId = null;

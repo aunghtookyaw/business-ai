@@ -4,7 +4,7 @@ Local business automation and Telegram AI assistant project.
 
 ## Veggies Production
 
-Daily vegetable production architecture, Excel import workflow, database migration,
+Daily vegetable production browser portal, normalized database migration,
 NocoDB setup, duplicate rules, and recovery instructions are documented in
 [`docs/FARM_PRODUCTION_SYSTEM.md`](docs/FARM_PRODUCTION_SYSTEM.md).
 

@@ -1,229 +1,203 @@
 # BigShot Veggies Production System
 
-## Purpose
+## Purpose and approved workflow
 
-The Veggies Production system records daily vegetable quantities without changing the legacy `farm_production` NocoDB view or `farm_transection` business logic. Staff use a wide Excel sheet or the simplified NocoDB entry table; PostgreSQL stores normalized batches and crop items.
+**Veggies Production Basic is the primary production-entry method.** Staff enter, search, review, and correct daily vegetable production directly in a local browser portal.
 
-Start here if you are new to the code:
+The uploaded Excel workbook was only a visual reference for the wide crop layout. Excel upload, preview, confirmation, rejected-row files, and spreadsheet-driven insertion are not part of the approved production workflow.
 
-1. `tools/veggies_production.py` contains date parsing, aliases, validation, normalization, duplicate detection, and database insertion.
-2. `scripts/excel_import_server.py` exposes the Business Data Import page and endpoints.
-3. `migrations/20260714_001_veggies_production_up.sql` defines the database.
-4. `scripts/import_veggies_production.py` provides command-line preview and import.
-5. `scripts/create_veggies_production_template.py` generates the staff workbook from active crops.
+The system does not rename, modify, delete, or migrate the legacy `farm_production` NocoDB object or `farm_transection` table.
 
-## Architecture
+## Beginner entry point
 
-```text
-Wide Excel row
-    |
-    +--> preview and row validation
-    |
-    +--> veggies_production_batches (one source row)
-            |
-            +--> veggies_production_items (one entered crop quantity)
-                    |
-                    +--> veggies_crop_master
+Read these files in order:
 
-Import audit --> veggies_production_imports
-Old headers  --> veggies_crop_alias --> veggies_crop_master
-```
+1. `tools/veggies_production_portal.py` — browser routes, validation, HTML, search, details, corrections, and transactional database writes.
+2. `scripts/receive_payment_server.py` — existing localhost Flask/Waitress service that hosts the portal.
+3. `tools/veggies_production.py` — shared crop, quantity, and date helpers.
+4. `migrations/20260714_001_veggies_production_up.sql` — normalized base schema.
+5. `migrations/20260714_002_veggies_production_portal_up.sql` — browser submission token and corrected Romaine Lettuce name.
 
-The existing `farm_production` object is independent and must not be renamed, modified, deleted, or migrated.
+## Start command and URL
 
-## Database Schema
-
-All objects are in the configured `TRANSACTION_SCHEMA`, currently `pipkgfu2wr9qxyy`.
-
-### `veggies_crop_master`
-
-Stores stable crop codes and standardized display names. `default_unit` is nullable because no production unit was verified. A new crop is added here rather than by altering production tables.
-
-### `veggies_crop_alias`
-
-Maps normalized historical workbook headers to standardized crops. Source spelling is retained in `source_header`.
-
-### `veggies_production_imports`
-
-Records filename, workbook/sheet name, SHA-256 file hash, source/accepted/rejected counts, created batch/item counts, duplicates, status, errors, operator, and timestamps.
-
-### `veggies_production_batches`
-
-One record per source submission. It stores the production date, assignee, notes, entry date, import/source identity, row hash, and audit timestamps. Multiple submissions may share a production date. Source identity is optional for manual NocoDB entry.
-
-### `veggies_production_items`
-
-One record per entered crop quantity. The `(production_batch_id, crop_id)` constraint prevents the same crop appearing twice in one batch. Quantity is decimal and must be zero or greater.
-
-### Read-only SQL views
-
-- `veggies_production_daily_summary`
-- `veggies_production_crop_summary`
-
-These are future reporting entry points and do not alter Formula Engine behavior.
-
-## NocoDB Configuration
-
-The NocoDB base is `AI Business OS`. Keep the existing `farm_production` view unchanged.
-
-Only these new tables should be visible to normal users:
-
-- `veggies_production_batches`, titled **Veggies Production Entry**
-- `veggies_crop_master`, titled **Veggies Crop Master**
-
-Keep these implementation objects hidden from the normal menu where supported:
-
-- `veggies_production_items`
-- `veggies_production_imports`
-- `veggies_crop_alias`
-- both summary views
-
-The batch-to-item and item-to-crop foreign keys should be synchronized as linked records. Production items remain available through the batch relation even when their technical table is hidden from the top-level menu.
-
-Do not edit NocoDB PostgreSQL metadata tables manually. Use the NocoDB metadata synchronization UI/API with a valid administrator token.
-
-Offline preparation artifacts:
-
-- `nocodb/veggies_production_metadata.json` is the declarative visibility, title, field, and relationship plan.
-- `nocodb/veggies_production_verify.sql` verifies the source tables and foreign keys without changing data.
-- `scripts/configure_nocodb_veggies.py` prints the plan by default and can read live metadata with `--inspect-live`. It never mutates NocoDB.
-
-After logging in as a NocoDB administrator:
-
-1. Run the verification SQL against PostgreSQL.
-2. Synchronize the `pipkgfu2wr9qxyy` schema in the **AI Business OS** base.
-3. Rename `veggies_production_batches` to **Veggies Production Entry**.
-4. Rename `veggies_crop_master` to **Veggies Crop Master**.
-5. Confirm both foreign-key relationships from `veggies_production_items` were detected.
-6. Hide every object listed in `hidden_tables` from normal users.
-7. Do not rename, hide, resynchronize destructively, or otherwise edit `farm_production` or `farm_transection`.
-
-## Business Data Import Workflow
-
-Start the local service:
-
-```bash
-python3 scripts/excel_import_server.py
-```
-
-Open `http://127.0.0.1:5055` and:
-
-1. Select **Veggies Production**.
-2. Download the template.
-3. Upload a completed `.xlsx` workbook.
-4. Review source, accepted, rejected, item, and duplicate counts.
-5. Download rejected-row errors when present.
-6. Confirm the import.
-
-The existing JSON and Excel macro import endpoints remain unchanged.
-
-Command-line dry run:
-
-```bash
-python3 scripts/import_veggies_production.py "/path/to/workbook.xlsx" --json
-```
-
-Explicit import after review:
-
-```bash
-python3 scripts/import_veggies_production.py "/path/to/workbook.xlsx" --apply --imported-by "operator-name"
-```
-
-## Template Columns
-
-The wide `Data Entry` sheet contains Production Date, one column for each active crop, Assignee, Note, AI Note, and Date of Entry. Instructions and Crop Master reference sheets are also included. Crop quantities accept decimals and reject negatives. The preferred date display is `YYYY/MM/DD`.
-
-Generate the template locally after the migration is available:
-
-```bash
-python3 scripts/create_veggies_production_template.py
-```
-
-The default output is `excel_import/BigShot_Veggies_Production_Template.xlsx`. The generator queries active crops so newly configured crops appear automatically. Use `--output /path/file.xlsx` to select another destination. Final visual verification is a local operator step.
-
-## Date Handling
-
-Accepted input:
-
-- Excel serial dates using the workbook 1900 date system
-- actual Excel date/datetime cells
-- `YYYY/MM/DD`
-- `YYYY-MM-DD`
-- `DD/MM/YYYY`
-
-PostgreSQL stores `production_date` and `entry_date` as `DATE`, never text. Ambiguous month-first text is not accepted.
-
-## Unit Handling
-
-No trustworthy unit was present in the reference workbook or existing operational system. Every seeded crop therefore has `default_unit = NULL`. Do not infer kilograms, pieces, bunches, or trays. Units can be configured later in Veggies Crop Master and copied into future imported items.
-
-## Duplicate Rules
-
-Production date alone is never a duplicate key. Multiple submissions on one day are valid.
-
-Protection layers:
-
-- completed import file hash detection;
-- duplicate canonical source-row hashes inside a workbook;
-- unique import batch/source-row identity;
-- unique source file/workbook/row/hash identity;
-- unique batch/crop items.
-
-A repeated completed file returns `already_exists`; it does not overwrite production.
-
-## Blank Versus Zero
-
-- Blank crop cell: no item record is created.
-- Explicit `0`: an item record is created with quantity zero.
-
-This preserves confirmed zero production separately from missing/unentered production.
-
-## Crop Alias Mapping
-
-| Historical header | Standard crop |
-|---|---|
-| Iceberg | Iceberg Lettuce |
-| Green Oak | Green Oak Lettuce |
-| Red Oak | Red Oak Lettuce |
-| Green lollo | Green Lollo Lettuce |
-| Red lollo | Red Lollo Lettuce |
-| Long Chilli | Long Chili |
-| Beet root | Beetroot |
-| Swiss Chert | Swiss Chard |
-| Persley | Parsley |
-| Brussel Sprout | Brussels Sprouts |
-| Funnel Bulb | Fennel Bulb |
-
-Exact historical headers for all other seeded crops are also stored in the alias table.
-
-## Validation and Transactions
-
-Every populated source row must have a supported production date, only recognized crop headers, at least one entered crop quantity, numeric quantities greater than or equal to zero, and a valid Date of Entry when supplied.
-
-Errors identify row and column. Invalid rows create neither a batch nor items. Database insertion uses one transaction; a fatal failure rolls back the import.
-
-## Migrations
-
-Apply:
+Apply migrations:
 
 ```bash
 python3 scripts/migrate_veggies_production.py up
 ```
 
-Rollback deletes only the new `veggies_*` objects and their data:
+Start the existing local Business OS service:
+
+```bash
+python3 scripts/receive_payment_server.py
+```
+
+Open:
+
+`http://127.0.0.1:5059/veggies-production`
+
+The server binds to localhost by default. PostgreSQL is never exposed publicly.
+
+## Browser workflow
+
+One submitted form creates:
+
+- one `veggies_production_batches` record;
+- one `veggies_production_items` record for every entered crop quantity.
+
+Crop inputs are generated from active `veggies_crop_master` records, so activating a new crop adds it to the browser form without changing page code.
+
+Entry fields:
+
+- Production Date, required
+- Assignee, free text
+- one decimal-capable quantity input per active crop
+- Note
+- AI Note
+- Date of Entry, defaulted to today
+
+`created_at` records the exact database save time. `entry_date` remains a PostgreSQL `DATE`, consistent with the normalized schema.
+
+Rules:
+
+- Blank quantity: no item record.
+- Explicit zero: confirmed-zero item record.
+- Decimal: accepted.
+- Negative: rejected beside the crop field.
+- At least one crop: required.
+- Every save: one database transaction.
+- Repeated browser submission token: rejected to prevent accidental double insertion.
+
+The create workflow uses Post/Redirect/Get, and JavaScript disables the Save button after submission. The unique database token is the final double-submit safeguard.
+
+## Search and summaries
+
+Filters:
+
+- Date From
+- Date To
+- exact Production Date
+- Assignee
+- Crop
+- Minimum Quantity
+- Maximum Quantity
+- Note text
+
+Results show production date, assignee, total quantity, crop count, note, entry date, and a View Details action.
+
+Summary cards reflect the selected result period:
+
+- Total Production Quantity
+- Number of Production Submissions
+- Number of Crops Produced
+- Latest Production Date
+
+## Detail and safe correction
+
+The detail screen shows batch metadata and each crop, quantity, unit, created time, and updated time.
+
+Editing requires an explicit Edit action. The page shows an original-value summary and requires a Save Changes confirmation checkbox. A transaction locks the batch, updates its editable fields, replaces its normalized items, and updates `updated_at`. A failure rolls back the entire correction.
+
+There is no delete action and no permanent-delete workflow.
+
+## Database architecture
+
+All objects use the configured `TRANSACTION_SCHEMA`, currently `pipkgfu2wr9qxyy`.
+
+### `veggies_crop_master`
+
+Standard crop names, codes, nullable default units, active status, and display order. The portal reads this table dynamically.
+
+### `veggies_production_batches`
+
+One row per browser submission. Stores production date, assignee, notes, entry date, submission token, timestamps, and optional import compatibility fields.
+
+### `veggies_production_items`
+
+One normalized crop quantity per batch. Quantity must be zero or greater. `(production_batch_id, crop_id)` is unique.
+
+### Compatibility tables
+
+- `veggies_crop_alias`
+- `veggies_production_imports`
+
+These remain for compatibility with previously implemented optional utilities. They are not used by normal browser entry.
+
+### Read-only reporting views
+
+- `veggies_production_daily_summary`
+- `veggies_production_crop_summary`
+
+They are future reporting entry points and do not change Formula Engine behavior.
+
+## Units
+
+No trustworthy production units were provided. Seeded crops therefore keep `default_unit = NULL`. Do not infer kilograms, pieces, bunches, or trays. A configured crop default unit is copied into newly saved production items.
+
+## NocoDB
+
+The browser portal is the primary entry method. Normal NocoDB users should only see:
+
+- `veggies_production_batches`, titled **Veggies Production Entry**
+- `veggies_crop_master`, titled **Veggies Crop Master**
+
+Keep items, imports, aliases, and summary views hidden from normal menus where supported. Relationships still connect items to batches and crops.
+
+Offline configuration artifacts:
+
+- `nocodb/veggies_production_metadata.json`
+- `nocodb/veggies_production_verify.sql`
+- `scripts/configure_nocodb_veggies.py`
+
+Never edit NocoDB’s PostgreSQL metadata tables directly. Never change the legacy `farm_production` object.
+
+## Excel utility classification
+
+The earlier Veggies workbook parser, preview/import endpoints, CLI dry-run, and template generator are retained as **harmless optional developer utilities**. They do not conflict with normalized storage, so they were not deleted. They are hidden from the main Business Data Import workflow and are not the production-entry method.
+
+Retained files include:
+
+- `scripts/create_veggies_production_template.py`
+- `scripts/import_veggies_production.py`
+- compatibility endpoints in `scripts/excel_import_server.py`
+- workbook parsing helpers in `tools/veggies_production.py`
+
+Do not use these utilities to insert normal production data.
+
+## Migrations and rollback
+
+Apply all Veggies migrations:
+
+```bash
+python3 scripts/migrate_veggies_production.py up
+```
+
+Rollback is destructive to the new Veggies system and must only be used after confirming the backup:
 
 ```bash
 python3 scripts/migrate_veggies_production.py down
 ```
 
-Never run rollback without confirming backups and intended data loss.
+The rollback never targets the legacy farm objects.
+
+## Backup and recovery
+
+Pre-migration custom archive:
+
+`backups/veggies_production_pre_migration_20260714_230130/automationdb_pre_veggies_production.dump`
+
+SHA-256:
+
+`2c48509d14f9db9680254fa6cdb17e78692fcca07a0597660733905810d0b186`
+
+The dump is private and ignored by Git. Validate with `pg_restore -l` and test restoration into a separate database.
 
 ## Tests
 
-Focused tests:
+Focused portal and existing Receive Payment Basic tests:
 
 ```bash
-python3 -B -m unittest tests.test_veggies_production tests.test_excel_import_server tests.test_excel_importer -v
+python3 -B -m unittest tests.test_veggies_production_portal tests.test_receive_payment_server -v
 ```
 
 Full suite:
@@ -232,32 +206,23 @@ Full suite:
 python3 -B -m unittest discover -s tests -v
 ```
 
-## Backup and Recovery
+## Adding a crop
 
-The pre-migration full PostgreSQL custom archive is:
+1. Add a unique code and standardized name in Veggies Crop Master.
+2. Leave the default unit blank unless the business confirms it.
+3. Set the crop active and assign its display order.
+4. Refresh Veggies Production Basic.
+5. Test a browser submission and detail view.
 
-`backups/veggies_production_pre_migration_20260714_230130/automationdb_pre_veggies_production.dump`
-
-SHA-256: `2c48509d14f9db9680254fa6cdb17e78692fcca07a0597660733905810d0b186`
-
-Validate with `pg_restore -l`. Restore into a separate database first when testing recovery. The reversible migration is the preferred rollback when only the new empty system must be removed.
-
-## Adding a Crop
-
-1. Add a unique code and standardized name to Veggies Crop Master.
-2. Leave `default_unit` blank unless the business confirms a unit.
-3. Add aliases for any historical or alternate headers.
-4. Generate a new template so the active crop becomes a wide entry column.
-5. Test an import preview before production use.
-
-No PostgreSQL table alteration is required.
+No PostgreSQL production-table alteration is required.
 
 ## Troubleshooting
 
-- **Unknown crop header:** add a reviewed alias or correct the header.
-- **Invalid date:** use an Excel date or a supported unambiguous format.
-- **No crop quantities:** enter at least one crop; zero is acceptable.
-- **Already exists:** the completed file hash has already been imported.
-- **NocoDB table missing:** synchronize metadata with a valid NocoDB administrator token; never insert NocoDB metadata rows manually.
-- **Template unavailable:** run `python3 scripts/create_veggies_production_template.py` before starting the import service.
-- **NocoDB login unavailable:** use the offline metadata and verification files above, then apply the UI changes after an administrator logs in.
+- **Portal does not open:** confirm `scripts/receive_payment_server.py` is running, then use the exact localhost URL above.
+- **Crop is missing:** confirm it exists and is active in `veggies_crop_master`, then refresh.
+- **Invalid date:** use the browser date picker.
+- **No crop quantities:** enter at least one crop; zero is valid.
+- **Already saved:** refresh before creating another submission. The unique token prevented a duplicate.
+- **Save or edit failed:** no partial change was committed. Check PostgreSQL connectivity and the Receive Payment service logs, then retry from a fresh page.
+- **Search returns nothing:** clear filters, verify the date range, then add filters one at a time.
+- **NocoDB table missing:** synchronize the schema after administrator login using the prepared metadata plan; do not manipulate metadata tables directly.

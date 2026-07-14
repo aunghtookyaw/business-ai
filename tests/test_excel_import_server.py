@@ -23,11 +23,12 @@ class ExcelImportServerTest(unittest.TestCase):
         excel_import_server._VEGGIES_PREVIEWS.clear()
         self.client = excel_import_server.app.test_client()
 
-    def test_import_page_contains_veggies_and_existing_import_options(self):
+    def test_import_page_directs_veggies_to_browser_portal(self):
         response = self.client.get("/")
         self.assertEqual(200, response.status_code)
-        self.assertIn(b"Veggies Production", response.data)
-        self.assertIn(b"Existing Business Import", response.data)
+        self.assertIn(b"Veggies Production Basic", response.data)
+        self.assertIn(b"127.0.0.1:5059/veggies-production", response.data)
+        self.assertIn(b"Optional legacy utilities", response.data)
 
     @patch("scripts.excel_import_server.import_excel_payload")
     def test_existing_json_import_endpoint_remains_functional(self, import_payload):

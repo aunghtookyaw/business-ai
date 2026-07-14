@@ -7,12 +7,13 @@ This folder contains an append-only Excel import workflow for:
 - `Sotephwar_Transection`
 - `Financial_Obligations`
 - `Sotephwar_Inventory`
-- `Veggies Production` (wide Excel input normalized into `veggies_*` tables)
 
 The importer inserts new rows into Postgres/NocoDB tables. It does not delete, update, truncate, replace, or clear existing data.
 
-The Veggies Production browser workflow, template, validation rules, and command-line
-dry run are documented in [`../docs/FARM_PRODUCTION_SYSTEM.md`](../docs/FARM_PRODUCTION_SYSTEM.md).
+Veggies Production is entered through the browser portal, not this Excel workflow. See
+[`../docs/FARM_PRODUCTION_SYSTEM.md`](../docs/FARM_PRODUCTION_SYSTEM.md). Previously
+created Veggies spreadsheet utilities remain optional developer tools and are not part
+of the production data-entry process.
 
 ## Files
 

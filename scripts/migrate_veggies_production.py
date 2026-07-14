@@ -13,18 +13,24 @@ if str(PROJECT_ROOT) not in sys.path:
 from tools.formula_engine import _connect
 
 
-MIGRATION = PROJECT_ROOT / "migrations" / "20260714_001_veggies_production_up.sql"
-ROLLBACK = PROJECT_ROOT / "migrations" / "20260714_001_veggies_production_down.sql"
+MIGRATIONS = [
+    PROJECT_ROOT / "migrations" / "20260714_001_veggies_production_up.sql",
+    PROJECT_ROOT / "migrations" / "20260714_002_veggies_production_portal_up.sql",
+]
+ROLLBACKS = [
+    PROJECT_ROOT / "migrations" / "20260714_002_veggies_production_portal_down.sql",
+    PROJECT_ROOT / "migrations" / "20260714_001_veggies_production_down.sql",
+]
 
 
 def run_migration(direction="up", connection=None):
-    path = MIGRATION if direction == "up" else ROLLBACK
-    sql = path.read_text(encoding="utf-8")
+    paths = MIGRATIONS if direction == "up" else ROLLBACKS
     owns_connection = connection is None
     connection = connection or _connect()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            for path in paths:
+                cursor.execute(path.read_text(encoding="utf-8"))
         connection.commit()
     except Exception:
         connection.rollback()
@@ -32,15 +38,17 @@ def run_migration(direction="up", connection=None):
     finally:
         if owns_connection:
             connection.close()
-    return path
+    return paths
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("direction", choices=("up", "down"), nargs="?", default="up")
     args = parser.parse_args()
-    path = run_migration(args.direction)
-    print(f"Applied {args.direction} migration: {path}")
+    paths = run_migration(args.direction)
+    print(f"Applied {args.direction} migrations:")
+    for path in paths:
+        print(path)
     return 0
 
 

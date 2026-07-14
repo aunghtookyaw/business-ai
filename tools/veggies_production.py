@@ -23,7 +23,7 @@ STANDARD_CROPS = [
     ("ZUCCHINI", "Zucchini", "Zucchini"),
     ("CHERRY_TOMATO", "Cherry Tomato", "Cherry Tomato"),
     ("ROSEMARY", "Rosemary", "Rosemary"),
-    ("ROMAINE", "Romaine", "Romaine"),
+    ("ROMAINE", "Romaine Lettuce", "Romaine"),
     ("ICEBERG_LETTUCE", "Iceberg Lettuce", "Iceberg"),
     ("GREEN_OAK_LETTUCE", "Green Oak Lettuce", "Green Oak"),
     ("RED_OAK_LETTUCE", "Red Oak Lettuce", "Red Oak"),
