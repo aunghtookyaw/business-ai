@@ -60,6 +60,7 @@ const pageConfig = {
   }
 };
 
+const startupScreen = document.getElementById("startupScreen");
 const loginScreen = document.getElementById("loginScreen");
 const loginForm = document.getElementById("loginForm");
 const loginUsername = document.getElementById("loginUsername");
@@ -658,6 +659,8 @@ async function initialize() {
     }
   } catch (error) {
     showLogin(error.message);
+  } finally {
+    startupScreen.hidden = true;
   }
 }
 

@@ -145,11 +145,13 @@ class DashboardServerTest(unittest.TestCase):
         response = self.client.get("/payments")
 
         self.assertEqual(200, response.status_code)
-        self.assertIn(b"BigShot Business Dashboard", response.data)
+        self.assertIn(b"<title>BigShot Dashboard</title>", response.data)
 
     def test_pwa_manifest_and_icons_are_public(self):
         expected_assets = {
             "/static/manifest.webmanifest": "application/manifest+json",
+            "/static/icons/favicon.ico": "image/x-icon",
+            "/static/icons/bigshot-32.png": "image/png",
             "/static/icons/apple-touch-icon.png": "image/png",
             "/static/icons/bigshot-192.png": "image/png",
             "/static/icons/bigshot-512.png": "image/png",
@@ -161,15 +163,32 @@ class DashboardServerTest(unittest.TestCase):
                 self.assertEqual(200, response.status_code)
                 self.assertTrue(response.content_type.startswith(content_type))
 
-    def test_dashboard_html_contains_pwa_and_apple_links(self):
+    def test_dashboard_html_contains_title_pwa_and_favicon_links(self):
         response = self.client.get("/")
 
         self.assertEqual(200, response.status_code)
+        self.assertIn(b"<title>BigShot Dashboard</title>", response.data)
         self.assertIn(b'rel="manifest" href="/static/manifest.webmanifest"', response.data)
         self.assertIn(
             b'rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png"',
             response.data,
         )
+        self.assertIn(b'rel="icon" type="image/x-icon" href="/static/icons/favicon.ico"', response.data)
+        self.assertIn(
+            b'rel="icon" type="image/png" sizes="32x32" href="/static/icons/bigshot-32.png"',
+            response.data,
+        )
+
+    def test_dashboard_html_contains_accessible_startup_screen(self):
+        response = self.client.get("/")
+        app_script = (dashboard_server.STATIC_ROOT / "app.js").read_text()
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn(b'id="startupScreen"', response.data)
+        self.assertIn(b'alt="Official BigShot logo"', response.data)
+        self.assertIn(b"Business Intelligence Platform", response.data)
+        self.assertIn("Loading…".encode("utf-8"), response.data)
+        self.assertIn("finally {\n    startupScreen.hidden = true;", app_script)
 
     def test_login_rejects_wrong_password(self):
         with self.assertLogs("bigshot.dashboard", level="WARNING") as logs:

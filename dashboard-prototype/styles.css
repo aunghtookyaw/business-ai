@@ -45,6 +45,52 @@ body {
 button, input, select { font: inherit; }
 button { color: inherit; }
 
+.startup-screen {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+}
+.startup-screen[hidden] { display: none; }
+.startup-brand {
+  width: min(100%, 360px);
+  text-align: center;
+}
+.startup-brand img {
+  width: clamp(112px, 28vw, 160px);
+  height: auto;
+  display: block;
+  margin: 0 auto 24px;
+  border-radius: 20%;
+}
+.startup-brand h1 {
+  margin: 0;
+  font-family: Georgia, serif;
+  font-size: clamp(28px, 6vw, 38px);
+  font-weight: 500;
+  line-height: 1.15;
+}
+.startup-brand p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: clamp(13px, 3vw, 15px);
+  line-height: 1.5;
+}
+.startup-brand small {
+  display: block;
+  margin-top: 28px;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
 .login-screen {
   min-height: 100vh;
   display: grid;
