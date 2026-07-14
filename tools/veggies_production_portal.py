@@ -4,17 +4,28 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import OrderedDict
 from datetime import date
 from decimal import Decimal
 from html import escape
 from typing import Any
+from urllib.parse import urlencode
 
 import psycopg2.extras
 from flask import redirect, request, url_for
 
 import config
 from tools import formula_engine
-from tools.veggies_production import CropDefinition, load_crop_definitions, parse_production_date, parse_quantity
+from tools.veggies_production import (
+    CROP_CATEGORIES,
+    CropDefinition,
+    load_crop_definitions,
+    parse_production_date,
+    parse_quantity,
+)
+
+
+PAGE_SIZE = 25
 
 
 def _ref(table: str) -> str:
@@ -52,6 +63,14 @@ def portal_crops() -> list[CropDefinition]:
     for crop in load_crop_definitions():
         unique.setdefault(crop.crop_code, crop)
     return list(unique.values())
+
+
+def grouped_crops(crops: list[CropDefinition]) -> OrderedDict[str, list[CropDefinition]]:
+    """Group crops in the stable staff-facing category order."""
+    groups = OrderedDict((category, []) for category in CROP_CATEGORIES)
+    for crop in crops:
+        groups.setdefault(crop.category or "Other", []).append(crop)
+    return OrderedDict((category, rows) for category, rows in groups.items() if rows)
 
 
 def validate_submission(values: dict[str, Any], crops: list[CropDefinition]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -217,7 +236,17 @@ def search_records(filters: dict[str, str]) -> tuple[list[dict[str, Any]], dict[
         conditions.append("COALESCE(batch.note, '') ILIKE %s")
         params.append(f"%{filters['note']}%")
     where_sql = " AND ".join(conditions)
-    query = f"""
+    sort_sql = {
+        "newest": "production_date DESC, id DESC",
+        "oldest": "production_date ASC, id ASC",
+        "highest": "total_quantity DESC, production_date DESC, id DESC",
+        "lowest": "total_quantity ASC, production_date DESC, id DESC",
+    }.get(filters.get("sort"), "production_date DESC, id DESC")
+    try:
+        page = max(int(filters.get("page") or 1), 1)
+    except ValueError:
+        page = 1
+    base_sql = f"""
       SELECT batch.id, batch.production_date, batch.assignee, batch.note, batch.entry_date,
              SUM(item.quantity) AS total_quantity, COUNT(DISTINCT item.crop_id) AS crop_count,
              batch.created_at, batch.updated_at
@@ -226,31 +255,94 @@ def search_records(filters: dict[str, str]) -> tuple[list[dict[str, Any]], dict[
       JOIN {_ref('veggies_crop_master')} crop ON crop.id = item.crop_id
       WHERE {where_sql}
       GROUP BY batch.id
-      ORDER BY batch.production_date DESC, batch.id DESC
-      LIMIT 500
     """
     connection = _connect()
     try:
         with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute(query, params)
+            cursor.execute(
+                f"SELECT *, COUNT(*) OVER() AS filtered_count FROM ({base_sql}) filtered ORDER BY {sort_sql} LIMIT %s OFFSET %s",
+                [*params, PAGE_SIZE, (page - 1) * PAGE_SIZE],
+            )
             rows = [dict(row) for row in cursor.fetchall()]
-        summaries = {
-            "total_quantity": sum((row["total_quantity"] or Decimal("0") for row in rows), Decimal("0")),
-            "submission_count": len(rows),
-            "crop_count": 0,
-            "latest_date": max((row["production_date"] for row in rows), default=None),
-        }
-        if rows:
-            ids = [row["id"] for row in rows]
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    f"SELECT COUNT(DISTINCT crop_id) FROM {_ref('veggies_production_items')} WHERE production_batch_id = ANY(%s)",
-                    (ids,),
-                )
-                summaries["crop_count"] = cursor.fetchone()[0]
+            total_records = int(rows[0]["filtered_count"]) if rows else 0
+        summaries = {"total_records": total_records, "page": page,
+                     "total_pages": max((total_records + PAGE_SIZE - 1) // PAGE_SIZE, 1)}
         return rows, summaries
     finally:
         connection.close()
+
+
+def today_summary(connection=None) -> dict[str, Any]:
+    """Return quantities saved today using the database's configured local date."""
+    owns_connection = connection is None
+    connection = connection or _connect()
+    try:
+        with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(f"""
+                SELECT COALESCE(SUM(item.quantity), 0) AS total_quantity,
+                       COUNT(DISTINCT batch.id) AS submission_count,
+                       COUNT(DISTINCT item.crop_id) AS crop_count,
+                       MAX(batch.created_at) AS latest_entry_time,
+                       COALESCE(BOOL_OR(item.unit IS NULL), TRUE)
+                         OR COUNT(DISTINCT item.unit) > 1 AS unit_pending
+                FROM {_ref('veggies_production_batches')} batch
+                LEFT JOIN {_ref('veggies_production_items')} item
+                  ON item.production_batch_id = batch.id
+                WHERE batch.created_at::date = CURRENT_DATE
+            """)
+            return dict(cursor.fetchone())
+    finally:
+        if owns_connection:
+            connection.close()
+
+
+def list_crop_master() -> list[dict[str, Any]]:
+    connection = _connect()
+    try:
+        with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(f"""
+                SELECT id, crop_code, crop_name, category, active, default_unit, display_order,
+                       created_at, updated_at
+                FROM {_ref('veggies_crop_master')}
+                ORDER BY display_order, crop_name
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    finally:
+        connection.close()
+
+
+def update_crop_master(crop_id: int, values: dict[str, Any], connection=None) -> None:
+    """Update editable master fields; crops are deactivated, never deleted."""
+    crop_name = _text(values.get("crop_name"))
+    category = _text(values.get("category")) or "Other"
+    if not crop_name:
+        raise ValueError("Crop Name is required.")
+    if category not in CROP_CATEGORIES:
+        raise ValueError("Select a valid category.")
+    try:
+        display_order = int(values.get("display_order") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Display Order must be a whole number.") from exc
+    owns_connection = connection is None
+    connection = connection or _connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"""
+                UPDATE {_ref('veggies_crop_master')}
+                SET crop_name=%s, crop_name_normalized=%s, category=%s, active=%s,
+                    default_unit=%s, display_order=%s, updated_at=NOW()
+                WHERE id=%s
+            """, (crop_name, crop_name.casefold(), category, values.get("active") == "yes",
+                  _text(values.get("default_unit")) or None, display_order, crop_id))
+            if cursor.rowcount != 1:
+                raise LookupError("Crop not found.")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        if owns_connection:
+            connection.close()
 
 
 def get_record(batch_id: int) -> dict[str, Any] | None:
@@ -266,7 +358,8 @@ def get_record(batch_id: int) -> dict[str, Any] | None:
                 return None
             cursor.execute(
                 f"""
-                SELECT item.crop_id, crop.crop_code, crop.crop_name, item.quantity, item.unit,
+                SELECT item.crop_id, crop.crop_code, crop.crop_name, crop.category,
+                       item.quantity, item.unit,
                        item.created_at, item.updated_at
                 FROM {_ref('veggies_production_items')} item
                 JOIN {_ref('veggies_crop_master')} crop ON crop.id=item.crop_id
@@ -283,7 +376,7 @@ def get_record(batch_id: int) -> dict[str, Any] | None:
 
 
 BASE_STYLE = """
-body{margin:0;font-family:Arial,sans-serif;background:#f4f6f5;color:#17211c}header{padding:18px 22px;background:#fff;border-bottom:1px solid #ccd5d0}main{padding:16px;max-width:1600px;margin:auto}section{background:#fff;border:1px solid #d5ddd9;border-radius:8px;margin-bottom:16px;padding:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.crop-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;max-height:420px;overflow:auto;padding:4px}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{background:#174f3b;color:white;border-radius:8px;padding:16px}.card strong{display:block;font-size:24px;margin-top:6px}label{display:block;font-weight:bold;font-size:12px;color:#47554e}input,textarea,select,button{box-sizing:border-box;width:100%;padding:9px;margin-top:5px;border:1px solid #aebbb5;border-radius:5px;font:inherit}button,.button{background:#176b5d;color:white;border:0;font-weight:bold;cursor:pointer;text-decoration:none;display:inline-block;padding:10px 16px;border-radius:5px;width:auto}.secondary{background:#fff;color:#176b5d;border:1px solid #176b5d}.error{color:#b00020;font-size:12px;margin-top:4px}.status{padding:12px;border-radius:6px;background:#e1f3ed;color:#155d4f;font-weight:bold}.status.bad{background:#fde8e8;color:#9b1c1c}.table-wrap{overflow:auto}table{width:100%;min-width:950px;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #e1e6e3;text-align:left;white-space:nowrap}th{background:#edf2ef}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.required{color:#a11}.original{background:#f8faf9;padding:12px;border-left:4px solid #d6a84b;margin-bottom:14px}@media(max-width:800px){.cards{grid-template-columns:1fr 1fr}.crop-grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.cards,.crop-grid{grid-template-columns:1fr}}
+body{margin:0;font-family:Arial,sans-serif;background:#f4f6f5;color:#17211c}header{padding:18px 22px;background:#fff;border-bottom:1px solid #ccd5d0}main{padding:16px;max-width:1600px;margin:auto}section{background:#fff;border:1px solid #d5ddd9;border-radius:8px;margin-bottom:16px;padding:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.crop-category{border:1px solid #dce4e0;border-radius:7px;margin:12px 0;padding:12px}.crop-category h4{margin:0 0 10px;color:#174f3b}.crop-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;padding:4px}.crop-tools{display:grid;grid-template-columns:minmax(220px,1fr) 220px;gap:12px;align-items:end}.crop-field.hidden,.crop-category.hidden{display:none}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}.card{background:#174f3b;color:white;border-radius:8px;padding:16px}.card strong{display:block;font-size:24px;margin-top:6px}.card small{display:block;margin-top:8px;color:#e4f0ea}label{display:block;font-weight:bold;font-size:12px;color:#47554e}input,textarea,select,button{box-sizing:border-box;width:100%;min-height:42px;padding:9px;margin-top:5px;border:1px solid #aebbb5;border-radius:5px;font:inherit}button,.button{background:#176b5d;color:white;border:0;font-weight:bold;cursor:pointer;text-decoration:none;display:inline-block;padding:11px 16px;border-radius:5px;width:auto}.secondary{background:#fff;color:#176b5d;border:1px solid #176b5d}.error{color:#b00020;font-size:12px;margin-top:4px}.status{padding:14px;border-radius:6px;background:#e1f3ed;color:#155d4f;font-weight:bold;line-height:1.5}.status.bad{background:#fde8e8;color:#9b1c1c}.preview{background:#f7faf8;border-left:4px solid #176b5d}.preview ul{columns:2;padding-left:20px}.table-wrap{overflow:auto}table{width:100%;min-width:1050px;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #e1e6e3;text-align:left;white-space:nowrap}th{background:#edf2ef}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.required{color:#a11}.original,.warning{background:#fff8e6;padding:12px;border-left:4px solid #d6a84b;margin-bottom:14px}.pagination{display:flex;align-items:center;gap:10px;margin-top:14px}@media(max-width:800px){.cards{grid-template-columns:1fr 1fr}.crop-grid{grid-template-columns:repeat(2,1fr)}.crop-tools{grid-template-columns:1fr}}@media(max-width:520px){.cards,.crop-grid{grid-template-columns:1fr}.preview ul{columns:1}}
 """
 
 
@@ -292,13 +385,17 @@ def _error(errors: dict[str, str], field: str) -> str:
 
 
 def _entry_form(crops, values, errors, action, edit=False):
-    fields = []
     item_values = values.get("item_values", {})
-    for crop in crops:
-        field = _crop_field(crop)
-        value = values.get(field, item_values.get(crop.crop_code, ""))
-        fields.append(f'''<label>{escape(crop.crop_name)}<input type="number" step="any" min="0" name="{field}" value="{escape(_quantity_text(value))}" inputmode="decimal">{_error(errors, field)}</label>''')
-    confirm = '<label><input style="width:auto" type="checkbox" name="confirm_changes" value="yes" required> I reviewed the original values and confirm these changes.</label>' if edit else ""
+    categories = []
+    for category, category_crops in grouped_crops(crops).items():
+        fields = []
+        for crop in category_crops:
+            field = _crop_field(crop)
+            value = values.get(field, item_values.get(crop.crop_code, ""))
+            input_id = f"input_{field}"
+            fields.append(f'''<div class="crop-field" data-crop-name="{escape(crop.crop_name.casefold())}"><label for="{input_id}">{escape(crop.crop_name)}</label><input class="crop-input" id="{input_id}" type="number" step="any" min="0" name="{field}" value="{escape(_quantity_text(value))}" inputmode="decimal" data-crop-label="{escape(crop.crop_name)}">{_error(errors, field)}</div>''')
+        categories.append(f'''<div class="crop-category" data-category="{escape(category)}"><h4>{escape(category)}</h4><div class="crop-grid">{''.join(fields)}</div></div>''')
+    confirm = '<label><input style="width:auto;min-height:auto" type="checkbox" name="confirm_changes" value="yes" required> I reviewed the original values and confirm these changes.</label>' if edit else ""
     return f'''<form method="post" action="{escape(action)}" id="productionForm">
       <input type="hidden" name="submission_token" value="{escape(_text(values.get('submission_token')) or str(uuid.uuid4()))}">
       <div class="grid">
@@ -307,19 +404,29 @@ def _entry_form(crops, values, errors, action, edit=False):
         <label>Date of Entry<input type="date" name="entry_date" value="{escape(_date_text(values.get('entry_date')) or date.today().isoformat())}">{_error(errors,'entry_date')}</label>
       </div>
       <h3>Vegetable quantities <span class="required">*</span></h3>{_error(errors,'crops')}
-      <div class="crop-grid">{''.join(fields)}</div>
+      <div class="crop-tools"><label for="cropSearch">Search crop<input id="cropSearch" type="search" placeholder="Example: tomato" autocomplete="off"></label><label for="cropMode">Show<select id="cropMode"><option value="all">All Crops</option><option value="entered">Entered Crops Only</option></select></label></div>
+      <div id="cropSections">{''.join(categories)}</div>
       <div class="grid">
         <label>Note<textarea name="note" rows="3">{escape(_text(values.get('note')))}</textarea></label>
         <label>AI Note<textarea name="ai_note" rows="3">{escape(_text(values.get('ai_note')))}</textarea></label>
-      </div>{confirm}
+      </div>
+      <section class="preview" aria-live="polite"><h3>Entry preview</h3><div class="grid"><p><b>Production Date</b><br><span id="previewDate">—</span></p><p><b>Assignee</b><br><span id="previewAssignee">—</span></p><p><b>Number of Entered Crops</b><br><span id="previewCount">0</span></p><p><b>Total Entered Quantity</b><br><span id="previewTotal">0</span></p></div><ul id="previewItems"><li>No crop quantities entered.</li></ul></section>{confirm}
       <div class="actions"><button id="saveButton" type="submit">{'Save Changes' if edit else 'Save Production'}</button></div>
-    </form><script>document.getElementById('productionForm').addEventListener('submit',function(){{const b=document.getElementById('saveButton');b.disabled=true;b.textContent='Saving…';}});</script>'''
+    </form><script>
+    (()=>{{
+      const form=document.getElementById('productionForm'),inputs=[...form.querySelectorAll('.crop-input')],search=document.getElementById('cropSearch'),mode=document.getElementById('cropMode'),dateInput=form.querySelector('[name="production_date"]'),assigneeInput=form.querySelector('[name="assignee"]');
+      const entered=input=>input.value.trim()!=='';
+      function safe(text){{return text.replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
+      function refresh(){{const query=search.value.trim().toLowerCase();let count=0,total=0,items=[];inputs.forEach(input=>{{const field=input.closest('.crop-field'),isEntered=entered(input),matches=!query||field.dataset.cropName.includes(query),visible=matches&&(mode.value==='all'||isEntered);field.classList.toggle('hidden',!visible);if(isEntered){{count++;total+=Number(input.value)||0;items.push(`${{input.dataset.cropLabel}} — ${{input.value}}`);}}}});document.querySelectorAll('.crop-category').forEach(section=>section.classList.toggle('hidden',![...section.querySelectorAll('.crop-field')].some(field=>!field.classList.contains('hidden'))));document.getElementById('previewDate').textContent=dateInput.value||'—';document.getElementById('previewAssignee').textContent=assigneeInput.value.trim()||'—';document.getElementById('previewCount').textContent=count;document.getElementById('previewTotal').textContent=String(Math.round(total*1000000)/1000000);document.getElementById('previewItems').innerHTML=items.length?items.map(item=>`<li>${{safe(item)}}</li>`).join(''):'<li>No crop quantities entered.</li>';}}
+      inputs.forEach(input=>input.addEventListener('input',refresh));search.addEventListener('input',refresh);mode.addEventListener('change',refresh);dateInput.addEventListener('input',refresh);assigneeInput.addEventListener('input',refresh);refresh();form.addEventListener('submit',()=>{{const b=document.getElementById('saveButton');b.disabled=true;b.textContent='Saving…';}});
+    }})();
+    </script>'''
 
 
 def _filters() -> dict[str, str]:
     return {key: _text(request.args.get(key)) for key in (
         "date_from", "date_to", "production_date", "assignee", "crop",
-        "min_quantity", "max_quantity", "note",
+        "min_quantity", "max_quantity", "note", "sort", "page",
     )}
 
 
@@ -331,22 +438,37 @@ def _render_main(crops, values=None, errors=None, message="", bad=False):
         rows, summary = search_records(filters)
         load_error = ""
     except Exception as exc:
-        rows, summary = [], {"total_quantity": 0, "submission_count": 0, "crop_count": 0, "latest_date": None}
+        rows, summary = [], {"total_records": 0, "page": 1, "total_pages": 1}
         load_error = f"Could not load production records: {exc}"
+    try:
+        today = today_summary()
+    except Exception as exc:
+        today = {"total_quantity": 0, "submission_count": 0, "crop_count": 0,
+                 "latest_entry_time": None, "unit_pending": True}
+        load_error = load_error or f"Could not load today’s summary: {exc}"
     status = message or load_error
     status_html = f'<p class="status {"bad" if bad or load_error else ""}">{escape(status)}</p>' if status else ""
     crop_options = ''.join(f'<option value="{escape(c.crop_code)}" {"selected" if filters["crop"]==c.crop_code else ""}>{escape(c.crop_name)}</option>' for c in crops)
     result_rows = ''.join(
-        f'<tr><td>{escape(_date_text(row["production_date"]))}</td><td>{escape(_text(row["assignee"]))}</td><td>{escape(_quantity_text(row["total_quantity"]))}</td><td>{row["crop_count"]}</td><td>{escape(_text(row["note"]))}</td><td>{escape(_date_text(row["entry_date"]))}</td><td><a href="/veggies-production/{row["id"]}">View Details</a></td></tr>'
+        f'<tr><td>{escape(_date_text(row["production_date"]))}</td><td>{escape(_text(row["assignee"]))}</td><td>{escape(_quantity_text(row["total_quantity"]))}</td><td>{row["crop_count"]}</td><td>{escape(_text(row["note"]))}</td><td>{escape(_date_text(row["entry_date"]))}</td><td><a href="/veggies-production/{row["id"]}">View</a></td><td><a href="/veggies-production/{row["id"]}/edit">Edit</a></td></tr>'
         for row in rows
-    ) or '<tr><td colspan="7">No production records found.</td></tr>'
+    ) or '<tr><td colspan="8">No production records found.</td></tr>'
+    query_base = {key: value for key, value in filters.items() if value and key != "page"}
+    previous_link = ""
+    next_link = ""
+    if summary["page"] > 1:
+        previous_link = f'<a class="button secondary" href="/veggies-production?{urlencode({**query_base, "page": summary["page"] - 1})}">Previous</a>'
+    if summary["page"] < summary["total_pages"]:
+        next_link = f'<a class="button secondary" href="/veggies-production?{urlencode({**query_base, "page": summary["page"] + 1})}">Next</a>'
+    latest_time = today["latest_entry_time"].strftime("%H:%M:%S") if hasattr(today["latest_entry_time"], "strftime") else "—"
+    unit_note = '<small>Unit configuration pending</small>' if today.get("unit_pending") else ""
     return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veggies Production Basic</title><style>{BASE_STYLE}</style></head><body>
     <header><h1>Veggies Production Basic</h1></header><main>{status_html}
-    <div class="cards"><div class="card">Total Production Quantity<strong>{escape(_quantity_text(summary['total_quantity']))}</strong></div><div class="card">Production Submissions<strong>{summary['submission_count']}</strong></div><div class="card">Crops Produced<strong>{summary['crop_count']}</strong></div><div class="card">Latest Production Date<strong>{escape(_date_text(summary['latest_date']) or '—')}</strong></div></div>
-    <section><h2>New production submission</h2>{_entry_form(crops, values, errors, '/veggies-production')}</section>
+    <div class="cards"><div class="card">Today’s Total Production<strong>{escape(_quantity_text(today['total_quantity']))}</strong>{unit_note}</div><div class="card">Today’s Number of Submissions<strong>{today['submission_count']}</strong></div><div class="card">Today’s Number of Crops Produced<strong>{today['crop_count']}</strong></div><div class="card">Latest Entry Time<strong>{escape(latest_time)}</strong></div></div>
+    <section><div class="actions"><h2 style="margin-right:auto">New production submission</h2><a class="button secondary" href="/veggies-production/crops">Veggies Crop Master</a></div>{_entry_form(crops, values, errors, '/veggies-production')}</section>
     <section><h2>Search and review</h2><form method="get" action="/veggies-production"><div class="grid">
-      <label>Date From<input type="date" name="date_from" value="{escape(filters['date_from'])}"></label><label>Date To<input type="date" name="date_to" value="{escape(filters['date_to'])}"></label><label>Production Date<input type="date" name="production_date" value="{escape(filters['production_date'])}"></label><label>Assignee<input name="assignee" value="{escape(filters['assignee'])}"></label><label>Crop<select name="crop"><option value="">All crops</option>{crop_options}</select></label><label>Minimum Quantity<input type="number" step="any" min="0" name="min_quantity" value="{escape(filters['min_quantity'])}"></label><label>Maximum Quantity<input type="number" step="any" min="0" name="max_quantity" value="{escape(filters['max_quantity'])}"></label><label>Note search<input name="note" value="{escape(filters['note'])}"></label></div><div class="actions"><button type="submit">Search</button><a class="button secondary" href="/veggies-production">Clear</a></div></form>
-      <div class="table-wrap"><table><thead><tr><th>Production Date</th><th>Assignee</th><th>Total Production Quantity</th><th>Number of Crops</th><th>Note</th><th>Date of Entry</th><th>Action</th></tr></thead><tbody>{result_rows}</tbody></table></div></section>
+      <label>Date From<input type="date" name="date_from" value="{escape(filters['date_from'])}"></label><label>Date To<input type="date" name="date_to" value="{escape(filters['date_to'])}"></label><label>Production Date<input type="date" name="production_date" value="{escape(filters['production_date'])}"></label><label>Assignee<input name="assignee" value="{escape(filters['assignee'])}"></label><label>Crop<select name="crop"><option value="">All crops</option>{crop_options}</select></label><label>Minimum Quantity<input type="number" step="any" min="0" name="min_quantity" value="{escape(filters['min_quantity'])}"></label><label>Maximum Quantity<input type="number" step="any" min="0" name="max_quantity" value="{escape(filters['max_quantity'])}"></label><label>Note search<input name="note" value="{escape(filters['note'])}"></label><label>Sort<select name="sort"><option value="newest" {"selected" if filters['sort'] in ('','newest') else ''}>Newest first</option><option value="oldest" {"selected" if filters['sort']=='oldest' else ''}>Oldest first</option><option value="highest" {"selected" if filters['sort']=='highest' else ''}>Highest total quantity</option><option value="lowest" {"selected" if filters['sort']=='lowest' else ''}>Lowest total quantity</option></select></label></div><div class="actions"><button type="submit">Search</button><a class="button secondary" href="/veggies-production">Clear</a></div></form>
+      <p>{summary['total_records']} record(s)</p><div class="table-wrap"><table><thead><tr><th>Production Date</th><th>Assignee</th><th>Total Quantity</th><th>Number of Crops</th><th>Note</th><th>Date of Entry</th><th>View</th><th>Edit</th></tr></thead><tbody>{result_rows}</tbody></table></div><div class="pagination">{previous_link}<span>Page {summary['page']} of {summary['total_pages']}</span>{next_link}</div></section>
     </main></body></html>''', 200, {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
 
@@ -358,7 +480,13 @@ def register_routes(app) -> None:
         except Exception as exc:
             return _render_main([], message=f"Could not load crop master: {exc}", bad=True)
         if request.method == "GET":
-            message = "Production saved." if request.args.get("saved") else ""
+            message = ""
+            if request.args.get("saved"):
+                message = ("Veggies production saved successfully. "
+                           f"Production Date: {_text(request.args.get('saved_date'))}; "
+                           f"Assignee: {_text(request.args.get('saved_assignee')) or '—'}; "
+                           f"Number of Crops Saved: {_text(request.args.get('saved_crops'))}; "
+                           f"Total Quantity Saved: {_text(request.args.get('saved_total'))}.")
             return _render_main(crops, message=message)
         values = request.form.to_dict()
         cleaned, errors = validate_submission(values, crops)
@@ -370,7 +498,43 @@ def register_routes(app) -> None:
             return _render_main(crops, values=values, message=str(exc), bad=True)
         except Exception:
             return _render_main(crops, values=values, message="Production could not be saved. No data was committed.", bad=True)
-        return redirect(url_for("veggies_production_basic", saved="1", record=result["id"]), code=303)
+        total = sum((item["quantity"] for item in cleaned["items"]), Decimal("0"))
+        return redirect(url_for(
+            "veggies_production_basic", saved="1",
+            saved_date=cleaned["production_date"].isoformat(),
+            saved_assignee=cleaned["assignee"] or "",
+            saved_crops=len(cleaned["items"]), saved_total=_quantity_text(total),
+        ), code=303)
+
+    @app.get("/veggies-production/crops")
+    def veggies_crop_master_page():
+        try:
+            master_rows = list_crop_master()
+            error = ""
+        except Exception as exc:
+            master_rows = []
+            error = f"Could not load Veggies Crop Master: {exc}"
+        cards = []
+        for crop in master_rows:
+            category_options = ''.join(
+                f'<option value="{escape(category)}" {"selected" if crop["category"] == category else ""}>{escape(category)}</option>'
+                for category in CROP_CATEGORIES
+            )
+            checked = "checked" if crop["active"] else ""
+            cards.append(f'''<section><form method="post" action="/veggies-production/crops/{crop['id']}"><div class="grid"><label>Crop Name<input name="crop_name" value="{escape(crop['crop_name'])}" required></label><label>Category<select name="category">{category_options}</select></label><label>Default Unit<input name="default_unit" value="{escape(_text(crop['default_unit']))}" placeholder="Leave blank until verified"></label><label>Display Order<input type="number" name="display_order" value="{crop['display_order']}" required></label><label>Active<br><input style="width:auto;min-height:auto" type="checkbox" name="active" value="yes" {checked}> Show on new entry form</label></div><div class="actions"><button type="submit">Save Crop</button></div></form></section>''')
+        status = f'<p class="status bad">{escape(error)}</p>' if error else ""
+        saved = '<p class="status">Veggies Crop Master saved.</p>' if request.args.get("saved") else ""
+        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veggies Crop Master</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Crop Master</h1></header><main>{status}{saved}<p>Deactivate crops instead of deleting them. Historical production remains linked and visible.</p><div class="actions"><a class="button secondary" href="/veggies-production">Back to Production Entry</a></div>{''.join(cards)}</main></body></html>'''
+
+    @app.post("/veggies-production/crops/<int:crop_id>")
+    def veggies_crop_master_update(crop_id):
+        try:
+            update_crop_master(crop_id, request.form.to_dict())
+        except (ValueError, LookupError) as exc:
+            return f"Crop could not be saved: {escape(str(exc))}", 400
+        except Exception:
+            return "Crop could not be saved. No data was committed.", 500
+        return redirect("/veggies-production/crops?saved=1", code=303)
 
     @app.get("/veggies-production/<int:batch_id>")
     def veggies_production_detail(batch_id):
@@ -392,6 +556,7 @@ def register_routes(app) -> None:
                 crops.append(CropDefinition(
                     item["crop_code"], item["crop_name"], item["crop_name"],
                     crop_id=item["crop_id"], default_unit=item["unit"],
+                    category=item.get("category") or "Other",
                 ))
         original = {
             **record,
@@ -412,4 +577,5 @@ def register_routes(app) -> None:
                 return redirect(f"/veggies-production/{batch_id}", code=303)
             message = "Please correct the highlighted fields."
         original_text = f"Original: {_date_text(record['production_date'])}; {record.get('assignee') or 'no assignee'}; {len(record['items'])} crops."
-        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Edit Veggies Production</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Edit production record #{batch_id}</h2><div class="original">{escape(original_text)} The saved record is not changed until you confirm and submit.</div>{f'<p class="status bad">{escape(message)}</p>' if message else ''}{_entry_form(crops, values, errors, f'/veggies-production/{batch_id}/edit', edit=True)}{_error(errors,'confirm_changes')}<div class="actions"><a class="button secondary" href="/veggies-production/{batch_id}">Cancel</a></div></section></main></body></html>'''
+        timestamps = f"Original created time: {_text(record.get('created_at'))}. Last updated time: {_text(record.get('updated_at')) or '—'}."
+        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Edit Veggies Production</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Edit production record #{batch_id}</h2><div class="warning"><strong>You are editing an existing production record.</strong><br>{escape(timestamps)}</div><div class="original">{escape(original_text)} The saved record is not changed until you confirm and submit.</div>{f'<p class="status bad">{escape(message)}</p>' if message else ''}{_entry_form(crops, values, errors, f'/veggies-production/{batch_id}/edit', edit=True)}{_error(errors,'confirm_changes')}<div class="actions"><a class="button secondary" href="/veggies-production/{batch_id}">Cancel</a></div></section></main></body></html>'''

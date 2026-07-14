@@ -123,11 +123,7 @@ VALUES
     ('BRUSSELS_SPROUTS', 'Brussels Sprouts', 'brussels sprouts', NULL, TRUE, 300),
     ('BASIL', 'Basil', 'basil', NULL, TRUE, 310),
     ('FENNEL_BULB', 'Fennel Bulb', 'fennel bulb', NULL, TRUE, 320)
-ON CONFLICT (crop_code) DO UPDATE SET
-    crop_name = EXCLUDED.crop_name,
-    crop_name_normalized = EXCLUDED.crop_name_normalized,
-    display_order = EXCLUDED.display_order,
-    updated_at = NOW();
+ON CONFLICT (crop_code) DO NOTHING;
 
 INSERT INTO pipkgfu2wr9qxyy.veggies_crop_alias
     (crop_id, source_header, source_header_normalized)

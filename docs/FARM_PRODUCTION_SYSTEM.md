@@ -14,9 +14,10 @@ Read these files in order:
 
 1. `tools/veggies_production_portal.py` — browser routes, validation, HTML, search, details, corrections, and transactional database writes.
 2. `scripts/receive_payment_server.py` — existing localhost Flask/Waitress service that hosts the portal.
-3. `tools/veggies_production.py` — shared crop, quantity, and date helpers.
+3. `tools/veggies_production.py` — shared crop, quantity, date, and category helpers.
 4. `migrations/20260714_001_veggies_production_up.sql` — normalized base schema.
 5. `migrations/20260714_002_veggies_production_portal_up.sql` — browser submission token and corrected Romaine Lettuce name.
+6. `migrations/20260715_003_veggies_crop_categories_up.sql` — editable categories and safe crop-category seed mapping.
 
 ## Start command and URL
 
@@ -47,6 +48,17 @@ One submitted form creates:
 
 Crop inputs are generated from active `veggies_crop_master` records, so activating a new crop adds it to the browser form without changing page code.
 
+Crops are grouped using these editable categories:
+
+- Leafy Vegetables
+- Fruit Vegetables
+- Root and Bulb Vegetables
+- Herbs and Specialty Crops
+- Legumes and Others
+- Other
+
+The crop-name search filters fields immediately without reloading. **Entered Crops Only** hides blank fields for review and never changes stored data.
+
 Entry fields:
 
 - Production Date, required
@@ -70,6 +82,21 @@ Rules:
 
 The create workflow uses Post/Redirect/Get, and JavaScript disables the Save button after submission. The unique database token is the final double-submit safeguard.
 
+The live entry preview shows the production date, assignee, entered-crop count, total entered quantity, and only entered crop lines. Blank inputs are excluded; explicit zero remains visible. Server-side validation remains authoritative.
+
+After saving, the success message shows production date, assignee, crop count, and total saved quantity without exposing an internal record ID.
+
+## Today’s summary calculations
+
+The top cards use batches whose `created_at` falls on PostgreSQL `CURRENT_DATE`, following the existing local database timezone convention:
+
+- Today’s Total Production: sum of quantities saved today.
+- Today’s Number of Submissions: distinct batches saved today.
+- Today’s Number of Crops Produced: distinct crops saved today.
+- Latest Entry Time: latest batch `created_at` today.
+
+Totals never assume or append a unit. **Unit configuration pending** appears when item units are unknown or mixed.
+
 ## Search and summaries
 
 Filters:
@@ -82,21 +109,19 @@ Filters:
 - Minimum Quantity
 - Maximum Quantity
 - Note text
+- Sort: newest, oldest, highest total quantity, or lowest total quantity
 
-Results show production date, assignee, total quantity, crop count, note, entry date, and a View Details action.
+Results show production date, assignee, total quantity, crop count, note, entry date, View, and Edit.
 
-Summary cards reflect the selected result period:
-
-- Total Production Quantity
-- Number of Production Submissions
-- Number of Crops Produced
-- Latest Production Date
+Newest first is the default. Results use 25 records per page with Previous and Next controls.
 
 ## Detail and safe correction
 
 The detail screen shows batch metadata and each crop, quantity, unit, created time, and updated time.
 
 Editing requires an explicit Edit action. The page shows an original-value summary and requires a Save Changes confirmation checkbox. A transaction locks the batch, updates its editable fields, replaces its normalized items, and updates `updated_at`. A failure rolls back the entire correction.
+
+The edit warning shows original created time and last updated time. Crop fields use the same category grouping as new entry. If a crop is later deactivated, historical details and edits still display it.
 
 There is no delete action and no permanent-delete workflow.
 
@@ -106,7 +131,9 @@ All objects use the configured `TRANSACTION_SCHEMA`, currently `pipkgfu2wr9qxyy`
 
 ### `veggies_crop_master`
 
-Standard crop names, codes, nullable default units, active status, and display order. The portal reads this table dynamically.
+Standard crop names, codes, editable category, nullable default unit, active status, and display order. The portal reads this table dynamically.
+
+Open `http://127.0.0.1:5059/veggies-production/crops` to edit Crop Name, Category, Active, Default Unit, and Display Order. Deactivate crops instead of deleting them. Historical relationships use stable crop IDs, so corrected names remain linked.
 
 ### `veggies_production_batches`
 
@@ -192,6 +219,14 @@ SHA-256:
 
 The dump is private and ignored by Git. Validate with `pg_restore -l` and test restoration into a separate database.
 
+Pre-category-migration archive:
+
+`backups/veggies_usability_pre_migration_20260715_000000/automationdb_veggies_schema.dump`
+
+SHA-256:
+
+`5184965ad1424ca6b575701232b665ee23d9e6ebed0e0a52131b77a6b6f10052`
+
 ## Tests
 
 Focused portal and existing Receive Payment Basic tests:
@@ -220,9 +255,12 @@ No PostgreSQL production-table alteration is required.
 
 - **Portal does not open:** confirm `scripts/receive_payment_server.py` is running, then use the exact localhost URL above.
 - **Crop is missing:** confirm it exists and is active in `veggies_crop_master`, then refresh.
+- **Crop is in the wrong group:** open Veggies Crop Master, correct its category, save, and refresh.
+- **Long crop form:** use Search crop, or select Entered Crops Only after entering quantities.
 - **Invalid date:** use the browser date picker.
 - **No crop quantities:** enter at least one crop; zero is valid.
 - **Already saved:** refresh before creating another submission. The unique token prevented a duplicate.
 - **Save or edit failed:** no partial change was committed. Check PostgreSQL connectivity and the Receive Payment service logs, then retry from a fresh page.
 - **Search returns nothing:** clear filters, verify the date range, then add filters one at a time.
+- **More search results exist:** use Previous and Next below the table; each page contains 25 records.
 - **NocoDB table missing:** synchronize the schema after administrator login using the prepared metadata plan; do not manipulate metadata tables directly.

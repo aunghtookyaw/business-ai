@@ -9,13 +9,13 @@ from tools.veggies_production import CropDefinition
 
 
 CROPS = [
-    CropDefinition("zucchini", "Zucchini", "Zucchini", crop_id=1),
-    CropDefinition("rosemary", "Rosemary", "Rosemary", crop_id=2),
+    CropDefinition("zucchini", "Zucchini", "Zucchini", crop_id=1, category="Fruit Vegetables"),
+    CropDefinition("rosemary", "Rosemary", "Rosemary", crop_id=2, category="Herbs and Specialty Crops"),
 ]
 
 
 def empty_search(filters):
-    return [], {"total_quantity": Decimal("0"), "submission_count": 0, "crop_count": 0, "latest_date": None}
+    return [], {"total_records": 0, "page": 1, "total_pages": 1}
 
 
 def record():
@@ -32,6 +32,7 @@ def record():
             "crop_id": 1,
             "crop_code": "zucchini",
             "crop_name": "Zucchini",
+            "category": "Fruit Vegetables",
             "quantity": Decimal("2.5"),
             "unit": None,
             "created_at": datetime(2026, 7, 14, 8, 0),
@@ -56,6 +57,12 @@ class FailingConnection:
 class VeggiesProductionPortalTest(unittest.TestCase):
     def setUp(self):
         self.client = receive_payment_server.app.test_client()
+        self.today_patcher = patch.object(portal, "today_summary", return_value={
+            "total_quantity": Decimal("0"), "submission_count": 0, "crop_count": 0,
+            "latest_entry_time": None, "unit_pending": True,
+        })
+        self.today_patcher.start()
+        self.addCleanup(self.today_patcher.stop)
 
     def test_page_loads_and_crop_fields_come_from_master(self):
         with patch.object(portal, "portal_crops", return_value=CROPS), patch.object(portal, "search_records", side_effect=empty_search):
@@ -66,6 +73,8 @@ class VeggiesProductionPortalTest(unittest.TestCase):
         self.assertIn('name="crop_zucchini"', html)
         self.assertIn('name="crop_rosemary"', html)
         self.assertNotIn("Farm Area", html)
+        self.assertIn("Fruit Vegetables", html)
+        self.assertIn("Herbs and Specialty Crops", html)
 
     def test_valid_submission_accepts_decimal_blank_and_explicit_zero(self):
         captured = {}
@@ -138,6 +147,87 @@ class VeggiesProductionPortalTest(unittest.TestCase):
         self.assertEqual(303, confirmed.status_code)
         self.assertEqual(7, updates[0][0])
         self.assertEqual(Decimal("3"), updates[0][1]["items"][0]["quantity"])
+
+    def test_category_migration_maps_without_inserting_duplicate_crops(self):
+        from pathlib import Path
+        migration = (Path(__file__).resolve().parents[1] / "migrations" / "20260715_003_veggies_crop_categories_up.sql").read_text()
+        self.assertIn("ADD COLUMN IF NOT EXISTS category", migration)
+        self.assertIn("WHEN 'CHERRY_TOMATO' THEN 'Fruit Vegetables'", migration)
+        self.assertIn("ELSE 'Other'", migration)
+        self.assertIn("WHERE category IS NULL", migration)
+        self.assertNotIn("INSERT INTO pipkgfu2wr9qxyy.veggies_crop_master", migration)
+        from tools.veggies_production import default_crop_definitions
+        codes = [crop.crop_code for crop in default_crop_definitions()]
+        self.assertEqual(len(codes), len(set(codes)))
+
+    def test_crop_search_entered_only_and_live_preview_are_browser_features(self):
+        with patch.object(portal, "portal_crops", return_value=CROPS), patch.object(portal, "search_records", side_effect=empty_search):
+            html = self.client.get("/veggies-production").get_data(as_text=True)
+        self.assertIn('id="cropSearch"', html)
+        self.assertIn("Entered Crops Only", html)
+        self.assertIn('id="previewItems"', html)
+        self.assertIn("input.value.trim()!==''", html)
+        self.assertIn("items.push", html)
+
+    def test_today_summary_cards_show_counts_time_and_pending_unit_note(self):
+        self.today_patcher.stop()
+        with patch.object(portal, "today_summary", return_value={
+            "total_quantity": Decimal("245.5"), "submission_count": 3, "crop_count": 7,
+            "latest_entry_time": datetime(2026, 7, 15, 9, 45, 2), "unit_pending": True,
+        }), patch.object(portal, "portal_crops", return_value=CROPS), patch.object(portal, "search_records", side_effect=empty_search):
+            html = self.client.get("/veggies-production").get_data(as_text=True)
+        self.today_patcher.start()
+        self.assertIn("Today’s Total Production", html)
+        self.assertIn("245.5", html)
+        self.assertIn("Today’s Number of Submissions", html)
+        self.assertIn("Unit configuration pending", html)
+        self.assertIn("09:45:02", html)
+
+    def test_success_summary_contains_saved_business_values(self):
+        with patch.object(portal, "portal_crops", return_value=CROPS), patch.object(portal, "search_records", side_effect=empty_search):
+            response = self.client.get("/veggies-production?saved=1&saved_date=2026-07-15&saved_assignee=Aye&saved_crops=2&saved_total=3.5")
+        html = response.get_data(as_text=True)
+        self.assertIn("Veggies production saved successfully", html)
+        self.assertIn("Number of Crops Saved: 2", html)
+        self.assertIn("Total Quantity Saved: 3.5", html)
+
+    def test_search_sorting_and_pagination_controls(self):
+        row = {"id": 1, "production_date": date(2026, 7, 15), "assignee": "Aye",
+               "total_quantity": Decimal("4"), "crop_count": 1, "note": "", "entry_date": date(2026, 7, 15)}
+        seen = []
+        def fake_search(filters):
+            seen.append(filters)
+            return [row], {"total_records": 26, "page": int(filters.get("page") or 1), "total_pages": 2}
+        with patch.object(portal, "portal_crops", return_value=CROPS), patch.object(portal, "search_records", side_effect=fake_search):
+            html = self.client.get("/veggies-production?sort=highest&page=1").get_data(as_text=True)
+        self.assertEqual("highest", seen[0]["sort"])
+        self.assertIn("Highest total quantity", html)
+        self.assertIn(">Next</a>", html)
+        self.assertIn(">Edit</a>", html)
+
+    def test_inactive_historical_crop_remains_on_edit_page(self):
+        historical = record()
+        historical["items"].append({
+            "crop_id": 99, "crop_code": "inactive_crop", "crop_name": "Inactive Crop",
+            "category": "Other", "quantity": Decimal("1"), "unit": None,
+            "created_at": datetime(2026, 7, 14, 8), "updated_at": datetime(2026, 7, 14, 8),
+        })
+        with patch.object(portal, "portal_crops", return_value=CROPS.copy()), patch.object(portal, "get_record", return_value=historical):
+            html = self.client.get("/veggies-production/7/edit").get_data(as_text=True)
+        self.assertIn("Inactive Crop", html)
+        self.assertIn("You are editing an existing production record", html)
+        self.assertIn("Original created time", html)
+
+    def test_crop_master_supports_category_active_unit_and_order(self):
+        master = [{"id": 1, "crop_code": "zucchini", "crop_name": "Zucchini",
+                   "category": "Fruit Vegetables", "active": False, "default_unit": None,
+                   "display_order": 10, "created_at": None, "updated_at": None}]
+        with patch.object(portal, "list_crop_master", return_value=master):
+            html = self.client.get("/veggies-production/crops").get_data(as_text=True)
+        self.assertIn("Veggies Crop Master", html)
+        self.assertIn("Fruit Vegetables", html)
+        self.assertIn("Show on new entry form", html)
+        self.assertNotIn('value="yes" checked', html)
 
     def test_migrations_never_modify_legacy_farm_production(self):
         from pathlib import Path

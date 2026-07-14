@@ -54,6 +54,34 @@ STANDARD_CROPS = [
     ("FENNEL_BULB", "Fennel Bulb", "Funnel Bulb"),
 ]
 
+CROP_CATEGORIES = (
+    "Leafy Vegetables",
+    "Fruit Vegetables",
+    "Root and Bulb Vegetables",
+    "Herbs and Specialty Crops",
+    "Legumes and Others",
+    "Other",
+)
+
+CROP_CATEGORY_BY_CODE = {
+    "ROMAINE": "Leafy Vegetables", "ICEBERG_LETTUCE": "Leafy Vegetables",
+    "GREEN_OAK_LETTUCE": "Leafy Vegetables", "RED_OAK_LETTUCE": "Leafy Vegetables",
+    "GREEN_LOLLO_LETTUCE": "Leafy Vegetables", "RED_LOLLO_LETTUCE": "Leafy Vegetables",
+    "SWISS_CHARD": "Leafy Vegetables", "ROCKET": "Leafy Vegetables", "KALE": "Leafy Vegetables",
+    "ZUCCHINI": "Fruit Vegetables", "CHERRY_TOMATO": "Fruit Vegetables",
+    "LONG_CHILI": "Fruit Vegetables", "BELL_PEPPER": "Fruit Vegetables",
+    "JAPANESE_CUCUMBER": "Fruit Vegetables", "LONG_SWEET_PEPPER": "Fruit Vegetables",
+    "FANCY_TOMATO": "Fruit Vegetables", "JAPANESE_PUMPKIN": "Fruit Vegetables",
+    "DAIKON": "Root and Bulb Vegetables", "LEEK": "Root and Bulb Vegetables",
+    "RED_CABBAGE": "Root and Bulb Vegetables", "BEETROOT": "Root and Bulb Vegetables",
+    "CARROT": "Root and Bulb Vegetables", "RED_RADISH": "Root and Bulb Vegetables",
+    "FENNEL_BULB": "Root and Bulb Vegetables",
+    "ROSEMARY": "Herbs and Specialty Crops", "PARSLEY": "Herbs and Specialty Crops",
+    "THYME": "Herbs and Specialty Crops", "GREEN_PERILLA": "Herbs and Specialty Crops",
+    "BASIL": "Herbs and Specialty Crops", "ASPARAGUS": "Herbs and Specialty Crops",
+    "EDAMAME": "Legumes and Others", "BRUSSELS_SPROUTS": "Legumes and Others",
+}
+
 ADMIN_HEADERS = {
     "date": "production_date",
     "production date": "production_date",
@@ -128,6 +156,7 @@ class CropDefinition:
     source_header: str
     crop_id: int | None = None
     default_unit: str | None = None
+    category: str = "Other"
 
 
 @dataclass(frozen=True)
@@ -215,7 +244,10 @@ class WorkbookPreview:
 
 
 def default_crop_definitions() -> list[CropDefinition]:
-    return [CropDefinition(code, name, source) for code, name, source in STANDARD_CROPS]
+    return [
+        CropDefinition(code, name, source, category=CROP_CATEGORY_BY_CODE.get(code, "Other"))
+        for code, name, source in STANDARD_CROPS
+    ]
 
 
 def load_crop_definitions(connection=None) -> list[CropDefinition]:
@@ -231,7 +263,8 @@ def load_crop_definitions(connection=None) -> list[CropDefinition]:
             cursor.execute(
                 f"""
                 SELECT crop.id AS crop_id, crop.crop_code, crop.crop_name,
-                       crop.default_unit, COALESCE(alias.source_header, crop.crop_name) AS source_header
+                       crop.default_unit, crop.category,
+                       COALESCE(alias.source_header, crop.crop_name) AS source_header
                 FROM {_ref('veggies_crop_master')} crop
                 LEFT JOIN {_ref('veggies_crop_alias')} alias ON alias.crop_id = crop.id
                 WHERE crop.active = TRUE
