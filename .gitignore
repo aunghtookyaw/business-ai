@@ -17,6 +17,7 @@ nocodb-data/
 
 # Database exports can contain private business data and credentials.
 *.sql
+*.dump
 
 # Local editor and temporary files.
 .vscode/

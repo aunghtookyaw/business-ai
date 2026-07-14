@@ -1,0 +1,49 @@
+{
+  "base": "AI Business OS",
+  "schema": "pipkgfu2wr9qxyy",
+  "legacy_objects_must_remain_unchanged": [
+    "farm_production",
+    "farm_transection"
+  ],
+  "visible_tables": [
+    {
+      "source_name": "veggies_production_batches",
+      "title": "Veggies Production Entry",
+      "show_in_menu": true,
+      "primary_display_column": "production_date",
+      "default_fields": [
+        "production_date",
+        "assignee",
+        "note",
+        "ai_note",
+        "entry_date",
+        "veggies_production_items"
+      ]
+    },
+    {
+      "source_name": "veggies_crop_master",
+      "title": "Veggies Crop Master",
+      "show_in_menu": true,
+      "primary_display_column": "crop_name"
+    }
+  ],
+  "hidden_tables": [
+    "veggies_production_items",
+    "veggies_production_imports",
+    "veggies_crop_alias",
+    "veggies_production_daily_summary",
+    "veggies_production_crop_summary"
+  ],
+  "relationships": [
+    {
+      "from": "veggies_production_items.production_batch_id",
+      "to": "veggies_production_batches.id",
+      "type": "belongs_to"
+    },
+    {
+      "from": "veggies_production_items.crop_id",
+      "to": "veggies_crop_master.id",
+      "type": "belongs_to"
+    }
+  ]
+}
