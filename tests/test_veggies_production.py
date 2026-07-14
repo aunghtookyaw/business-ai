@@ -188,6 +188,8 @@ class VeggiesProductionTest(unittest.TestCase):
         ).read_text()
         self.assertIn("veggies_production_batches", migration)
         self.assertIn("veggies_production_items", migration)
+        self.assertIn("public.veggies_crop_master", migration)
+        self.assertNotIn("pipkgfu2wr9qxyy.veggies_", migration)
         self.assertNotIn("farm_transection", migration)
 
     def test_template_generation_has_required_structure_and_validation(self):

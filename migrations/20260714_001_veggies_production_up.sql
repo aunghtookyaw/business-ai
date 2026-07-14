@@ -1,6 +1,6 @@
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_crop_master (
+CREATE TABLE IF NOT EXISTS public.veggies_crop_master (
     id BIGSERIAL PRIMARY KEY,
     crop_code TEXT NOT NULL UNIQUE,
     crop_name TEXT NOT NULL UNIQUE,
@@ -12,15 +12,15 @@ CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_crop_master (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_crop_alias (
+CREATE TABLE IF NOT EXISTS public.veggies_crop_alias (
     id BIGSERIAL PRIMARY KEY,
-    crop_id BIGINT NOT NULL REFERENCES pipkgfu2wr9qxyy.veggies_crop_master(id) ON DELETE CASCADE,
+    crop_id BIGINT NOT NULL REFERENCES public.veggies_crop_master(id) ON DELETE CASCADE,
     source_header TEXT NOT NULL,
     source_header_normalized TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_production_imports (
+CREATE TABLE IF NOT EXISTS public.veggies_production_imports (
     id BIGSERIAL PRIMARY KEY,
     import_type TEXT NOT NULL DEFAULT 'veggies_production',
     filename TEXT NOT NULL,
@@ -42,9 +42,9 @@ CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_production_imports (
 );
 
 CREATE INDEX IF NOT EXISTS veggies_production_imports_file_hash_idx
-    ON pipkgfu2wr9qxyy.veggies_production_imports (file_hash, status);
+    ON public.veggies_production_imports (file_hash, status);
 
-CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_production_batches (
+CREATE TABLE IF NOT EXISTS public.veggies_production_batches (
     id BIGSERIAL PRIMARY KEY,
     production_date DATE NOT NULL,
     assignee TEXT,
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_production_batches (
     entry_date DATE,
     source_file TEXT,
     source_workbook TEXT,
-    import_id BIGINT REFERENCES pipkgfu2wr9qxyy.veggies_production_imports(id) ON DELETE RESTRICT,
+    import_id BIGINT REFERENCES public.veggies_production_imports(id) ON DELETE RESTRICT,
     source_row_number INTEGER,
     source_row_hash CHAR(64),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -65,16 +65,16 @@ CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_production_batches (
 );
 
 CREATE INDEX IF NOT EXISTS veggies_production_batches_date_idx
-    ON pipkgfu2wr9qxyy.veggies_production_batches (production_date);
+    ON public.veggies_production_batches (production_date);
 
-ALTER TABLE pipkgfu2wr9qxyy.veggies_production_batches
+ALTER TABLE public.veggies_production_batches
     ALTER COLUMN source_row_hash DROP NOT NULL;
 
-CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_production_items (
+CREATE TABLE IF NOT EXISTS public.veggies_production_items (
     id BIGSERIAL PRIMARY KEY,
     production_batch_id BIGINT NOT NULL
-      REFERENCES pipkgfu2wr9qxyy.veggies_production_batches(id) ON DELETE CASCADE,
-    crop_id BIGINT NOT NULL REFERENCES pipkgfu2wr9qxyy.veggies_crop_master(id) ON DELETE RESTRICT,
+      REFERENCES public.veggies_production_batches(id) ON DELETE CASCADE,
+    crop_id BIGINT NOT NULL REFERENCES public.veggies_crop_master(id) ON DELETE RESTRICT,
     quantity NUMERIC(18,4) NOT NULL,
     unit TEXT,
     quality_grade TEXT,
@@ -86,9 +86,9 @@ CREATE TABLE IF NOT EXISTS pipkgfu2wr9qxyy.veggies_production_items (
 );
 
 CREATE INDEX IF NOT EXISTS veggies_production_items_crop_idx
-    ON pipkgfu2wr9qxyy.veggies_production_items (crop_id);
+    ON public.veggies_production_items (crop_id);
 
-INSERT INTO pipkgfu2wr9qxyy.veggies_crop_master
+INSERT INTO public.veggies_crop_master
     (crop_code, crop_name, crop_name_normalized, default_unit, active, display_order)
 VALUES
     ('ZUCCHINI', 'Zucchini', 'zucchini', NULL, TRUE, 10),
@@ -125,7 +125,7 @@ VALUES
     ('FENNEL_BULB', 'Fennel Bulb', 'fennel bulb', NULL, TRUE, 320)
 ON CONFLICT (crop_code) DO NOTHING;
 
-INSERT INTO pipkgfu2wr9qxyy.veggies_crop_alias
+INSERT INTO public.veggies_crop_alias
     (crop_id, source_header, source_header_normalized)
 SELECT crop.id, aliases.source_header, aliases.source_header_normalized
 FROM (VALUES
@@ -162,32 +162,32 @@ FROM (VALUES
     ('BASIL', 'Basil', 'basil'),
     ('FENNEL_BULB', 'Funnel Bulb', 'funnel bulb')
 ) AS aliases(crop_code, source_header, source_header_normalized)
-JOIN pipkgfu2wr9qxyy.veggies_crop_master crop USING (crop_code)
+JOIN public.veggies_crop_master crop USING (crop_code)
 ON CONFLICT (source_header_normalized) DO UPDATE SET
     crop_id = EXCLUDED.crop_id,
     source_header = EXCLUDED.source_header;
 
-CREATE OR REPLACE VIEW pipkgfu2wr9qxyy.veggies_production_daily_summary AS
+CREATE OR REPLACE VIEW public.veggies_production_daily_summary AS
 SELECT
     batch.production_date,
     SUM(item.quantity) AS total_quantity,
     COUNT(DISTINCT item.crop_id) AS number_of_crops,
     batch.assignee
-FROM pipkgfu2wr9qxyy.veggies_production_batches batch
-JOIN pipkgfu2wr9qxyy.veggies_production_items item
+FROM public.veggies_production_batches batch
+JOIN public.veggies_production_items item
   ON item.production_batch_id = batch.id
 GROUP BY batch.production_date, batch.assignee;
 
-CREATE OR REPLACE VIEW pipkgfu2wr9qxyy.veggies_production_crop_summary AS
+CREATE OR REPLACE VIEW public.veggies_production_crop_summary AS
 SELECT
     crop.crop_name,
     SUM(item.quantity) AS total_quantity,
     COUNT(DISTINCT batch.production_date) AS number_of_production_days,
     MAX(batch.production_date) AS latest_production_date
-FROM pipkgfu2wr9qxyy.veggies_production_items item
-JOIN pipkgfu2wr9qxyy.veggies_production_batches batch
+FROM public.veggies_production_items item
+JOIN public.veggies_production_batches batch
   ON batch.id = item.production_batch_id
-JOIN pipkgfu2wr9qxyy.veggies_crop_master crop
+JOIN public.veggies_crop_master crop
   ON crop.id = item.crop_id
 GROUP BY crop.id, crop.crop_name;
 

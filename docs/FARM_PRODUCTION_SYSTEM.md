@@ -127,7 +127,9 @@ There is no delete action and no permanent-delete workflow.
 
 ## Database architecture
 
-All objects use the configured `TRANSACTION_SCHEMA`, currently `pipkgfu2wr9qxyy`.
+All Veggies business tables live in the PostgreSQL `public` schema. Other existing Business OS tables continue using their established schemas.
+
+The five tables were moved in place from the original generated NocoDB schema with PostgreSQL `ALTER TABLE ... SET SCHEMA`. This preserved their object identities, data, owned sequences, indexes, constraints, foreign keys, defaults, and permissions. They were not copied or recreated.
 
 ### `veggies_crop_master`
 
@@ -175,6 +177,8 @@ Offline configuration artifacts:
 - `nocodb/veggies_production_metadata.json`
 - `nocodb/veggies_production_verify.sql`
 - `scripts/configure_nocodb_veggies.py`
+
+The current NocoDB base source is restricted to the original generated schema. After the tables were moved to `public`, PostgreSQL catalog discovery confirmed that the NocoDB database role can see them, but the base must add or synchronize a `public` schema source through the authenticated NocoDB admin UI/API. Do not change the existing generated-schema source in place unless all of its current models have been reviewed.
 
 Never edit NocoDB’s PostgreSQL metadata tables directly. Never change the legacy `farm_production` object.
 
@@ -226,6 +230,14 @@ Pre-category-migration archive:
 SHA-256:
 
 `5184965ad1424ca6b575701232b665ee23d9e6ebed0e0a52131b77a6b6f10052`
+
+Pre-public-schema-move full database archive:
+
+`backups/veggies_public_schema_move_20260715_001800/automationdb_pre_public_move.dump`
+
+SHA-256:
+
+`3ecd5040d4a6b46588e16d993987c5bef6fc0cf355964f372386c3bdad769b11`
 
 ## Tests
 

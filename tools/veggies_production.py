@@ -15,7 +15,6 @@ import psycopg2.extras
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import WINDOWS_EPOCH, from_excel
 
-import config
 from tools.formula_engine import _connect
 
 
@@ -100,7 +99,8 @@ def normalize_header(value: Any) -> str:
 
 
 def _schema() -> str:
-    return getattr(config, "TRANSACTION_SCHEMA", "pipkgfu2wr9qxyy")
+    """Veggies tables are Business OS public-schema objects."""
+    return "public"
 
 
 def _ref(name: str) -> str:

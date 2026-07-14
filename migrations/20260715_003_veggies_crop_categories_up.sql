@@ -1,7 +1,7 @@
-ALTER TABLE pipkgfu2wr9qxyy.veggies_crop_master
+ALTER TABLE public.veggies_crop_master
   ADD COLUMN IF NOT EXISTS category TEXT;
 
-UPDATE pipkgfu2wr9qxyy.veggies_crop_master
+UPDATE public.veggies_crop_master
 SET category = CASE crop_code
   WHEN 'ROMAINE' THEN 'Leafy Vegetables'
   WHEN 'ICEBERG_LETTUCE' THEN 'Leafy Vegetables'
@@ -40,14 +40,14 @@ END,
 updated_at = NOW()
 WHERE category IS NULL;
 
-ALTER TABLE pipkgfu2wr9qxyy.veggies_crop_master
+ALTER TABLE public.veggies_crop_master
   ALTER COLUMN category SET DEFAULT 'Other',
   ALTER COLUMN category SET NOT NULL;
 
-ALTER TABLE pipkgfu2wr9qxyy.veggies_crop_master
+ALTER TABLE public.veggies_crop_master
   DROP CONSTRAINT IF EXISTS veggies_crop_master_category_check;
 
-ALTER TABLE pipkgfu2wr9qxyy.veggies_crop_master
+ALTER TABLE public.veggies_crop_master
   ADD CONSTRAINT veggies_crop_master_category_check CHECK (category IN (
     'Leafy Vegetables',
     'Fruit Vegetables',

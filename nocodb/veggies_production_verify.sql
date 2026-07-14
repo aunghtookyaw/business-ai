@@ -3,7 +3,7 @@
 
 SELECT table_name
 FROM information_schema.tables
-WHERE table_schema = 'pipkgfu2wr9qxyy'
+WHERE table_schema = 'public'
   AND table_name IN (
     'veggies_crop_master',
     'veggies_crop_alias',
@@ -21,6 +21,6 @@ JOIN information_schema.key_column_usage kcu
 JOIN information_schema.constraint_column_usage ccu
   ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
 WHERE tc.constraint_type = 'FOREIGN KEY'
-  AND tc.table_schema = 'pipkgfu2wr9qxyy'
+  AND tc.table_schema = 'public'
   AND tc.table_name = 'veggies_production_items'
 ORDER BY kcu.column_name;

@@ -14,7 +14,6 @@ from urllib.parse import urlencode
 import psycopg2.extras
 from flask import redirect, request, url_for
 
-import config
 from tools import formula_engine
 from tools.veggies_production import (
     CROP_CATEGORIES,
@@ -29,8 +28,7 @@ PAGE_SIZE = 25
 
 
 def _ref(table: str) -> str:
-    schema = config.TRANSACTION_SCHEMA.replace('"', '""')
-    return f'"{schema}"."{table}"'
+    return f'"public"."{table}"'
 
 
 def _connect():

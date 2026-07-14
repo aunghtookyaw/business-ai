@@ -1,6 +1,6 @@
 {
   "base": "AI Business OS",
-  "schema": "pipkgfu2wr9qxyy",
+  "schema": "public",
   "legacy_objects_must_remain_unchanged": [
     "farm_production",
     "farm_transection"
