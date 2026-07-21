@@ -37,6 +37,10 @@ No database migration or new business table is required.
 |---|---|
 | `/` | Redirects to Business OS |
 | `/business-os` | Local module dashboard |
+| `/business-os/farm-voucher` | Integrated Farm Voucher |
+| `/business-os/sotephwar-voucher` | Integrated SotePhwar Voucher |
+| `/business-os/general-transaction` | General non-voucher Income and Expense workflow |
+| `/business-os/sotephwar-inventory` | Integrated SotePhwar Inventory operations |
 | `/business-os/receive-payment` | Integrated Receive Payment |
 | `/business-os/veggies-production` | Integrated production entry and search |
 | `/business-os/veggies-production/crops` | Integrated crop master |

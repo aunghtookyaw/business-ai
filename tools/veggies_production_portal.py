@@ -48,6 +48,13 @@ def _date_text(value: Any) -> str:
 def _quantity_text(value: Any) -> str:
     if value is None or (isinstance(value, str) and not value.strip()):
         return ""
+    return format(Decimal(str(value)), ".1f")
+
+
+def _quantity_input_text(value: Any) -> str:
+    """Keep stored precision in editable fields while display values use one decimal."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return ""
     return format(Decimal(str(value)), "f")
 
 
@@ -63,6 +70,24 @@ def portal_crops() -> list[CropDefinition]:
     return list(unique.values())
 
 
+def portal_farm_areas(connection=None) -> list[dict[str, Any]]:
+    """Load active farm areas dynamically for production entry and filtering."""
+    owns_connection = connection is None
+    connection = connection or _connect()
+    try:
+        with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(f"""
+                SELECT id, area_code, area_name
+                FROM {_ref('veggies_farm_area_master')}
+                WHERE active = TRUE
+                ORDER BY display_order, area_name
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    finally:
+        if owns_connection:
+            connection.close()
+
+
 def grouped_crops(crops: list[CropDefinition]) -> OrderedDict[str, list[CropDefinition]]:
     """Group crops in the stable staff-facing category order."""
     groups = OrderedDict((category, []) for category in CROP_CATEGORIES)
@@ -71,9 +96,17 @@ def grouped_crops(crops: list[CropDefinition]) -> OrderedDict[str, list[CropDefi
     return OrderedDict((category, rows) for category, rows in groups.items() if rows)
 
 
-def validate_submission(values: dict[str, Any], crops: list[CropDefinition]) -> tuple[dict[str, Any], dict[str, str]]:
+def validate_submission(values: dict[str, Any], crops: list[CropDefinition],
+                        farm_areas: list[dict[str, Any]] | None = None) -> tuple[dict[str, Any], dict[str, str]]:
     """Validate a browser submission while preserving blank versus zero."""
     errors: dict[str, str] = {}
+    valid_area_ids = {int(area["id"]) for area in (farm_areas or [])}
+    try:
+        farm_area_id = int(values.get("farm_area_id") or 0)
+    except (TypeError, ValueError):
+        farm_area_id = 0
+    if not farm_area_id or farm_area_id not in valid_area_ids:
+        errors["farm_area_id"] = "Select a valid Farm Area."
     try:
         production_date = parse_production_date(values.get("production_date"))
         if production_date is None:
@@ -110,6 +143,7 @@ def validate_submission(values: dict[str, Any], crops: list[CropDefinition]) -> 
 
     return {
         "production_date": production_date,
+        "farm_area_id": farm_area_id or None,
         "assignee": _text(values.get("assignee")) or None,
         "note": _text(values.get("note")) or None,
         "ai_note": _text(values.get("ai_note")) or None,
@@ -128,13 +162,13 @@ def save_submission(values: dict[str, Any], connection=None) -> dict[str, Any]:
             cursor.execute(
                 f"""
                 INSERT INTO {_ref('veggies_production_batches')}
-                  (production_date, assignee, note, ai_note, entry_date,
+                  (production_date, farm_area_id, assignee, note, ai_note, entry_date,
                    submission_token, created_by, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON CONFLICT (submission_token) WHERE submission_token IS NOT NULL DO NOTHING
                 RETURNING id
                 """,
-                (values["production_date"], values["assignee"], values["note"],
+                (values["production_date"], values["farm_area_id"], values["assignee"], values["note"],
                  values["ai_note"], values["entry_date"], values["submission_token"],
                  "Veggies Production Basic"),
             )
@@ -176,11 +210,11 @@ def update_submission(batch_id: int, values: dict[str, Any], connection=None) ->
             cursor.execute(
                 f"""
                 UPDATE {_ref('veggies_production_batches')}
-                SET production_date=%s, assignee=%s, note=%s, ai_note=%s,
+                SET production_date=%s, farm_area_id=%s, assignee=%s, note=%s, ai_note=%s,
                     entry_date=%s, updated_at=NOW()
                 WHERE id=%s
                 """,
-                (values["production_date"], values["assignee"], values["note"],
+                (values["production_date"], values["farm_area_id"], values["assignee"], values["note"],
                  values["ai_note"], values["entry_date"], batch_id),
             )
             cursor.execute(
@@ -206,6 +240,37 @@ def update_submission(batch_id: int, values: dict[str, Any], connection=None) ->
             connection.close()
 
 
+def delete_submission(batch_id: int, confirmation: Any, reason: Any, connection=None) -> dict[str, Any]:
+    """Delete one manually entered production batch and its items atomically."""
+    if _text(confirmation) != str(int(batch_id)):
+        raise ValueError("Production record ID confirmation does not match")
+    reason = _text(reason)
+    if not reason:
+        raise ValueError("Deletion reason is required")
+    owns_connection = connection is None
+    connection = connection or _connect()
+    try:
+        with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(f"SELECT * FROM {_ref('veggies_production_batches')} WHERE id=%s FOR UPDATE", (int(batch_id),))
+            batch = cursor.fetchone()
+            if not batch:
+                raise LookupError("Production record not found.")
+            if batch.get("import_id") is not None:
+                raise ValueError("Imported production records cannot be deleted here")
+            cursor.execute(f"DELETE FROM {_ref('veggies_production_items')} WHERE production_batch_id=%s", (int(batch_id),))
+            cursor.execute(f"DELETE FROM {_ref('veggies_production_batches')} WHERE id=%s RETURNING id", (int(batch_id),))
+            if not cursor.fetchone():
+                raise RuntimeError("Production record changed concurrently; refresh and retry")
+        connection.commit()
+        return {"deleted": True, "batch_id": int(batch_id), "reason": reason}
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        if owns_connection:
+            connection.close()
+
+
 def search_records(filters: dict[str, str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     conditions = ["TRUE"]
     params: list[Any] = []
@@ -221,6 +286,9 @@ def search_records(filters: dict[str, str]) -> tuple[list[dict[str, Any]], dict[
     if filters.get("assignee"):
         conditions.append("COALESCE(batch.assignee, '') ILIKE %s")
         params.append(f"%{filters['assignee']}%")
+    if filters.get("farm_area_id"):
+        conditions.append("batch.farm_area_id = %s")
+        params.append(filters["farm_area_id"])
     if filters.get("crop"):
         conditions.append("crop.crop_code = %s")
         params.append(filters["crop"])
@@ -245,14 +313,18 @@ def search_records(filters: dict[str, str]) -> tuple[list[dict[str, Any]], dict[
     except ValueError:
         page = 1
     base_sql = f"""
-      SELECT batch.id, batch.production_date, batch.assignee, batch.note, batch.entry_date,
+      SELECT batch.id, batch.production_date, batch.farm_area_id, area.area_name AS farm_area,
+             batch.assignee, batch.note, batch.entry_date,
              SUM(item.quantity) AS total_quantity, COUNT(DISTINCT item.crop_id) AS crop_count,
              batch.created_at, batch.updated_at
       FROM {_ref('veggies_production_batches')} batch
       JOIN {_ref('veggies_production_items')} item ON item.production_batch_id = batch.id
       JOIN {_ref('veggies_crop_master')} crop ON crop.id = item.crop_id
+      JOIN {_ref('veggies_farm_area_master')} area ON area.id = batch.farm_area_id
       WHERE {where_sql}
-      GROUP BY batch.id
+      GROUP BY batch.id, batch.production_date, batch.farm_area_id, area.area_name,
+               batch.assignee, batch.note, batch.entry_date,
+               batch.created_at, batch.updated_at
     """
     connection = _connect()
     try:
@@ -348,7 +420,10 @@ def get_record(batch_id: int) -> dict[str, Any] | None:
     try:
         with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
             cursor.execute(
-                f"SELECT * FROM {_ref('veggies_production_batches')} WHERE id=%s",
+                f"""SELECT batch.*, area.area_name AS farm_area
+                    FROM {_ref('veggies_production_batches')} batch
+                    JOIN {_ref('veggies_farm_area_master')} area ON area.id=batch.farm_area_id
+                    WHERE batch.id=%s""",
                 (batch_id,),
             )
             batch = cursor.fetchone()
@@ -382,7 +457,7 @@ def _error(errors: dict[str, str], field: str) -> str:
     return f'<div class="error">{escape(errors[field])}</div>' if field in errors else ""
 
 
-def _entry_form(crops, values, errors, action, edit=False):
+def _entry_form(crops, farm_areas, values, errors, action, edit=False):
     item_values = values.get("item_values", {})
     categories = []
     for category, category_crops in grouped_crops(crops).items():
@@ -391,13 +466,19 @@ def _entry_form(crops, values, errors, action, edit=False):
             field = _crop_field(crop)
             value = values.get(field, item_values.get(crop.crop_code, ""))
             input_id = f"input_{field}"
-            fields.append(f'''<div class="crop-field" data-crop-name="{escape(crop.crop_name.casefold())}"><label for="{input_id}">{escape(crop.crop_name)}</label><input class="crop-input" id="{input_id}" type="number" step="any" min="0" name="{field}" value="{escape(_quantity_text(value))}" inputmode="decimal" data-crop-label="{escape(crop.crop_name)}">{_error(errors, field)}</div>''')
+            fields.append(f'''<div class="crop-field" data-crop-name="{escape(crop.crop_name.casefold())}"><label for="{input_id}">{escape(crop.crop_name)}</label><input class="crop-input" id="{input_id}" type="number" step="any" min="0" name="{field}" value="{escape(_quantity_input_text(value))}" inputmode="decimal" data-crop-label="{escape(crop.crop_name)}">{_error(errors, field)}</div>''')
         categories.append(f'''<div class="crop-category" data-category="{escape(category)}"><h4>{escape(category)}</h4><div class="crop-grid">{''.join(fields)}</div></div>''')
     confirm = '<label><input style="width:auto;min-height:auto" type="checkbox" name="confirm_changes" value="yes" required> I reviewed the original values and confirm these changes.</label>' if edit else ""
+    selected_area = _text(values.get("farm_area_id"))
+    area_options = ''.join(
+        f'<option value="{area["id"]}" {"selected" if selected_area == str(area["id"]) else ""}>{escape(area["area_name"])}</option>'
+        for area in farm_areas
+    )
     return f'''<form method="post" action="{escape(action)}" id="productionForm">
       <input type="hidden" name="submission_token" value="{escape(_text(values.get('submission_token')) or str(uuid.uuid4()))}">
       <div class="grid">
         <label>Production Date <span class="required">*</span><input type="date" name="production_date" value="{escape(_date_text(values.get('production_date')))}" required>{_error(errors,'production_date')}</label>
+        <label>Farm Area <span class="required">*</span><select name="farm_area_id" required><option value="">Select Farm Area</option>{area_options}</select>{_error(errors,'farm_area_id')}</label>
         <label>Assignee<input name="assignee" value="{escape(_text(values.get('assignee')))}"></label>
         <label>Date of Entry<input type="date" name="entry_date" value="{escape(_date_text(values.get('entry_date')) or date.today().isoformat())}">{_error(errors,'entry_date')}</label>
       </div>
@@ -415,7 +496,7 @@ def _entry_form(crops, values, errors, action, edit=False):
       const form=document.getElementById('productionForm'),inputs=[...form.querySelectorAll('.crop-input')],search=document.getElementById('cropSearch'),mode=document.getElementById('cropMode'),dateInput=form.querySelector('[name="production_date"]'),assigneeInput=form.querySelector('[name="assignee"]');
       const entered=input=>input.value.trim()!=='';
       function safe(text){{return text.replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
-      function refresh(){{const query=search.value.trim().toLowerCase();let count=0,total=0,items=[];inputs.forEach(input=>{{const field=input.closest('.crop-field'),isEntered=entered(input),matches=!query||field.dataset.cropName.includes(query),visible=matches&&(mode.value==='all'||isEntered);field.classList.toggle('hidden',!visible);if(isEntered){{count++;total+=Number(input.value)||0;items.push(`${{input.dataset.cropLabel}} — ${{input.value}}`);}}}});document.querySelectorAll('.crop-category').forEach(section=>section.classList.toggle('hidden',![...section.querySelectorAll('.crop-field')].some(field=>!field.classList.contains('hidden'))));document.getElementById('previewDate').textContent=dateInput.value||'—';document.getElementById('previewAssignee').textContent=assigneeInput.value.trim()||'—';document.getElementById('previewCount').textContent=count;document.getElementById('previewTotal').textContent=String(Math.round(total*1000000)/1000000);document.getElementById('previewItems').innerHTML=items.length?items.map(item=>`<li>${{safe(item)}}</li>`).join(''):'<li>No crop quantities entered.</li>';}}
+      function refresh(){{const query=search.value.trim().toLowerCase();let count=0,total=0,items=[];inputs.forEach(input=>{{const field=input.closest('.crop-field'),isEntered=entered(input),matches=!query||field.dataset.cropName.includes(query),visible=matches&&(mode.value==='all'||isEntered);field.classList.toggle('hidden',!visible);if(isEntered){{count++;const quantity=Number(input.value)||0;total+=quantity;items.push(`${{input.dataset.cropLabel}} — ${{quantity.toFixed(1)}}`);}}}});document.querySelectorAll('.crop-category').forEach(section=>section.classList.toggle('hidden',![...section.querySelectorAll('.crop-field')].some(field=>!field.classList.contains('hidden'))));document.getElementById('previewDate').textContent=dateInput.value||'—';document.getElementById('previewAssignee').textContent=assigneeInput.value.trim()||'—';document.getElementById('previewCount').textContent=count;document.getElementById('previewTotal').textContent=total.toFixed(1);document.getElementById('previewItems').innerHTML=items.length?items.map(item=>`<li>${{safe(item)}}</li>`).join(''):'<li>No crop quantities entered.</li>';}}
       inputs.forEach(input=>input.addEventListener('input',refresh));search.addEventListener('input',refresh);mode.addEventListener('change',refresh);dateInput.addEventListener('input',refresh);assigneeInput.addEventListener('input',refresh);refresh();form.addEventListener('submit',()=>{{const b=document.getElementById('saveButton');b.disabled=true;b.textContent='Saving…';}});
     }})();
     </script>'''
@@ -424,11 +505,11 @@ def _entry_form(crops, values, errors, action, edit=False):
 def _filters() -> dict[str, str]:
     return {key: _text(request.args.get(key)) for key in (
         "date_from", "date_to", "production_date", "assignee", "crop",
-        "min_quantity", "max_quantity", "note", "sort", "page",
+        "farm_area_id", "min_quantity", "max_quantity", "note", "sort", "page",
     )}
 
 
-def _render_main(crops, values=None, errors=None, message="", bad=False):
+def _render_main(crops, farm_areas, values=None, errors=None, message="", bad=False):
     values = values or {}
     errors = errors or {}
     filters = _filters()
@@ -447,10 +528,11 @@ def _render_main(crops, values=None, errors=None, message="", bad=False):
     status = message or load_error
     status_html = f'<p class="status {"bad" if bad or load_error else ""}">{escape(status)}</p>' if status else ""
     crop_options = ''.join(f'<option value="{escape(c.crop_code)}" {"selected" if filters["crop"]==c.crop_code else ""}>{escape(c.crop_name)}</option>' for c in crops)
+    area_filter_options = ''.join(f'<option value="{area["id"]}" {"selected" if filters["farm_area_id"]==str(area["id"]) else ""}>{escape(area["area_name"])}</option>' for area in farm_areas)
     result_rows = ''.join(
-        f'<tr><td>{escape(_date_text(row["production_date"]))}</td><td>{escape(_text(row["assignee"]))}</td><td>{escape(_quantity_text(row["total_quantity"]))}</td><td>{row["crop_count"]}</td><td>{escape(_text(row["note"]))}</td><td>{escape(_date_text(row["entry_date"]))}</td><td><a href="/veggies-production/{row["id"]}">View</a></td><td><a href="/veggies-production/{row["id"]}/edit">Edit</a></td></tr>'
+        f'<tr><td>{escape(_date_text(row["production_date"]))}</td><td>{escape(_text(row["farm_area"]))}</td><td>{escape(_text(row["assignee"]))}</td><td>{escape(_quantity_text(row["total_quantity"]))}</td><td>{row["crop_count"]}</td><td>{escape(_text(row["note"]))}</td><td>{escape(_date_text(row["entry_date"]))}</td><td><a href="/veggies-production/{row["id"]}">View</a></td><td><a href="/veggies-production/{row["id"]}/edit">Edit</a></td></tr>'
         for row in rows
-    ) or '<tr><td colspan="8">No production records found.</td></tr>'
+    ) or '<tr><td colspan="9">No production records found.</td></tr>'
     query_base = {key: value for key, value in filters.items() if value and key != "page"}
     previous_link = ""
     next_link = ""
@@ -463,10 +545,10 @@ def _render_main(crops, values=None, errors=None, message="", bad=False):
     return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veggies Production Basic</title><style>{BASE_STYLE}</style></head><body>
     <header><h1>Veggies Production Basic</h1></header><main>{status_html}
     <div class="cards"><div class="card">Today’s Total Production<strong>{escape(_quantity_text(today['total_quantity']))}</strong>{unit_note}</div><div class="card">Today’s Number of Submissions<strong>{today['submission_count']}</strong></div><div class="card">Today’s Number of Crops Produced<strong>{today['crop_count']}</strong></div><div class="card">Latest Entry Time<strong>{escape(latest_time)}</strong></div></div>
-    <section><div class="actions"><h2 style="margin-right:auto">New production submission</h2><a class="button secondary" href="/veggies-production/crops">Veggies Crop Master</a></div>{_entry_form(crops, values, errors, '/veggies-production')}</section>
+    <section><div class="actions"><h2 style="margin-right:auto">New production submission</h2><a class="button secondary" href="/veggies-production/crops">Veggies Crop Master</a></div>{_entry_form(crops, farm_areas, values, errors, '/veggies-production')}</section>
     <section><h2>Search and review</h2><form method="get" action="/veggies-production"><div class="grid">
-      <label>Date From<input type="date" name="date_from" value="{escape(filters['date_from'])}"></label><label>Date To<input type="date" name="date_to" value="{escape(filters['date_to'])}"></label><label>Production Date<input type="date" name="production_date" value="{escape(filters['production_date'])}"></label><label>Assignee<input name="assignee" value="{escape(filters['assignee'])}"></label><label>Crop<select name="crop"><option value="">All crops</option>{crop_options}</select></label><label>Minimum Quantity<input type="number" step="any" min="0" name="min_quantity" value="{escape(filters['min_quantity'])}"></label><label>Maximum Quantity<input type="number" step="any" min="0" name="max_quantity" value="{escape(filters['max_quantity'])}"></label><label>Note search<input name="note" value="{escape(filters['note'])}"></label><label>Sort<select name="sort"><option value="newest" {"selected" if filters['sort'] in ('','newest') else ''}>Newest first</option><option value="oldest" {"selected" if filters['sort']=='oldest' else ''}>Oldest first</option><option value="highest" {"selected" if filters['sort']=='highest' else ''}>Highest total quantity</option><option value="lowest" {"selected" if filters['sort']=='lowest' else ''}>Lowest total quantity</option></select></label></div><div class="actions"><button type="submit">Search</button><a class="button secondary" href="/veggies-production">Clear</a></div></form>
-      <p>{summary['total_records']} record(s)</p><div class="table-wrap"><table><thead><tr><th>Production Date</th><th>Assignee</th><th>Total Quantity</th><th>Number of Crops</th><th>Note</th><th>Date of Entry</th><th>View</th><th>Edit</th></tr></thead><tbody>{result_rows}</tbody></table></div><div class="pagination">{previous_link}<span>Page {summary['page']} of {summary['total_pages']}</span>{next_link}</div></section>
+      <label>Date From<input type="date" name="date_from" value="{escape(filters['date_from'])}"></label><label>Date To<input type="date" name="date_to" value="{escape(filters['date_to'])}"></label><label>Production Date<input type="date" name="production_date" value="{escape(filters['production_date'])}"></label><label>Farm Area<select name="farm_area_id"><option value="">All areas</option>{area_filter_options}</select></label><label>Assignee<input name="assignee" value="{escape(filters['assignee'])}"></label><label>Crop<select name="crop"><option value="">All crops</option>{crop_options}</select></label><label>Minimum Quantity<input type="number" step="any" min="0" name="min_quantity" value="{escape(filters['min_quantity'])}"></label><label>Maximum Quantity<input type="number" step="any" min="0" name="max_quantity" value="{escape(filters['max_quantity'])}"></label><label>Note search<input name="note" value="{escape(filters['note'])}"></label><label>Sort<select name="sort"><option value="newest" {"selected" if filters['sort'] in ('','newest') else ''}>Newest first</option><option value="oldest" {"selected" if filters['sort']=='oldest' else ''}>Oldest first</option><option value="highest" {"selected" if filters['sort']=='highest' else ''}>Highest total quantity</option><option value="lowest" {"selected" if filters['sort']=='lowest' else ''}>Lowest total quantity</option></select></label></div><div class="actions"><button type="submit">Search</button><a class="button secondary" href="/veggies-production">Clear</a></div></form>
+      <p>{summary['total_records']} record(s)</p><div class="table-wrap"><table><thead><tr><th>Production Date</th><th>Farm Area</th><th>Assignee</th><th>Total Quantity</th><th>Number of Crops</th><th>Note</th><th>Date of Entry</th><th>View</th><th>Edit</th></tr></thead><tbody>{result_rows}</tbody></table></div><div class="pagination">{previous_link}<span>Page {summary['page']} of {summary['total_pages']}</span>{next_link}</div></section>
     </main></body></html>''', 200, {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
 
@@ -475,27 +557,30 @@ def register_routes(app) -> None:
     def veggies_production_basic():
         try:
             crops = portal_crops()
+            farm_areas = portal_farm_areas()
         except Exception as exc:
-            return _render_main([], message=f"Could not load crop master: {exc}", bad=True)
+            return _render_main([], [], message=f"Could not load production master data: {exc}", bad=True)
         if request.method == "GET":
             message = ""
+            if request.args.get("deleted"):
+                message = "Veggies production record deleted successfully."
             if request.args.get("saved"):
                 message = ("Veggies production saved successfully. "
                            f"Production Date: {_text(request.args.get('saved_date'))}; "
                            f"Assignee: {_text(request.args.get('saved_assignee')) or '—'}; "
                            f"Number of Crops Saved: {_text(request.args.get('saved_crops'))}; "
                            f"Total Quantity Saved: {_text(request.args.get('saved_total'))}.")
-            return _render_main(crops, message=message)
+            return _render_main(crops, farm_areas, message=message)
         values = request.form.to_dict()
-        cleaned, errors = validate_submission(values, crops)
+        cleaned, errors = validate_submission(values, crops, farm_areas)
         if errors:
-            return _render_main(crops, values=values, errors=errors, message="Please correct the highlighted fields.", bad=True)
+            return _render_main(crops, farm_areas, values=values, errors=errors, message="Please correct the highlighted fields.", bad=True)
         try:
             result = save_submission(cleaned)
         except ValueError as exc:
-            return _render_main(crops, values=values, message=str(exc), bad=True)
+            return _render_main(crops, farm_areas, values=values, message=str(exc), bad=True)
         except Exception:
-            return _render_main(crops, values=values, message="Production could not be saved. No data was committed.", bad=True)
+            return _render_main(crops, farm_areas, values=values, message="Production could not be saved. No data was committed.", bad=True)
         total = sum((item["quantity"] for item in cleaned["items"]), Decimal("0"))
         return redirect(url_for(
             "veggies_production_basic", saved="1",
@@ -540,11 +625,22 @@ def register_routes(app) -> None:
         if not record:
             return "Production record not found.", 404
         item_rows = ''.join(f'<tr><td>{escape(item["crop_name"])}</td><td>{escape(_quantity_text(item["quantity"]))}</td><td>{escape(_text(item["unit"]) or "—")}</td><td>{escape(_text(item["created_at"]))}</td><td>{escape(_text(item["updated_at"]))}</td></tr>' for item in record["items"])
-        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veggies Production Detail</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Production record #{batch_id}</h2><div class="grid"><p><b>Production Date</b><br>{escape(_date_text(record['production_date']))}</p><p><b>Assignee</b><br>{escape(_text(record['assignee']) or '—')}</p><p><b>Date of Entry</b><br>{escape(_date_text(record['entry_date']) or '—')}</p><p><b>Created</b><br>{escape(_text(record['created_at']))}</p><p><b>Updated</b><br>{escape(_text(record['updated_at']))}</p></div><p><b>Note</b><br>{escape(_text(record['note']) or '—')}</p><p><b>AI Note</b><br>{escape(_text(record['ai_note']) or '—')}</p><div class="table-wrap"><table><thead><tr><th>Crop</th><th>Quantity</th><th>Unit</th><th>Created time</th><th>Updated time</th></tr></thead><tbody>{item_rows}</tbody></table></div><div class="actions"><a class="button" href="/veggies-production/{batch_id}/edit">Edit</a><a class="button secondary" href="/veggies-production">Back</a></div></section></main></body></html>'''
+        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veggies Production Detail</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Production record #{batch_id}</h2><div class="grid"><p><b>Production Date</b><br>{escape(_date_text(record['production_date']))}</p><p><b>Farm Area</b><br>{escape(_text(record['farm_area']))}</p><p><b>Assignee</b><br>{escape(_text(record['assignee']) or '—')}</p><p><b>Date of Entry</b><br>{escape(_date_text(record['entry_date']) or '—')}</p><p><b>Created</b><br>{escape(_text(record['created_at']))}</p><p><b>Updated</b><br>{escape(_text(record['updated_at']))}</p></div><p><b>Note</b><br>{escape(_text(record['note']) or '—')}</p><p><b>AI Note</b><br>{escape(_text(record['ai_note']) or '—')}</p><div class="table-wrap"><table><thead><tr><th>Crop</th><th>Quantity</th><th>Unit</th><th>Created time</th><th>Updated time</th></tr></thead><tbody>{item_rows}</tbody></table></div><div class="actions"><a class="button" href="/veggies-production/{batch_id}/edit">Edit</a><a class="button secondary" href="/veggies-production">Back</a></div><hr><h3>Delete Production Record</h3><p>Imported workbook records are protected. Type record ID <strong>{batch_id}</strong> and provide a reason.</p><form method="post" action="/veggies-production/{batch_id}/delete" onsubmit="return confirm('Permanently delete production record {batch_id}?')"><div class="grid"><label>Record ID<input name="confirmation" required></label><label>Deletion reason<input name="reason" required></label></div><div class="actions"><button type="submit" class="secondary">Delete Record</button></div></form></section></main></body></html>'''
+
+    @app.post("/veggies-production/<int:batch_id>/delete")
+    def veggies_production_delete(batch_id):
+        try:
+            delete_submission(batch_id, request.form.get("confirmation"), request.form.get("reason"))
+        except (ValueError, LookupError) as exc:
+            return f"Production record could not be deleted: {escape(str(exc))}", 400
+        except Exception:
+            return "Production record could not be deleted. No data was changed.", 500
+        return redirect("/veggies-production?deleted=1", code=303)
 
     @app.route("/veggies-production/<int:batch_id>/edit", methods=["GET", "POST"])
     def veggies_production_edit(batch_id):
         crops = portal_crops()
+        farm_areas = portal_farm_areas()
         record = get_record(batch_id)
         if not record:
             return "Production record not found.", 404
@@ -564,7 +660,7 @@ def register_routes(app) -> None:
             values, errors, message = original, {}, ""
         else:
             values = request.form.to_dict()
-            cleaned, errors = validate_submission(values, crops)
+            cleaned, errors = validate_submission(values, crops, farm_areas)
             if request.form.get("confirm_changes") != "yes":
                 errors["confirm_changes"] = "Confirm the changes before saving."
             if not errors:
@@ -576,4 +672,4 @@ def register_routes(app) -> None:
             message = "Please correct the highlighted fields."
         original_text = f"Original: {_date_text(record['production_date'])}; {record.get('assignee') or 'no assignee'}; {len(record['items'])} crops."
         timestamps = f"Original created time: {_text(record.get('created_at'))}. Last updated time: {_text(record.get('updated_at')) or '—'}."
-        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Edit Veggies Production</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Edit production record #{batch_id}</h2><div class="warning"><strong>You are editing an existing production record.</strong><br>{escape(timestamps)}</div><div class="original">{escape(original_text)} The saved record is not changed until you confirm and submit.</div>{f'<p class="status bad">{escape(message)}</p>' if message else ''}{_entry_form(crops, values, errors, f'/veggies-production/{batch_id}/edit', edit=True)}{_error(errors,'confirm_changes')}<div class="actions"><a class="button secondary" href="/veggies-production/{batch_id}">Cancel</a></div></section></main></body></html>'''
+        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Edit Veggies Production</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Edit production record #{batch_id}</h2><div class="warning"><strong>You are editing an existing production record.</strong><br>{escape(timestamps)}</div><div class="original">{escape(original_text)} The saved record is not changed until you confirm and submit.</div>{f'<p class="status bad">{escape(message)}</p>' if message else ''}{_entry_form(crops, farm_areas, values, errors, f'/veggies-production/{batch_id}/edit', edit=True)}{_error(errors,'confirm_changes')}<div class="actions"><a class="button secondary" href="/veggies-production/{batch_id}">Cancel</a></div></section></main></body></html>'''

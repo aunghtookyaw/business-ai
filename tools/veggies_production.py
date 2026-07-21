@@ -511,18 +511,24 @@ def import_veggies_preview(preview: WorkbookPreview, imported_by: str | None = N
             )
             for crop in cursor.fetchall():
                 crop_ids[crop["crop_code"]] = crop["id"]
+            cursor.execute(
+                f"SELECT id FROM {_ref('veggies_farm_area_master')} WHERE area_code = 'HOME_FARM' AND active = TRUE"
+            )
+            home_farm = cursor.fetchone()
+            if not home_farm:
+                raise ValueError("Active Home Farm is missing from Farm Area Master")
 
             for row in preview.valid_rows:
                 cursor.execute(
                     f"""
                     INSERT INTO {_ref('veggies_production_batches')}
-                      (production_date, assignee, note, ai_note, entry_date, source_file,
+                      (production_date, farm_area_id, assignee, note, ai_note, entry_date, source_file,
                        source_workbook, import_id, source_row_number, source_row_hash, created_by)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
-                        row.production_date, row.assignee, row.note, row.ai_note, row.entry_date,
+                        row.production_date, home_farm["id"], row.assignee, row.note, row.ai_note, row.entry_date,
                         preview.filename, preview.workbook_name, import_id, row.row_number,
                         row.row_hash, imported_by,
                     ),

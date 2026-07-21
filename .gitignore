@@ -3,11 +3,20 @@ __pycache__/
 *.py[cod]
 
 .env
+.env.*
+!.env.example
+!*.env.example
 deploy/dashboard.env
 *.log
 config.py
 google_calendar_credentials.json
 google_calendar_token.json
+*credentials*.json
+*token*.json
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Local database and NocoDB data should not be committed.
 ../postgres-data/
@@ -18,6 +27,7 @@ nocodb-data/
 # Database exports can contain private business data and credentials.
 *.sql
 *.dump
+!migrations/*.sql
 
 # Local editor and temporary files.
 .vscode/
@@ -25,3 +35,24 @@ nocodb-data/
 tmp/
 temp/
 ~$*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.pid
+*.sqlite
+*.sqlite3
+
+# Production/runtime artifacts and local recovery material.
+backups/
+output/
+reports/
+BusinessOS_Backups/
+uploads/
+
+# Windows launcher build output; source and build instructions remain tracked.
+windows-launcher/build/
+windows-launcher/dist/
+windows-launcher/*.spec
+windows-launcher/*.exe

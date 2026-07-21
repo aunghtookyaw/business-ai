@@ -17,8 +17,10 @@ MIGRATIONS = [
     PROJECT_ROOT / "migrations" / "20260714_001_veggies_production_up.sql",
     PROJECT_ROOT / "migrations" / "20260714_002_veggies_production_portal_up.sql",
     PROJECT_ROOT / "migrations" / "20260715_003_veggies_crop_categories_up.sql",
+    PROJECT_ROOT / "migrations" / "20260715_004_veggies_farm_areas_up.sql",
 ]
 ROLLBACKS = [
+    PROJECT_ROOT / "migrations" / "20260715_004_veggies_farm_areas_down.sql",
     PROJECT_ROOT / "migrations" / "20260715_003_veggies_crop_categories_down.sql",
     PROJECT_ROOT / "migrations" / "20260714_002_veggies_production_portal_down.sql",
     PROJECT_ROOT / "migrations" / "20260714_001_veggies_production_down.sql",

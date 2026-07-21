@@ -48,7 +48,7 @@ IMPORT_PAGE = """<!doctype html>
   <h1>BigShot Business Data Import</h1>
   <p>The existing Excel macro import workflow remains available through its established API endpoints.</p>
   <p>Daily vegetable production is entered directly in <strong>Veggies Production Basic</strong>, not through Excel.</p>
-  <div class="actions"><a class="button secondary" href="http://127.0.0.1:5059/veggies-production">Open Veggies Production Basic</a></div>
+  <div class="actions"><a class="button secondary" href="/business-os/veggies-production">Open Veggies Production Basic</a></div>
   <!-- Optional legacy utilities below are intentionally not part of the normal production workflow. -->
   <div hidden>
   <label>Import type

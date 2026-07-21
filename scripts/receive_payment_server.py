@@ -541,7 +541,7 @@ def _basic_payment_page(
               <label>Receive Amount</label>
               <input name="receive_amount" inputmode="numeric" placeholder="Enter new receive amount only" required>
               <label>Payment Method</label>
-              <input name="payment_method" placeholder="Cash, KPay, Bank...">
+              <select name="payment_method" required><option value="">Select payment type</option><option>Cash</option><option>KPay</option><option>AYA Pay</option><option>UAB Pay</option><option>Other Online Pay</option></select>
               <label>Reference Number</label>
               <input name="reference_number">
               <label>Note</label>
@@ -1047,7 +1047,7 @@ PAGE_HTML = r'''<!doctype html>
 
       <form id="paymentForm">
         <div class="field"><label>Receive Amount</label><input id="receiveAmount" inputmode="numeric" required></div>
-        <div class="field"><label>Payment Method</label><input id="paymentMethod" placeholder="Cash, KPay, Bank..."></div>
+        <div class="field"><label>Payment Method</label><select id="paymentMethod" required><option value="">Select payment type</option><option>Cash</option><option>KPay</option><option>AYA Pay</option><option>UAB Pay</option><option>Other Online Pay</option></select></div>
         <div class="field"><label>Reference Number</label><input id="referenceNumber"></div>
         <div class="field"><label>Notes</label><textarea id="notes"></textarea></div>
         <div class="form-actions">

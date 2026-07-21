@@ -20,6 +20,8 @@ from waitress import serve
 from werkzeug.exceptions import HTTPException
 
 from tools import dashboard_service
+from tools import farm_voucher_repository, voucher_engine
+from tools.farm_voucher_pdf import write_farm_voucher_pdf
 from tools.bi_reports import write_excel_report
 from tools.dashboard_pdf import write_dashboard_pdf
 
@@ -47,9 +49,22 @@ DASHBOARD_PAGE_PATHS = {
     "/payments",
     "/customers",
     "/inventory",
+    "/farm-production",
     "/financial",
     "/insights",
+    "/farm-voucher",
 }
+
+
+def _voucher_error(exc):
+    if isinstance(exc, voucher_engine.VoucherValidationError):
+        return jsonify({"ok": False, "error": "Validation failed", "errors": exc.errors}), 400
+    if isinstance(exc, (ValueError, RuntimeError)):
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if isinstance(exc, LookupError):
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    app.logger.exception("Farm Voucher operation failed")
+    return jsonify({"ok": False, "error": str(exc)}), 500
 _FAILED_LOGIN_ATTEMPTS = {}
 
 
@@ -258,6 +273,7 @@ def dashboard_page():
 @app.get("/payments")
 @app.get("/customers")
 @app.get("/inventory")
+@app.get("/farm-production")
 @app.get("/financial")
 @app.get("/insights")
 def dashboard_named_page():
@@ -349,7 +365,9 @@ def dashboard_meta():
         "read_only": True,
         "business_logic": "canonical_bi_engine",
         "milestone": 1,
-        "pages": ["executive", "payments", "customers", "inventory", "financial", "insights"],
+        "pages": ["executive", "payments", "customers", "inventory", "farm-production", "farm-voucher", "financial", "insights"],
+        "executive_read_only": True,
+        "write_modules": ["farm-voucher"],
         "roles_ready": FUTURE_ROLES,
     })
 
@@ -391,6 +409,20 @@ def _executive_insight_response():
     return jsonify({"ok": True, "cached": cached, "data": data})
 
 
+def _farm_production_response():
+    filters = dashboard_service.parse_farm_production_filters(request.get_json(silent=True))
+    return jsonify({"ok": True, "data": dashboard_service.farm_production_dashboard(filters)})
+
+
+def _inventory_response():
+    return jsonify({"ok": True, "data": dashboard_service.inventory_dashboard()})
+
+
+def _payments_response():
+    filters = _filters_from_request()
+    return jsonify({"ok": True, "data": dashboard_service.payments_dashboard(filters)})
+
+
 @app.post("/api/dashboard/executive")
 @login_required
 def executive_dashboard():
@@ -421,6 +453,152 @@ def executive_insight():
             "error": "Executive narrative is temporarily unavailable.",
             "detail": str(exc),
         }), 503
+
+
+@app.post("/api/dashboard/farm-production")
+@login_required
+def farm_production_dashboard():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("farm-production")
+    try:
+        return _farm_production_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Farm Production dashboard failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/dashboard/inventory")
+@login_required
+def inventory_dashboard():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("inventory")
+    try:
+        return _inventory_response()
+    except Exception as exc:
+        app.logger.exception("Inventory dashboard failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/dashboard/payments")
+@login_required
+def payments_dashboard():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("payments")
+    try:
+        return _payments_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Payments dashboard failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/vouchers/farm/customers")
+@login_required
+def farm_voucher_customers():
+    try:
+        return jsonify({"ok": True, "customers": farm_voucher_repository.list_customers()})
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.get("/api/vouchers/farm/crops")
+@login_required
+def farm_voucher_crops():
+    try:
+        return jsonify({"ok": True, "crops": farm_voucher_repository.list_crops()})
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.get("/api/vouchers/farm/drafts")
+@login_required
+def farm_voucher_drafts():
+    try:
+        return jsonify({"ok": True, "drafts": farm_voucher_repository.list_drafts()})
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.post("/api/vouchers/farm/drafts")
+@login_required
+def create_farm_voucher_draft():
+    try:
+        draft = farm_voucher_repository.create_draft(request.get_json(silent=True) or {}, _current_user()["username"])
+        return jsonify({"ok": True, "draft": draft}), 201
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.get("/api/vouchers/farm/drafts/<int:draft_id>")
+@login_required
+def get_farm_voucher_draft(draft_id):
+    try:
+        draft = farm_voucher_repository.get_draft(draft_id)
+        if not draft:
+            raise LookupError("Farm voucher draft not found")
+        return jsonify({"ok": True, "draft": draft})
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.put("/api/vouchers/farm/drafts/<int:draft_id>")
+@login_required
+def update_farm_voucher_draft(draft_id):
+    try:
+        body = request.get_json(silent=True) or {}
+        draft = farm_voucher_repository.update_draft(draft_id, body, body.get("version"))
+        return jsonify({"ok": True, "draft": draft})
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.post("/api/vouchers/farm/drafts/<int:draft_id>/validate")
+@login_required
+def validate_farm_voucher_draft(draft_id):
+    try:
+        return jsonify({"ok": True, **farm_voucher_repository.set_workflow_state(draft_id, "validated")})
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.post("/api/vouchers/farm/drafts/<int:draft_id>/preview")
+@login_required
+def preview_farm_voucher_draft(draft_id):
+    try:
+        return jsonify({"ok": True, **farm_voucher_repository.set_workflow_state(draft_id, "previewed")})
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.get("/api/vouchers/farm/drafts/<int:draft_id>/pdf")
+@login_required
+def farm_voucher_pdf(draft_id):
+    try:
+        draft = farm_voucher_repository.get_draft(draft_id)
+        if not draft:
+            raise LookupError("Farm voucher draft not found")
+        voucher = voucher_engine.preview(draft)
+        handle = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        path = Path(handle.name)
+        handle.close()
+        write_farm_voucher_pdf(voucher, path)
+        return send_file(path, as_attachment=True, download_name=f'Farm_Voucher_{voucher["voucher_number"]}.pdf', mimetype="application/pdf")
+    except Exception as exc:
+        return _voucher_error(exc)
+
+
+@app.post("/api/vouchers/farm/drafts/<int:draft_id>/submit")
+@login_required
+def submit_farm_voucher_draft(draft_id):
+    try:
+        result = farm_voucher_repository.submit(draft_id, _current_user()["username"])
+        dashboard_service.clear_dashboard_cache()
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        return _voucher_error(exc)
 
 
 def _export_payload(filters):
@@ -546,6 +724,43 @@ def internal_v1_executive_insight():
             "error": "Executive narrative is temporarily unavailable.",
             "detail": str(exc),
         }), 503
+
+
+@app.post("/internal/v1/dashboard/farm-production")
+@internal_api_required
+def internal_v1_farm_production():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("farm-production")
+    try:
+        return _farm_production_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/internal/v1/dashboard/inventory")
+@internal_api_required
+def internal_v1_inventory():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("inventory")
+    try:
+        return _inventory_response()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/internal/v1/dashboard/payments")
+@internal_api_required
+def internal_v1_payments_dashboard():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("payments")
+    try:
+        return _payments_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.post("/internal/v1/dashboard/export/excel")

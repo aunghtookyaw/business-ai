@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from tools import dashboard_service
+from tools import dashboard_service, formula_engine
 
 
 class DashboardServiceTest(unittest.TestCase):
@@ -120,6 +120,64 @@ class DashboardServiceTest(unittest.TestCase):
         self.assertFalse(first_cached)
         self.assertTrue(second_cached)
         self.assertEqual(1, len(calls))
+
+    @patch("tools.dashboard_service.formula_engine.recent_payment_receipts")
+    @patch("tools.dashboard_service.formula_engine.payment_receive_summary")
+    def test_payments_dashboard_uses_canonical_reports_and_labels_invoice_age(self, summary, receipts):
+        summary.return_value = {
+            "total_invoice_amount": 1000, "total_received": 400,
+            "outstanding_receivables": 600, "collection_rate_percent": 40,
+            "aging": {"0-30": 600}, "customer_balances": [{"customer": "C", "outstanding_balance": 600}],
+            "sector_totals": [], "invoices": [{"received_amount": 400, "outstanding_balance": 600}],
+        }
+        receipts.return_value = {"payments": [{"id": 1, "receive_amount": 400}]}
+        filters = dashboard_service.parse_dashboard_filters({"filters": {"period": {"type": "year", "year": 2026}}})
+        result = dashboard_service.payments_dashboard(filters)
+        self.assertEqual(600, result["metrics"]["outstanding"])
+        self.assertEqual("Partial", result["invoices"][0]["payment_status"])
+        self.assertIn("invoice age", result["data_quality"][0]["message"])
+        summary.assert_called_once_with("year:2026", sector=None, customer=None, payment_status=None, limit=100)
+
+    def test_payments_query_contract_is_frozen(self):
+        self.assertEqual(
+            {
+                "version": "payments-v1-2026-07-16",
+                "read_only": True,
+                "voucher_identity": ["sector", "voucher_number", "invoice_date", "customer"],
+                "period_basis": {"receivables": "invoice_date", "receipts": "receive_date"},
+                "sources": ["payment_receive_summary", "recent_payment_receipts"],
+                "row_limit": 100,
+                "voucher_order": ["outstanding_balance DESC", "invoice_date ASC NULLS LAST"],
+                "receipt_order": ["receive_date DESC NULLS LAST", "id DESC"],
+                "aging_semantics": "invoice_age_not_due_date",
+            },
+            dashboard_service.PAYMENTS_QUERY_CONTRACT,
+        )
+
+    @patch("tools.formula_engine._fetch_all")
+    @patch("tools.formula_engine.ensure_payment_receive_table")
+    def test_live_payment_formula_sql_contract_keeps_identity_filters_and_ordering(self, _ensure, fetch_all):
+        fetch_all.return_value = []
+        formula_engine.payment_receive_summary(
+            "year:2026", sector="Farm", customer="C", payment_status="Partial", limit=100,
+        )
+        summary_sql = fetch_all.call_args.args[0]
+        self.assertIn("f.\"Invoice_Number\"::text", summary_sql)
+        self.assertIn("f.\"Date\"", summary_sql)
+        self.assertIn("invoices.customer", summary_sql)
+        self.assertIn("p.\"Sector\" = invoices.sector", summary_sql)
+        self.assertIn("p.\"Voucher_Number\" = invoices.voucher_number", summary_sql)
+        self.assertIn("p.\"Invoice_Date\" = invoices.invoice_date", summary_sql)
+        self.assertIn("ORDER BY outstanding_balance DESC", summary_sql)
+
+        formula_engine.recent_payment_receipts(
+            "year:2026", sector="Farm", customer="C", payment_status="Partial", limit=100,
+        )
+        receipt_sql = fetch_all.call_args.args[0]
+        self.assertIn('"Receive_Date" AS receive_date', receipt_sql)
+        self.assertIn('AND "Sector" = %(sector)s', receipt_sql)
+        self.assertIn('COALESCE("Customer", \'\') = %(customer)s', receipt_sql)
+        self.assertIn('ORDER BY "Receive_Date" DESC NULLS LAST, id DESC', receipt_sql)
 
     @patch("tools.dashboard_service.ask_ai", return_value="Executive Summary\n- Revenue is $10.")
     @patch("tools.dashboard_service.executive_dashboard")

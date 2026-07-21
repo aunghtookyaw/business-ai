@@ -27,7 +27,8 @@ class ExcelImportServerTest(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(200, response.status_code)
         self.assertIn(b"Veggies Production Basic", response.data)
-        self.assertIn(b"127.0.0.1:5059/veggies-production", response.data)
+        self.assertIn(b'href="/business-os/veggies-production"', response.data)
+        self.assertNotIn(b"127.0.0.1:5059", response.data)
         self.assertIn(b"Optional legacy utilities", response.data)
 
     @patch("scripts.excel_import_server.import_excel_payload")

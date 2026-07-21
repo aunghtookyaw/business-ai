@@ -3271,6 +3271,211 @@ def dashboard_dimension_values():
     }
 
 
+def farm_production_dimensions():
+    """Return active Farm Production dimensions from their authoritative masters."""
+    crops = _fetch_all('''
+        SELECT crop.id, crop.crop_code, crop.crop_name, crop.default_unit,
+               MAX(batch.production_date) AS latest_production_date
+        FROM public.veggies_crop_master crop
+        LEFT JOIN public.veggies_production_items item ON item.crop_id = crop.id
+        LEFT JOIN public.veggies_production_batches batch ON batch.id = item.production_batch_id
+        WHERE crop.active = TRUE
+        GROUP BY crop.id
+        ORDER BY latest_production_date DESC NULLS LAST, crop.display_order, crop.crop_name
+    ''')
+    farm_areas = _fetch_all('''
+        SELECT id, area_code, area_name
+        FROM public.veggies_farm_area_master
+        WHERE active = TRUE
+        ORDER BY display_order, area_name
+    ''')
+    return {"formula": "farm_production_dimensions", "crops": crops, "farm_areas": farm_areas}
+
+
+def farm_production_trend(start_date, end_date, crop_ids=None, farm_area_ids=None,
+                          grouping="daily"):
+    """Read-only normalized production totals without combining incompatible units."""
+    bucket = {"daily": "day", "weekly": "week", "monthly": "month"}.get(grouping)
+    if not bucket:
+        raise ValueError("grouping must be daily, weekly, or monthly")
+    params = {"start_date": start_date, "end_date": end_date}
+    crop_sql = area_sql = ""
+    if crop_ids is not None:
+        crop_sql = "AND crop.id = ANY(%(crop_ids)s)"
+        params["crop_ids"] = list(crop_ids)
+    if farm_area_ids:
+        area_sql = "AND area.id = ANY(%(farm_area_ids)s)"
+        params["farm_area_ids"] = list(farm_area_ids)
+    rows = _fetch_all(f'''
+        SELECT DATE_TRUNC('{bucket}', batch.production_date)::date AS production_date,
+               crop.id AS crop_id, crop.crop_name,
+               area.id AS farm_area_id, area.area_name AS farm_area,
+               item.unit, SUM(item.quantity) AS quantity
+        FROM public.veggies_production_batches batch
+        JOIN public.veggies_production_items item ON item.production_batch_id = batch.id
+        JOIN public.veggies_crop_master crop ON crop.id = item.crop_id
+        JOIN public.veggies_farm_area_master area ON area.id = batch.farm_area_id
+        WHERE batch.production_date BETWEEN %(start_date)s AND %(end_date)s
+          {crop_sql} {area_sql}
+        GROUP BY 1, crop.id, crop.crop_name, area.id, area.area_name, item.unit
+        ORDER BY 1, crop.crop_name, area.area_name, item.unit NULLS FIRST
+    ''', params)
+    last_rows = _fetch_all(f'''
+        SELECT MAX(batch.production_date) AS last_data_date
+        FROM public.veggies_production_batches batch
+        JOIN public.veggies_production_items item ON item.production_batch_id = batch.id
+        JOIN public.veggies_crop_master crop ON crop.id = item.crop_id
+        JOIN public.veggies_farm_area_master area ON area.id = batch.farm_area_id
+        WHERE batch.production_date BETWEEN %(start_date)s AND %(end_date)s
+          {crop_sql} {area_sql}
+    ''', params)
+    totals = {}
+    for row in rows:
+        unit = row.get("unit") or "Unspecified"
+        totals[unit] = totals.get(unit, 0) + row["quantity"]
+    return {
+        "formula": "farm_production_trend",
+        "start_date": start_date,
+        "end_date": end_date,
+        "grouping": grouping,
+        "rows": rows,
+        "totals": [{"unit": unit, "quantity": quantity} for unit, quantity in sorted(totals.items())],
+        "last_data_date": (last_rows[0].get("last_data_date") if last_rows else None),
+    }
+
+
+def farm_production_analytics(start_date, end_date, crop_ids=None, farm_area_ids=None,
+                              grouping="daily", farm_areas=None):
+    """Return dashboard-ready Farm Production summaries from authoritative rows."""
+    trend = farm_production_trend(
+        start_date, end_date, crop_ids, farm_area_ids, grouping,
+    )
+    params = {"start_date": start_date, "end_date": end_date}
+    crop_sql = area_sql = ""
+    if crop_ids is not None:
+        crop_sql = "AND crop.id = ANY(%(crop_ids)s)"
+        params["crop_ids"] = list(crop_ids)
+    if farm_area_ids:
+        area_sql = "AND area.id = ANY(%(farm_area_ids)s)"
+        params["farm_area_ids"] = list(farm_area_ids)
+
+    summary_by_area_rows = _fetch_all(f'''
+        WITH area_stats AS (
+          SELECT area.id AS farm_area_id, COUNT(DISTINCT crop.id) AS crop_count,
+                 MAX(batch.production_date) AS latest_production_date
+          FROM public.veggies_production_batches batch
+          JOIN public.veggies_production_items item ON item.production_batch_id = batch.id
+          JOIN public.veggies_crop_master crop ON crop.id = item.crop_id
+          JOIN public.veggies_farm_area_master area ON area.id = batch.farm_area_id
+          WHERE batch.production_date BETWEEN %(start_date)s AND %(end_date)s
+            {crop_sql} {area_sql}
+          GROUP BY area.id
+        )
+        SELECT area.id AS farm_area_id, area.area_name AS farm_area,
+               item.unit, SUM(item.quantity) AS quantity,
+               stats.crop_count, stats.latest_production_date
+        FROM public.veggies_production_batches batch
+        JOIN public.veggies_production_items item ON item.production_batch_id = batch.id
+        JOIN public.veggies_crop_master crop ON crop.id = item.crop_id
+        JOIN public.veggies_farm_area_master area ON area.id = batch.farm_area_id
+        JOIN area_stats stats ON stats.farm_area_id = area.id
+        WHERE batch.production_date BETWEEN %(start_date)s AND %(end_date)s
+          {crop_sql} {area_sql}
+        GROUP BY area.id, area.area_name, item.unit, stats.crop_count, stats.latest_production_date
+        ORDER BY area.area_name, item.unit NULLS FIRST
+    ''', params)
+    summary_by_crop = _fetch_all(f'''
+        SELECT crop.id AS crop_id, crop.crop_name, item.unit,
+               SUM(item.quantity) AS quantity,
+               MAX(batch.production_date) AS latest_production_date
+        FROM public.veggies_production_batches batch
+        JOIN public.veggies_production_items item ON item.production_batch_id = batch.id
+        JOIN public.veggies_crop_master crop ON crop.id = item.crop_id
+        JOIN public.veggies_farm_area_master area ON area.id = batch.farm_area_id
+        WHERE batch.production_date BETWEEN %(start_date)s AND %(end_date)s
+          {crop_sql} {area_sql}
+        GROUP BY crop.id, crop.crop_name, item.unit
+        ORDER BY quantity DESC, crop.crop_name, item.unit NULLS FIRST
+    ''', params)
+
+    start_value = start_date if isinstance(start_date, date) else date.fromisoformat(str(start_date))
+    end_value = end_date if isinstance(end_date, date) else date.fromisoformat(str(end_date))
+    previous_end = start_value - timedelta(days=1)
+    previous_start = previous_end - (end_value - start_value)
+    previous_params = dict(params, start_date=previous_start, end_date=previous_end)
+    previous_rows = _fetch_all(f'''
+        SELECT crop.id AS crop_id, item.unit, SUM(item.quantity) AS quantity
+        FROM public.veggies_production_batches batch
+        JOIN public.veggies_production_items item ON item.production_batch_id = batch.id
+        JOIN public.veggies_crop_master crop ON crop.id = item.crop_id
+        JOIN public.veggies_farm_area_master area ON area.id = batch.farm_area_id
+        WHERE batch.production_date BETWEEN %(start_date)s AND %(end_date)s
+          {crop_sql} {area_sql}
+        GROUP BY crop.id, item.unit
+    ''', previous_params)
+    previous = {
+        (row["crop_id"], row.get("unit") or "Unspecified"): row["quantity"]
+        for row in previous_rows
+    }
+    for row in summary_by_crop:
+        unit = row.get("unit") or "Unspecified"
+        row["unit"] = unit
+        prior = previous.get((row["crop_id"], unit))
+        row["previous_quantity"] = prior
+        row["percentage_change"] = (
+            ((row["quantity"] - prior) / prior * 100) if prior not in (None, 0) else None
+        )
+
+    area_map = {}
+    for area in farm_areas or []:
+        if farm_area_ids and area["id"] not in farm_area_ids:
+            continue
+        area_map[area["id"]] = {
+            "farm_area_id": area["id"], "farm_area": area["area_name"],
+            "quantities_by_unit": [], "crop_count": 0,
+            "latest_production_date": None,
+        }
+    for row in summary_by_area_rows:
+        summary = area_map.setdefault(row["farm_area_id"], {
+            "farm_area_id": row["farm_area_id"], "farm_area": row["farm_area"],
+            "quantities_by_unit": [], "crop_count": 0,
+            "latest_production_date": None,
+        })
+        summary["quantities_by_unit"].append({
+            "unit": row.get("unit") or "Unspecified", "quantity": row["quantity"],
+        })
+        summary["crop_count"] = max(summary["crop_count"], int(row["crop_count"] or 0))
+        latest = row.get("latest_production_date")
+        if latest and (not summary["latest_production_date"] or latest > summary["latest_production_date"]):
+            summary["latest_production_date"] = latest
+
+    combined = {}
+    scope_label = "All Fields" if not farm_area_ids else "Selected Fields"
+    for row in trend["rows"]:
+        key = (row["production_date"], row["crop_id"], row.get("unit") or "Unspecified")
+        if key not in combined:
+            combined[key] = {
+                "production_date": row["production_date"], "crop_id": row["crop_id"],
+                "crop_name": row["crop_name"], "farm_area_id": None,
+                "farm_area": scope_label, "unit": row.get("unit") or "Unspecified",
+                "quantity": 0,
+            }
+        combined[key]["quantity"] += row["quantity"]
+
+    return {
+        **trend,
+        "combined_rows": sorted(combined.values(), key=lambda row: (
+            row["production_date"], row["crop_name"], row["unit"],
+        )),
+        "summary_by_area": list(area_map.values()),
+        "summary_by_crop": summary_by_crop,
+        "selected_area_totals": trend["totals"],
+        "previous_period": {
+            "start_date": previous_start, "end_date": previous_end,
+        },
+    }
+
+
 def sotephwar_transection_customer(
     period="all_time",
     customer=None,
@@ -3468,6 +3673,69 @@ def sotephwar_inventory_stock(period="all_time", product=None, store=None):
         "product": product,
         "store": store,
         "stock": rows,
+    }
+
+
+def _sotephwar_bottle_type(product):
+    """Normalize presentation aliases without changing stored movement records."""
+    text = re.sub(r"^sote\s*phwar\s*", "", str(product or "").strip(), flags=re.IGNORECASE)
+    compact = re.sub(r"\s+", "", text).casefold()
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(ml|l)", compact)
+    if not match:
+        return text or "Unknown"
+    amount, unit = match.groups()
+    return f"{amount} {'mL' if unit == 'ml' else 'L'}"
+
+
+def sotephwar_inventory_dashboard():
+    """Return authoritative current bottle quantities by store and bottle type."""
+    stock_rows = sotephwar_inventory_stock().get("stock") or []
+    to_store = _sotephwar_inventory_store_expr('"To_Store"')
+    from_store = _sotephwar_inventory_store_expr('"From_Store"')
+    updated_rows = _fetch_all(f'''
+        WITH movements AS (
+          SELECT {to_store} AS store, "Product" AS product,
+                 GREATEST(COALESCE("Date"::timestamp, '-infinity'),
+                          COALESCE(updated_at, '-infinity')) AS changed_at
+          FROM {_sotephwar_inventory_table_ref()}
+          WHERE COALESCE(__nc_deleted, false) = false
+            AND "To_Store" IS NOT NULL AND "To_Store" NOT IN ('-', 'Customer')
+          UNION ALL
+          SELECT {from_store} AS store, "Product" AS product,
+                 GREATEST(COALESCE("Date"::timestamp, '-infinity'),
+                          COALESCE(updated_at, '-infinity')) AS changed_at
+          FROM {_sotephwar_inventory_table_ref()}
+          WHERE COALESCE(__nc_deleted, false) = false
+            AND "From_Store" IS NOT NULL AND "From_Store" NOT IN ('-', 'Customer')
+        )
+        SELECT store, product, MAX(changed_at) AS last_updated
+        FROM movements GROUP BY store, product
+    ''')
+    updates = {(row["store"], row["product"]): row.get("last_updated") for row in updated_rows}
+    rows = []
+    bottle_totals = {}
+    store_totals = {}
+    for stock in stock_rows:
+        bottle_type = _sotephwar_bottle_type(stock.get("product"))
+        quantity = int(stock.get("stock_qty") or 0)
+        row = {
+            "store": stock.get("store") or "Unknown",
+            "bottle_type": bottle_type,
+            "product": stock.get("product") or "",
+            "current_quantity": quantity,
+            "last_updated": updates.get((stock.get("store"), stock.get("product"))),
+        }
+        rows.append(row)
+        bottle_totals[bottle_type] = bottle_totals.get(bottle_type, 0) + quantity
+        store_totals[row["store"]] = store_totals.get(row["store"], 0) + quantity
+    last_updated = max((row["last_updated"] for row in rows if row["last_updated"]), default=None)
+    return {
+        "formula": "sotephwar_inventory_stock",
+        "stock": rows,
+        "bottle_types": sorted(bottle_totals),
+        "bottle_totals": [{"bottle_type": key, "current_quantity": bottle_totals[key]} for key in sorted(bottle_totals)],
+        "store_totals": [{"store": key, "current_quantity": store_totals[key]} for key in sorted(store_totals)],
+        "last_updated": last_updated,
     }
 
 
@@ -4284,6 +4552,10 @@ def save_payment_receive(
 ):
     ensure_payment_receive_table()
     ensure_voucher_summary_fields()
+    allowed_payment_methods = {"Cash", "KPay", "AYA Pay", "UAB Pay", "Other Online Pay"}
+    payment_method = str(payment_method or "").strip()
+    if payment_method not in allowed_payment_methods:
+        raise ValueError("payment_method must be Cash, KPay, AYA Pay, UAB Pay, or Other Online Pay")
     receive_amount = int(receive_amount or 0)
     if receive_amount <= 0:
         raise ValueError("receive_amount must be greater than zero")

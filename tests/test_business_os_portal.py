@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from scripts import receive_payment_server
 from tools import business_os_portal
+from tools import farm_voucher_repository
 from tools import veggies_production_portal as veggies
 
 
@@ -19,13 +20,34 @@ class BusinessOsPortalTest(unittest.TestCase):
             response = self.client.get("/business-os")
         html = response.get_data(as_text=True)
         self.assertEqual(200, response.status_code)
-        for label in ("BigShot Business OS", "Dashboard", "Sales", "Receive Payment", "Production",
-                      "Veggies Production", "Veggies Crop Master", "Customers", "Inventory",
-                      "Financial", "Reports", "Settings"):
+        for label in ("BigShot Business OS", "Dashboard", "Daily Entry", "Farm Voucher", "Receive Payment", "General Transaction",
+                      "Veggies Production", "Master Data", "Veggies Crop Master", "Customers"):
             self.assertIn(label, html)
         self.assertIn('aria-current="page">Dashboard', html)
         self.assertNotIn("POSTGRES_PASSWORD", html)
         self.assertNotIn("nc_pat_", html)
+        self.assertIn('href="/business-os/farm-voucher"', html)
+
+    def test_integrated_farm_voucher_route_card_and_sidebar(self):
+        with patch.object(farm_voucher_repository, "list_customers", return_value=[]), \
+             patch.object(farm_voucher_repository, "list_crops", return_value=[{"id": 1, "crop_name": "Beetroot"}]), \
+             patch.object(farm_voucher_repository, "list_drafts", return_value=[]):
+            home = self.client.get("/business-os")
+            integrated = self.client.get("/business-os/farm-voucher")
+            legacy = self.client.get("/farm-voucher")
+            customers = self.client.get("/business-os/api/farm-voucher/customers")
+            drafts = self.client.get("/business-os/api/farm-voucher/drafts")
+            crops = self.client.get("/business-os/api/farm-voucher/crops")
+        self.assertEqual([200, 200, 200, 200, 200, 200], [home.status_code, integrated.status_code, legacy.status_code, customers.status_code, drafts.status_code, crops.status_code])
+        html = integrated.get_data(as_text=True)
+        self.assertIn("BigShot Business OS", html)
+        self.assertIn('aria-current="page">Farm Voucher', html)
+        self.assertIn('/static/farm_voucher.css', html)
+        self.assertIn('/static/farm_voucher.js', html)
+        self.assertIn('Invoice Date', html)
+        self.assertIn('Add Date Section', html)
+        self.assertEqual("Beetroot", crops.get_json()["crops"][0]["crop_name"])
+        self.assertIn('href="/business-os/farm-voucher"', home.get_data(as_text=True))
 
     def test_root_redirects_to_business_os(self):
         response = self.client.get("/")
@@ -59,7 +81,7 @@ class BusinessOsPortalTest(unittest.TestCase):
         self.assertIn('aria-current="page">Veggies Crop Master', crop_master.get_data(as_text=True))
 
     def test_placeholder_pages_return_200(self):
-        for slug in ("customers", "inventory", "financial", "reports", "settings"):
+        for slug in ("inventory", "financial", "reports", "settings"):
             response = self.client.get(f"/business-os/{slug}")
             self.assertEqual(200, response.status_code, slug)
             self.assertIn("Module planned for a future version.", response.get_data(as_text=True))

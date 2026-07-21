@@ -5,6 +5,7 @@ import json
 import re
 import threading
 from time import monotonic
+from typing import Optional
 
 from tools import bi_search
 from tools import formula_engine
@@ -20,6 +21,17 @@ BUSINESS_UNIT_SECTORS = {
     "factory": "SP Production",
 }
 VALID_PAYMENT_STATUSES = {"", "Paid", "Partial", "Outstanding"}
+PAYMENTS_QUERY_CONTRACT = {
+    "version": "payments-v1-2026-07-16",
+    "read_only": True,
+    "voucher_identity": ["sector", "voucher_number", "invoice_date", "customer"],
+    "period_basis": {"receivables": "invoice_date", "receipts": "receive_date"},
+    "sources": ["payment_receive_summary", "recent_payment_receipts"],
+    "row_limit": 100,
+    "voucher_order": ["outstanding_balance DESC", "invoice_date ASC NULLS LAST"],
+    "receipt_order": ["receive_date DESC NULLS LAST", "id DESC"],
+    "aging_semantics": "invoice_age_not_due_date",
+}
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
 
@@ -46,6 +58,117 @@ class DashboardFilters:
             "location": self.location,
             "payment_status": self.payment_status,
         }
+
+
+@dataclass(frozen=True)
+class FarmProductionFilters:
+    start_date: date
+    end_date: date
+    crop_ids: Optional[tuple[int, ...]] = None
+    farm_area_ids: tuple[int, ...] = ()
+    grouping: str = "daily"
+
+
+def parse_farm_production_filters(payload):
+    raw = (payload or {}).get("filters") or {}
+    try:
+        start = date.fromisoformat(str(raw.get("start_date") or ""))
+        end = date.fromisoformat(str(raw.get("end_date") or ""))
+    except ValueError as exc:
+        raise ValueError("start_date and end_date must use YYYY-MM-DD") from exc
+    if end < start:
+        raise ValueError("end_date must not be before start_date")
+    if (end - start).days > 730:
+        raise ValueError("date range cannot exceed two years")
+    grouping = str(raw.get("grouping") or "daily").lower()
+    if grouping not in {"daily", "weekly", "monthly"}:
+        raise ValueError("grouping must be daily, weekly, or monthly")
+    try:
+        crop_ids = (tuple(sorted({int(value) for value in (raw.get("crop_ids") or [])}))
+                    if "crop_ids" in raw else None)
+        farm_area_ids = tuple(sorted({int(value) for value in (raw.get("farm_area_ids") or [])}))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("crop_ids and farm_area_ids must contain integer IDs") from exc
+    return FarmProductionFilters(start, end, crop_ids, farm_area_ids, grouping)
+
+
+def farm_production_dashboard(filters):
+    dimensions = formula_engine.farm_production_dimensions()
+    selected_crops = (tuple(crop["id"] for crop in dimensions["crops"][:5])
+                      if filters.crop_ids is None else filters.crop_ids)
+    trend = formula_engine.farm_production_analytics(
+        filters.start_date, filters.end_date, selected_crops,
+        filters.farm_area_ids, filters.grouping, dimensions["farm_areas"],
+    )
+    return {
+        **trend,
+        "available_crops": dimensions["crops"],
+        "available_farm_areas": dimensions["farm_areas"],
+        "selected_crop_ids": list(selected_crops),
+        "selected_farm_area_ids": list(filters.farm_area_ids),
+    }
+
+
+def inventory_dashboard():
+    return formula_engine.sotephwar_inventory_dashboard()
+
+
+def payments_dashboard(filters):
+    """Compose the read-only Payments page from canonical Formula Engine reports."""
+    period = legacy_period(filters.period)
+    sector = _formula_filters(filters).get("sector")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        summary_future = executor.submit(
+            formula_engine.payment_receive_summary,
+            period,
+            sector=sector,
+            customer=filters.customer or None,
+            payment_status=filters.payment_status or None,
+            limit=PAYMENTS_QUERY_CONTRACT["row_limit"],
+        )
+        history_future = executor.submit(
+            formula_engine.recent_payment_receipts,
+            period,
+            sector=sector,
+            customer=filters.customer or None,
+            payment_status=filters.payment_status or None,
+            limit=PAYMENTS_QUERY_CONTRACT["row_limit"],
+        )
+        summary = summary_future.result()
+        history = history_future.result()
+
+    invoices = summary.get("invoices", [])
+    status_counts = {"Paid": 0, "Partial": 0, "Outstanding": 0}
+    for invoice in invoices:
+        outstanding = int(invoice.get("outstanding_balance") or 0)
+        received = int(invoice.get("received_amount") or 0)
+        status = "Paid" if outstanding <= 0 else "Partial" if received > 0 else "Outstanding"
+        invoice["payment_status"] = status
+        status_counts[status] += 1
+    return {
+        "filters": filters.to_dict(),
+        "filter_label": filter_label(filters),
+        "metrics": {
+            "invoiced": summary.get("total_invoice_amount", 0),
+            "received": summary.get("total_received", 0),
+            "outstanding": summary.get("outstanding_receivables", 0),
+            "collection_rate_percent": summary.get("collection_rate_percent", 0),
+            "voucher_count": len(invoices),
+        },
+        "aging": summary.get("aging", {}),
+        "status_counts": status_counts,
+        "sector_totals": summary.get("sector_totals", []),
+        "customer_balances": summary.get("customer_balances", []),
+        "invoices": invoices,
+        "recent_payments": history.get("payments", []),
+        "data_quality": [{
+            "metric": "aging",
+            "status": "limited",
+            "message": "Aging is based on invoice age because an approved due-date model is not yet available.",
+        }],
+        "sources": ["payment_receive_summary", "recent_payment_receipts"],
+        "contract": PAYMENTS_QUERY_CONTRACT,
+    }
 
 
 def parse_dashboard_filters(payload):

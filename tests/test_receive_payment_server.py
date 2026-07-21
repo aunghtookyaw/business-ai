@@ -102,6 +102,13 @@ class ReceivePaymentServerTest(unittest.TestCase):
         self.assertNotIn('COALESCE(MAX(s."Outstanding_Balance"), 0)', sql)
         self.assertNotIn('COALESCE(SUM(s."Outstanding_Balance"), 0) AS "Outstanding_Balance"', sql)
 
+    def test_farm_receive_payment_identity_uses_one_aggregate_invoice_date_not_delivery_dates(self):
+        sql = receive_payment_server._voucher_query()
+        self.assertIn("'Farm' AS \"Sector\"", sql)
+        self.assertIn('f."Date" AS "Invoice_Date"', sql)
+        self.assertIn('GROUP BY f."Invoice_Number"::text, f."Date"', sql)
+        self.assertNotIn("delivery_date", sql.lower())
+
     def test_sotephwar_listing_query_returns_raw_rows(self):
         sql = receive_payment_server._sotephwar_listing_query(
             where_sql=(

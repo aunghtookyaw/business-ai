@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from uuid import uuid4
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -16,7 +17,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "dashboard-prototype" / "assets" / "bigshot-logo.jpg"
 
 PLACEHOLDERS = {
-    "customers": "Customers",
     "inventory": "Inventory",
     "financial": "Financial",
     "reports": "Reports",
@@ -42,15 +42,10 @@ def render_shell(content: str, title: str, active: str = "dashboard") -> str:
     <a class="bos-brand" href="/business-os"><img src="/business-os/assets/logo" alt="BigShot logo"><span>BigShot Business OS</span></a>
     <nav>
       {_nav_item('/business-os', 'Dashboard', active, 'dashboard')}
-      <div class="bos-nav-group"><span>Sales</span>{_nav_item('/business-os/receive-payment', 'Receive Payment', active, 'receive-payment')}</div>
-      <div class="bos-nav-group"><span>Production</span>{_nav_item('/business-os/veggies-production', 'Veggies Production', active, 'veggies-production')}{_nav_item('/business-os/veggies-production/crops', 'Veggies Crop Master', active, 'crop-master')}</div>
-      {_nav_item('/business-os/customers', 'Customers', active, 'customers')}
-      {_nav_item('/business-os/inventory', 'Inventory', active, 'inventory')}
-      {_nav_item('/business-os/financial', 'Financial', active, 'financial')}
-      {_nav_item('/business-os/reports', 'Reports', active, 'reports')}
-      {_nav_item('/business-os/settings', 'Settings', active, 'settings')}
+      <div class="bos-nav-group"><span>Daily Entry</span>{_nav_item('/business-os/farm-voucher', 'Farm Voucher', active, 'farm-voucher')}{_nav_item('/business-os/sotephwar-voucher', 'SotePhwar Voucher', active, 'sotephwar-voucher')}{_nav_item('/business-os/sotephwar-inventory', 'SotePhwar Inventory', active, 'sotephwar-inventory')}{_nav_item('/business-os/general-transaction', 'General Transaction', active, 'general-transaction')}{_nav_item('/business-os/receive-payment', 'Receive Payment', active, 'receive-payment')}{_nav_item('/business-os/veggies-production', 'Veggies Production', active, 'veggies-production')}</div>
+      <div class="bos-nav-group"><span>Master Data</span>{_nav_item('/business-os/customers', 'Customers', active, 'customers')}{_nav_item('/business-os/veggies-production/crops', 'Veggies Crop Master', active, 'crop-master')}</div>
     </nav>
-    <div class="bos-status">Local Business OS<br><span>127.0.0.1 only</span></div>
+    <div class="bos-status">Local Business OS<br><span>Local network access</span></div>
   </aside>
   <div class="bos-workspace">
     <header class="bos-header"><button class="bos-menu" type="button" aria-controls="businessOsSidebar" aria-expanded="false">Menu</button><div><span>Current module</span><h1>{escape(title)}</h1></div><a href="/business-os">Business OS Home</a></header>
@@ -126,6 +121,22 @@ def _database_health(connect) -> tuple[str, str]:
 
 def register_business_os(app, connect) -> None:
     """Register the unified shell around already-registered module routes."""
+    from tools.farm_voucher_portal import register_farm_voucher
+    from tools.sotephwar_voucher_portal import register_sotephwar_voucher
+    from tools.sotephwar_inventory_portal import register_sotephwar_inventory
+    from tools.general_transaction_portal import register_general_transaction
+    from tools.customer_master_portal import register_customer_master
+    register_farm_voucher(app)
+    register_sotephwar_voucher(app)
+    register_sotephwar_inventory(app)
+    register_general_transaction(app)
+    register_customer_master(app)
+
+    @app.post("/business-os/api/security/idempotency-token")
+    def business_os_idempotency_token():
+        if request.headers.get("X-Business-OS-Request") != "uuid-v1":
+            return {"ok": False, "error": "Protected Business OS endpoint"}, 403
+        return {"ok": True, "token": str(uuid4())}
     app.add_url_rule(
         "/business-os/receive-payment", "business_os_receive_payment",
         app.view_functions["receive_payment_basic_page"], methods=["GET", "POST"],
@@ -136,6 +147,7 @@ def register_business_os(app, connect) -> None:
         ("/business-os/veggies-production/crops/<int:crop_id>", "business_os_crop_update", "veggies_crop_master_update", ["POST"]),
         ("/business-os/veggies-production/<int:batch_id>", "business_os_production_detail", "veggies_production_detail", ["GET"]),
         ("/business-os/veggies-production/<int:batch_id>/edit", "business_os_production_edit", "veggies_production_edit", ["GET", "POST"]),
+        ("/business-os/veggies-production/<int:batch_id>/delete", "business_os_production_delete", "veggies_production_delete", ["POST"]),
     )
     for rule, endpoint, legacy_endpoint, methods in aliases:
         app.add_url_rule(rule, endpoint, app.view_functions[legacy_endpoint], methods=methods)
@@ -148,13 +160,14 @@ def register_business_os(app, connect) -> None:
     def business_os_home():
         db_status, db_class = _database_health(connect)
         cards = (
+            ("Farm Voucher", "Create, validate, preview, print and submit Farm sales vouchers.", "/business-os/farm-voucher", "Available"),
+            ("SotePhwar Voucher", "Create, validate, preview, print and submit SotePhwar sales vouchers.", "/business-os/sotephwar-voucher", "Available"),
+            ("SotePhwar Inventory", "Record production, transfers and sales against authoritative bottle stock.", "/business-os/sotephwar-inventory", "Available"),
             ("Receive Payment", "Record and review customer payments.", "/business-os/receive-payment", "Available"),
+            ("General Transaction", "Record genuine non-voucher income and general expenses.", "/business-os/general-transaction", "Available"),
             ("Veggies Production", "Enter and review daily vegetable production.", "/business-os/veggies-production", "Available"),
             ("Veggies Crop Master", "Manage active crops and display settings.", "/business-os/veggies-production/crops", "Available"),
-            ("Customers", "Customer operations module.", "/business-os/customers", "Coming Soon"),
-            ("Inventory", "Inventory operations module.", "/business-os/inventory", "Coming Soon"),
-            ("Financial", "Financial operations module.", "/business-os/financial", "Coming Soon"),
-            ("Reports", "Business reports module.", "/business-os/reports", "Coming Soon"),
+            ("Customers", "Search, add and maintain the operational Customer Master.", "/business-os/customers", "Available"),
         )
         card_html = "".join(
             f'<a class="bos-module-card" href="{path}"><span>{escape(status)}</span><h2>{escape(name)}</h2><p>{escape(description)}</p></a>'
@@ -163,7 +176,11 @@ def register_business_os(app, connect) -> None:
         now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
         health = f'''<section class="bos-panel"><h2>System health</h2><div class="bos-health-grid">
           <div><span>PostgreSQL connection</span><strong class="{db_class}">{db_status}</strong></div>
+          <div><span>Farm Voucher module</span><strong class="good">Available</strong></div>
+          <div><span>SotePhwar Voucher module</span><strong class="good">Available</strong></div>
+          <div><span>SotePhwar Inventory module</span><strong class="good">Available</strong></div>
           <div><span>Receive Payment module</span><strong class="good">Available</strong></div>
+          <div><span>General Transaction module</span><strong class="good">Available</strong></div>
           <div><span>Veggies Production module</span><strong class="good">Available</strong></div>
           <div><span>Current local time</span><strong>{escape(now)}</strong></div>
           <div><span>Application version</span><strong>{escape(_git_version())}</strong></div>
@@ -188,6 +205,11 @@ def register_business_os(app, connect) -> None:
         if response.status_code < 300 and response.mimetype == "text/html":
             titles = {
                 "business_os_receive_payment": ("Receive Payment", "receive-payment"),
+                "business_os_farm_voucher": ("Farm Voucher", "farm-voucher"),
+                "business_os_sotephwar_voucher": ("SotePhwar Voucher", "sotephwar-voucher"),
+                "business_os_sotephwar_inventory": ("SotePhwar Inventory", "sotephwar-inventory"),
+                "business_os_general_transaction": ("General Transaction", "general-transaction"),
+                "business_os_customers": ("Customers", "customers"),
                 "business_os_veggies_production": ("Veggies Production", "veggies-production"),
                 "business_os_crop_master": ("Veggies Crop Master", "crop-master"),
                 "business_os_crop_update": ("Veggies Crop Master", "crop-master"),
