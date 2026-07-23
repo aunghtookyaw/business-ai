@@ -32,6 +32,17 @@ def _nav_item(path: str, label: str, active: str, key: str) -> str:
 
 def render_shell(content: str, title: str, active: str = "dashboard") -> str:
     """Render one accessible, responsive shell around module content."""
+    audit_targets = {
+        "sotephwar-voucher": "sotephwar_transection",
+        "farm-voucher": "farm_transection",
+        "general-transaction": "transection",
+    }
+    audit_link = ""
+    if active in audit_targets:
+        audit_link = (
+            f'<a class="bos-header-action" href="/data-audit?target_key={audit_targets[active]}" '
+            f'data-audit-target="{audit_targets[active]}">Excel Upload &amp; Compare</a>'
+        )
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)} · BigShot Business OS</title>
@@ -49,7 +60,7 @@ def render_shell(content: str, title: str, active: str = "dashboard") -> str:
     <div class="bos-status">Local Business OS<br><span>Local network access</span></div>
   </aside>
   <div class="bos-workspace">
-    <header class="bos-header"><button class="bos-menu" type="button" aria-controls="businessOsSidebar" aria-expanded="false">Menu</button><div><span>Current module</span><h1>{escape(title)}</h1></div><a href="/business-os">Business OS Home</a></header>
+    <header class="bos-header"><button class="bos-menu" type="button" aria-controls="businessOsSidebar" aria-expanded="false">Menu</button><div><span>Current module</span><h1>{escape(title)}</h1></div>{audit_link}<a href="/business-os">Business OS Home</a></header>
     <main class="bos-main" id="main-content">{content}</main>
   </div>
 </div><script src="/static/business_os.js"></script></body></html>'''

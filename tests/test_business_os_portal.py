@@ -84,6 +84,18 @@ class BusinessOsPortalTest(unittest.TestCase):
         self.assertEqual("Beetroot", crops.get_json()["crops"][0]["crop_name"])
         self.assertIn('href="/business-os/farm-voucher"', home.get_data(as_text=True))
 
+    def test_transaction_modules_link_to_locked_data_audit_targets(self):
+        expected = {
+            "/business-os/sotephwar-voucher": "sotephwar_transection",
+            "/business-os/farm-voucher": "farm_transection",
+            "/business-os/general-transaction": "transection",
+        }
+        for path, target in expected.items():
+            with self.subTest(path=path):
+                html = self.client.get(path).get_data(as_text=True)
+                self.assertIn("Excel Upload &amp; Compare", html)
+                self.assertIn(f"/data-audit?target_key={target}", html)
+
     def test_root_redirects_to_business_os(self):
         response = self.client.get("/")
         self.assertEqual(302, response.status_code)
