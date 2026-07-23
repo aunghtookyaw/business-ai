@@ -11,7 +11,7 @@ This local portal is separate from the public DigitalOcean executive dashboard.
 From the repository root:
 
 ```bash
-python3 scripts/receive_payment_server.py
+python3 ops/business_os_server.py
 ```
 
 Open `http://127.0.0.1:5059/business-os`.
@@ -20,9 +20,10 @@ The server binds to `127.0.0.1` by default. Current access behavior is preserved
 
 ## Architecture
 
-The established Flask server remains the single process and main entry point. Both modules continue using the existing Formula Engine database connection helper; the portal does not duplicate database credentials or connections.
+Waitress runs only from the canonical Business OS server entrypoint. Modules continue using the existing Formula Engine database connection helper; the portal does not duplicate database credentials or connections.
 
-- `scripts/receive_payment_server.py`: main server and Receive Payment business logic
+- `ops/business_os_server.py`: sole Waitress production entrypoint and `/status` route
+- `business_os_app.py`: shared Flask application and Receive Payment business logic
 - `tools/veggies_production_portal.py`: Veggies Production routes, validation, queries, and writes
 - `tools/business_os_portal.py`: shared shell, route aliases, health display, placeholders, and safe error pages
 - `static/business_os.css`: shared responsive presentation
@@ -50,7 +51,7 @@ No database migration or new business table is required.
 | `/business-os/reports` | Future-module placeholder |
 | `/business-os/settings` | System information and future-module placeholder |
 
-The old `/receive-payment-basic`, `/receive-payment`, `/veggies-production`, and `/veggies-production/crops` routes remain available. Record detail and edit paths are also aliased under `/business-os/veggies-production/...`.
+The standalone Receive Payment portal routes are retired. Receive Payment is available only at `/business-os/receive-payment`. Veggies Production record detail and edit paths are available under `/business-os/veggies-production/...`.
 
 ## Module integration
 
@@ -69,7 +70,7 @@ Receive Payment retains its voucher lookup, validation, save workflow, and Formu
 
 ### Blank page
 
-Run the start command in a terminal and keep it open. Confirm `http://127.0.0.1:5059/health` returns JSON, then reload `/business-os`. Check the terminal for a locally logged exception. Browser users never receive a stack trace.
+Run the start command in a terminal and keep it open. Confirm `http://127.0.0.1:5059/status` returns JSON, then reload `/business-os`. Check the terminal for a locally logged exception. Browser users never receive a stack trace.
 
 ### PostgreSQL unavailable
 
@@ -77,7 +78,7 @@ The home page reports `Unavailable` without exposing connection details. Confirm
 
 ### Where to begin reading
 
-Start at `scripts/receive_payment_server.py`. Find `register_business_os`, then read `tools/business_os_portal.py`. Read `tools/veggies_production_portal.py` for production behavior. Tests in `tests/test_business_os_portal.py`, `tests/test_receive_payment_server.py`, and `tests/test_veggies_production_portal.py` provide small usage examples.
+Start at `ops/business_os_server.py`, then read `business_os_app.py` and `tools/business_os_portal.py`. Read `tools/veggies_production_portal.py` for production behavior. Tests in `tests/test_business_os_portal.py`, `tests/test_receive_payment_server.py`, and `tests/test_veggies_production_portal.py` provide small usage examples.
 
 ## Protected boundaries
 

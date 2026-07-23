@@ -3688,8 +3688,9 @@ def _sotephwar_bottle_type(product):
 
 
 def sotephwar_inventory_dashboard():
-    """Return authoritative current bottle quantities by store and bottle type."""
-    stock_rows = sotephwar_inventory_stock().get("stock") or []
+    """Return authoritative current quantities and valuations for Inventory UI."""
+    valuation = calculate_inventory_value()
+    stock_rows = valuation.get("stock") or []
     to_store = _sotephwar_inventory_store_expr('"To_Store"')
     from_store = _sotephwar_inventory_store_expr('"From_Store"')
     updated_rows = _fetch_all(f'''
@@ -3723,19 +3724,129 @@ def sotephwar_inventory_dashboard():
             "bottle_type": bottle_type,
             "product": stock.get("product") or "",
             "current_quantity": quantity,
+            "unit_cost": int(stock.get("unit_cost") or 0),
+            "inventory_value": int(stock.get("inventory_value") or 0),
             "last_updated": updates.get((stock.get("store"), stock.get("product"))),
         }
         rows.append(row)
-        bottle_totals[bottle_type] = bottle_totals.get(bottle_type, 0) + quantity
-        store_totals[row["store"]] = store_totals.get(row["store"], 0) + quantity
+        bottle_row = bottle_totals.setdefault(bottle_type, {
+            "bottle_type": bottle_type, "product": row["product"],
+            "current_quantity": 0, "inventory_value": 0,
+        })
+        bottle_row["current_quantity"] += quantity
+        bottle_row["inventory_value"] += row["inventory_value"]
+        store_row = store_totals.setdefault(row["store"], {
+            "store": row["store"], "current_quantity": 0, "inventory_value": 0,
+        })
+        store_row["current_quantity"] += quantity
+        store_row["inventory_value"] += row["inventory_value"]
     last_updated = max((row["last_updated"] for row in rows if row["last_updated"]), default=None)
     return {
         "formula": "sotephwar_inventory_stock",
         "stock": rows,
         "bottle_types": sorted(bottle_totals),
-        "bottle_totals": [{"bottle_type": key, "current_quantity": bottle_totals[key]} for key in sorted(bottle_totals)],
-        "store_totals": [{"store": key, "current_quantity": store_totals[key]} for key in sorted(store_totals)],
+        "bottle_totals": [bottle_totals[key] for key in sorted(bottle_totals)],
+        "store_totals": [store_totals[key] for key in sorted(store_totals)],
+        "total_bottles": sum(row["current_quantity"] for row in bottle_totals.values()),
+        "total_inventory_value": int(valuation.get("total_inventory_value") or 0),
         "last_updated": last_updated,
+    }
+
+
+def sotephwar_production_inventory_dashboard(year=None, month=None):
+    """Compose production management analytics from the authoritative movement ledger."""
+    today = date.today()
+    selected_year = int(year or today.year)
+    requested_month = int(month) if month not in (None, "") else None
+    selected_month = requested_month or today.month
+    if not 2000 <= selected_year <= 2100 or not 1 <= selected_month <= 12:
+        raise ValueError("invalid inventory production month")
+    inventory = sotephwar_inventory_dashboard()
+    movement_rows = _fetch_all(f'''
+        SELECT DATE_TRUNC('month', "Date")::date AS production_month,
+               "Product" AS product, "Type" AS movement_type,
+               COALESCE(SUM("Qty"), 0) AS quantity
+        FROM {_sotephwar_inventory_table_ref()}
+        WHERE COALESCE(__nc_deleted, false) = false
+          AND "Date" IS NOT NULL
+          AND "Type" IN ('Production', 'Sale')
+        GROUP BY DATE_TRUNC('month', "Date"), "Product", "Type"
+        ORDER BY production_month, product, movement_type
+    ''')
+    bottle_types = ["4 L", "1 L", "500 mL", "100 mL"]
+    stock_by_type = {row["bottle_type"]: row for row in inventory.get("bottle_totals") or []}
+    lifetime = {bottle_type: {"produced": 0, "sold": 0} for bottle_type in bottle_types}
+    selected = {bottle_type: 0 for bottle_type in bottle_types}
+    monthly = {}
+    for row in movement_rows:
+        bottle_type = _sotephwar_bottle_type(row.get("product"))
+        if bottle_type not in lifetime:
+            continue
+        quantity = int(row.get("quantity") or 0)
+        movement_type = row.get("movement_type")
+        month_date = row.get("production_month")
+        key = month_date.strftime("%Y-%m")
+        bucket = monthly.setdefault(key, {
+            "month": key, "label": month_date.strftime("%b %Y"),
+            "production": {item: 0 for item in bottle_types}, "sales": 0,
+            "has_production_source": False,
+        })
+        if movement_type == "Production":
+            bucket["has_production_source"] = True
+            lifetime[bottle_type]["produced"] += quantity
+            bucket["production"][bottle_type] += quantity
+            if month_date.year == selected_year and month_date.month == selected_month:
+                selected[bottle_type] += quantity
+        elif movement_type == "Sale":
+            lifetime[bottle_type]["sold"] += quantity
+            bucket["sales"] += quantity
+    lifetime_rows = []
+    for bottle_type in bottle_types:
+        stock = stock_by_type.get(bottle_type) or {}
+        lifetime_rows.append({
+            "bottle_type": bottle_type,
+            "lifetime_produced": lifetime[bottle_type]["produced"],
+            "current_stock": int(stock.get("current_quantity") or 0),
+            "sold": lifetime[bottle_type]["sold"],
+            "inventory_value": int(stock.get("inventory_value") or 0),
+        })
+    selected_month_key = f"{selected_year:04d}-{selected_month:02d}"
+    current_month = monthly.get(f"{today.year:04d}-{today.month:02d}") or {"production": {}, "sales": 0}
+    monthly_rows = [row for key, row in sorted(monthly.items()) if key.startswith(f"{selected_year:04d}-")]
+    for row in monthly_rows:
+        row["total_production"] = sum(row["production"].values())
+    available_production_months = [
+        int(row["month"].split("-")[1]) for row in monthly_rows
+        if row.get("has_production_source")
+    ]
+    if requested_month is None and available_production_months:
+        selected_month = max(available_production_months)
+    return {
+        **inventory,
+        "formula": "sotephwar_production_inventory_dashboard",
+        "selected_year": selected_year,
+        "selected_month": selected_month,
+        "production_summary_label": date(selected_year, selected_month, 1).strftime("%B %Y"),
+        "production_summary_has_data": selected_month in available_production_months,
+        "available_production_months": available_production_months,
+        "bottle_types": bottle_types,
+        "lifetime_production_bottles": sum(item["lifetime_produced"] for item in lifetime_rows),
+        "current_month_production": sum((current_month.get("production") or {}).values()),
+        "current_month_sales": int(current_month.get("sales") or 0),
+        "factory_utilization": None,
+        "factory_utilization_available": False,
+        "lifetime_by_bottle_type": lifetime_rows,
+        "selected_month_production": [
+            {"bottle_type": bottle_type, "quantity": selected[bottle_type]}
+            for bottle_type in bottle_types
+        ],
+        "selected_month_total": sum(selected.values()),
+        "monthly_production": monthly_rows,
+        "production_vs_sales": [
+            {"month": row["month"], "label": row["label"],
+             "production": row["total_production"], "sales": row["sales"]}
+            for row in monthly_rows
+        ],
     }
 
 

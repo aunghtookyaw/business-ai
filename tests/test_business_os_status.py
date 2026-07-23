@@ -22,7 +22,7 @@ def test_status_endpoint_shape(monkeypatch):
     }
 
 
-def test_launchagent_environment_imports_receive_payment_server():
+def test_launchagent_environment_imports_business_os_app():
     root = Path(__file__).resolve().parents[1]
     wrapper = (root / "ops/businessos-service.sh").read_text()
     assert 'export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"' in wrapper
@@ -35,9 +35,17 @@ def test_launchagent_environment_imports_receive_payment_server():
         "RECEIVE_PAYMENT_PORT": "5059",
     }
     result = subprocess.run(
-        ["/usr/bin/python3", "-c", "import scripts.receive_payment_server; print('import-ok')"],
+        ["/usr/bin/python3", "-c", "import business_os_app; print('import-ok')"],
         cwd="/tmp", env=environment, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "import-ok"
     assert "PYTHONHOME" not in environment
+
+
+def test_launchagent_execs_only_canonical_entrypoint():
+    root = Path(__file__).resolve().parents[1]
+    wrapper = (root / "ops/businessos-service.sh").read_text()
+
+    assert 'lsof -nP -iTCP:5059 -sTCP:LISTEN' in wrapper
+    assert wrapper.count('exec /usr/bin/python3 "$PROJECT_ROOT/ops/business_os_server.py"') == 1

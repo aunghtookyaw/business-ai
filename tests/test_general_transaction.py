@@ -3,7 +3,7 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 from uuid import UUID
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 from tools import general_transaction
 
 

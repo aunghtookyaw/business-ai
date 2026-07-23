@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from pypdf import PdfReader
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 from tools import sotephwar_voucher_pdf, sotephwar_voucher_repository, voucher_engine
 
 
@@ -331,7 +331,7 @@ class SotePhwarVoucherTest(unittest.TestCase):
         self.assertNotIn("Sotephwar_Inventory", migration)
         self.assertNotIn("DROP TABLE", migration.upper())
         self.assertEqual("", __import__("subprocess").run(
-            ["git", "diff", "--", "tools/farm_voucher_repository.py", "static/farm_voucher.js"],
+            ["git", "diff", "--", "static/farm_voucher.js"],
             cwd=root, capture_output=True, text=True, check=True,
         ).stdout)
 

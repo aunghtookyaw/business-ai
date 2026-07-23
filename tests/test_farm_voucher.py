@@ -1,11 +1,14 @@
 import tempfile
 import unittest
+from io import BytesIO
+import hashlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from pypdf import PdfReader
 
 from scripts import dashboard_server
+import business_os_app
 from tools import farm_voucher_pdf, farm_voucher_repository, voucher_engine
 
 
@@ -245,6 +248,38 @@ class FarmVoucherTest(unittest.TestCase):
         self.assertIn("091234567", extracted)
         self.assertIn("Farm Road", extracted)
         self.assertIn("Beetroot", extracted)
+
+    def test_submitted_pdf_defaults_to_current_payment_statement_and_preserves_original(self):
+        submitted = voucher_engine.preview({
+            **self.draft,
+            "amount_received": "880000",
+            "lines": [{"description": "Beetroot", "quantity": "1", "unit": "kg", "unit_price": "1880000"}],
+            "customer_snapshot": {"phone_number": "091234567", "contact_address": "Farm Road"},
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            original = Path(directory) / "original.pdf"
+            farm_voucher_pdf.write_farm_voucher_pdf(submitted, original)
+            original_checksum = hashlib.sha256(original.read_bytes()).hexdigest()
+            draft = {"id": 77, "status": "submitted", "submitted_voucher": submitted}
+            current = {"invoice_amount": 1880000, "current_received": 1880000, "current_outstanding": 0,
+                       "current_payment_status": "Paid", "latest_payment_date": "2026-07-20"}
+            client = business_os_app.app.test_client()
+            with patch("tools.farm_voucher_portal.farm_voucher_repository.get_draft", return_value=draft), \
+                 patch("tools.farm_voucher_portal.farm_voucher_repository.submitted_pdf_path", return_value=original), \
+                 patch("tools.farm_voucher_portal.current_voucher_payment_state", return_value=current):
+                current_response = client.get("/business-os/api/farm-voucher/drafts/77/pdf")
+                original_response = client.get("/business-os/api/farm-voucher/drafts/77/pdf?original=1")
+
+            current_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(current_response.data)).pages)
+            original_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(original_response.data)).pages)
+            self.assertEqual(200, current_response.status_code)
+            self.assertIn("Beetroot", current_text)
+            self.assertIn("PAYMENT", current_text)
+            self.assertIn("STATUS", current_text)
+            self.assertIn("PAID", current_text)
+            self.assertIn("0.00 MMK", current_text)
+            self.assertIn("880,000.00 MMK", original_text)
+            self.assertEqual(original_checksum, hashlib.sha256(original.read_bytes()).hexdigest())
 
     @patch("tools.farm_voucher_repository.get_draft")
     @patch("tools.farm_voucher_repository._connect")

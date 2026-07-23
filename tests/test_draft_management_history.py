@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 from tools import draft_management, farm_voucher_repository, sotephwar_voucher_repository
 
 
@@ -65,6 +65,55 @@ class DraftManagementHistoryTest(unittest.TestCase):
             result=sotephwar_voucher_repository.recent_submissions({},1,20)
         self.assertEqual(1000,result["items"][0]["paid_quantity"])
         self.assertEqual(2,result["items"][0]["free_quantity"])
+
+    def test_farm_history_uses_current_payment_state_and_keeps_original_audit_values(self):
+        row={"draft_id":8,"voucher_number":"FV-8","voucher_date":__import__('datetime').date(2026,7,1),"customer_name":"Customer",
+             "submitted_at":__import__('datetime').datetime(2026,7,1,1,0),"submitted_pdf_path":"original.pdf","submitted_pdf_checksum":"checksum",
+             "submitted_voucher":{"gross_amount":"2000000","discount_amount":"120000","cashback_amount":"0","net_amount":"1880000","amount_received":"880000","outstanding_balance":"1000000"},
+             "record_id":91,"total_amount":1880000,"total_received":880000,"outstanding_balance":1000000,"payment_status":"Partial","total_count":1}
+        connection=MagicMock();connection.__enter__.return_value=connection;cursor=connection.cursor.return_value.__enter__.return_value;cursor.fetchall.return_value=[row]
+        current={"invoice_amount":1880000,"current_received":1880000,"current_outstanding":0,"current_payment_status":"Paid","latest_payment_date":"2026-07-20"}
+        with patch.object(farm_voucher_repository,"_connect",return_value=connection), patch.object(farm_voucher_repository,"current_voucher_payment_state",return_value=current):
+            result=farm_voucher_repository.recent_submissions({},1,20)
+        item=result["records"][0]
+        self.assertEqual("1880000",item["net_amount"]);self.assertEqual("880000",item["original_received"])
+        self.assertEqual("1000000",item["original_outstanding"]);self.assertEqual("1880000",item["total_received"])
+        self.assertEqual("0",item["outstanding_balance"]);self.assertEqual("Paid",item["payment_status"])
+        self.assertEqual("2026-07-20",item["latest_payment_date"])
+
+    def test_farm_summary_uses_all_today_vouchers_not_visible_history_page(self):
+        today = __import__('datetime').date(2026,7,22)
+        rows = [
+            {"voucher_number":"700","voucher_date":today,"customer_name":"A","total_amount":1000},
+            {"voucher_number":"701","voucher_date":today,"customer_name":"B","total_amount":1284000},
+            {"voucher_number":"702","voucher_date":today,"customer_name":"C","total_amount":1880000},
+        ]
+        connection=MagicMock();connection.__enter__.return_value=connection
+        cursor=connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value={"open_drafts":0};cursor.fetchall.return_value=rows
+        states=[{"current_outstanding":1000},{"current_outstanding":500},{"current_outstanding":0}]
+        with patch.object(farm_voucher_repository,"_connect",return_value=connection), \
+             patch.object(farm_voucher_repository,"current_voucher_payment_state",side_effect=states) as current:
+            summary=farm_voucher_repository.operational_summary()
+        self.assertEqual({"open_drafts":0,"outstanding_today":1500,"submitted_today":3,"total_today":3165000},summary)
+        self.assertEqual(3,current.call_count)
+
+    def test_farm_summary_all_paid_is_zero_and_endpoint_is_not_cached(self):
+        today = __import__('datetime').date(2026,7,22)
+        rows=[{"voucher_number":"701","voucher_date":today,"customer_name":"B","total_amount":1284000},
+              {"voucher_number":"702","voucher_date":today,"customer_name":"C","total_amount":1880000}]
+        connection=MagicMock();connection.__enter__.return_value=connection
+        cursor=connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value={"open_drafts":0};cursor.fetchall.return_value=rows
+        with patch.object(farm_voucher_repository,"_connect",return_value=connection), \
+             patch.object(farm_voucher_repository,"current_voucher_payment_state",side_effect=[{"current_outstanding":0},{"current_outstanding":0}]):
+            summary=farm_voucher_repository.operational_summary()
+        self.assertEqual(0,summary["outstanding_today"]);self.assertEqual(2,summary["submitted_today"]);self.assertEqual(3164000,summary["total_today"])
+        client=receive_payment_server.app.test_client()
+        with patch.object(farm_voucher_repository,"operational_summary",side_effect=[summary,{**summary,"outstanding_today":99}]) as operational:
+            first=client.get("/business-os/api/farm-voucher/summary");second=client.get("/business-os/api/farm-voucher/summary")
+        self.assertEqual("no-store",first.headers["Cache-Control"]);self.assertEqual(0,first.get_json()["summary"]["outstanding_today"])
+        self.assertEqual(99,second.get_json()["summary"]["outstanding_today"]);self.assertEqual(2,operational.call_count)
 
     def test_sote_history_endpoint_normalizes_empty_filters_and_defaults(self):
         client=receive_payment_server.app.test_client()

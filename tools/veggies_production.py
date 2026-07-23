@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, BinaryIO, Iterable
 
@@ -149,6 +149,14 @@ def parse_quantity(value: Any, crop_name: str) -> Decimal | None:
     return quantity
 
 
+def format_quantity(value: Any, blank: str = "") -> str:
+    """Format a production quantity for display without changing its stored value."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return blank
+    quantity = Decimal(str(value).replace(",", "").strip())
+    return format(quantity.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), ".2f")
+
+
 @dataclass(frozen=True)
 class CropDefinition:
     crop_code: str
@@ -284,6 +292,7 @@ def load_crop_definitions(connection=None) -> list[CropDefinition]:
 def crop_header_map(crops: Iterable[CropDefinition]) -> dict[str, CropDefinition]:
     result: dict[str, CropDefinition] = {}
     for crop in crops:
+        result[normalize_header(crop.crop_code)] = crop
         result[normalize_header(crop.crop_name)] = crop
         result[normalize_header(crop.source_header)] = crop
     return result

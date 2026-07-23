@@ -13,6 +13,7 @@ import config
 from tools.formula_engine import _connect
 from tools import voucher_engine
 from tools import draft_management
+from tools.payment_state import current_voucher_payment_state
 from tools.farm_voucher_pdf import write_farm_voucher_pdf
 
 
@@ -481,7 +482,16 @@ def recent_submissions(filters=None, page=1, page_size=20):
         row["cashback_amount"] = str(voucher.get("cashback_amount", 0) or 0)
         row["net_amount"] = str(voucher.get("net_amount", previous_total) or 0)
         row["voucher_date"]=row["voucher_date"].isoformat(); row["submitted_at"]=row["submitted_at"].isoformat() if row["submitted_at"] else None
-        for key in ("total_amount","total_received","outstanding_balance"): row[key]=str(row.get(key) or 0)
+        row["original_received"] = str(voucher.get("amount_received", row.get("total_received") or 0) or 0)
+        row["original_outstanding"] = str(voucher.get("outstanding_balance", row.get("outstanding_balance") or 0) or 0)
+        current = current_voucher_payment_state(
+            "Farm", row["voucher_number"], invoice_date=row["voucher_date"], customer=row["customer_name"],
+        )
+        row.update({key: str(value) if key != "latest_payment_date" else value for key, value in current.items()})
+        row["total_received"] = row["current_received"]
+        row["outstanding_balance"] = row["current_outstanding"]
+        row["payment_status"] = row["current_payment_status"]
+        row["total_amount"] = str(row.get("total_amount") or 0)
         pdf_path = row.pop("submitted_pdf_path", None)
         pdf_checksum = row.pop("submitted_pdf_checksum", None)
         row["pdf_available"] = bool(pdf_path and pdf_checksum)
@@ -503,9 +513,22 @@ def submission_details(draft_id):
 
 def operational_summary():
     with _connect() as connection, connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-        cursor.execute(sql.SQL('SELECT COUNT(*) FILTER (WHERE status<>\'submitted\' AND is_deleted=false) AS open_drafts,'
-            'COUNT(*) FILTER (WHERE status=\'submitted\' AND submitted_at::date=CURRENT_DATE) AS submitted_today,'
-            'COALESCE(SUM(total_amount) FILTER (WHERE status=\'submitted\' AND submitted_at::date=CURRENT_DATE),0) AS total_today,'
-            'COALESCE(SUM((submitted_voucher->>\'outstanding_balance\')::numeric) FILTER (WHERE status=\'submitted\' AND submitted_at::date=CURRENT_DATE),0) AS outstanding_today '
-            'FROM {}.{} WHERE sector=\'farm\'').format(sql.Identifier(_schema()),sql.Identifier(DRAFT_TABLE)))
-        return dict(cursor.fetchone())
+        cursor.execute(sql.SQL('SELECT COUNT(*) AS open_drafts FROM {}.{} WHERE sector=\'farm\' AND status<>\'submitted\' AND is_deleted=false').format(
+            sql.Identifier(_schema()), sql.Identifier(DRAFT_TABLE)))
+        open_drafts = int(cursor.fetchone()["open_drafts"] or 0)
+        cursor.execute(sql.SQL('SELECT voucher_number,voucher_date,customer_name,total_amount FROM {}.{} '
+            'WHERE sector=\'farm\' AND status=\'submitted\' AND is_deleted=false AND submitted_at::date=CURRENT_DATE '
+            'ORDER BY id').format(sql.Identifier(_schema()), sql.Identifier(DRAFT_TABLE)))
+        submitted_today = [dict(row) for row in cursor.fetchall()]
+    outstanding_today = sum(
+        current_voucher_payment_state(
+            "Farm", row["voucher_number"], invoice_date=row["voucher_date"], customer=row["customer_name"],
+        )["current_outstanding"]
+        for row in submitted_today
+    )
+    return {
+        "open_drafts": open_drafts,
+        "outstanding_today": outstanding_today,
+        "submitted_today": len(submitted_today),
+        "total_today": sum(int(row.get("total_amount") or 0) for row in submitted_today),
+    }

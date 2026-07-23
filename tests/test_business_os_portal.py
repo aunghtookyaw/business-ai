@@ -1,10 +1,24 @@
 import unittest
 from unittest.mock import patch
+from html.parser import HTMLParser
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 from tools import business_os_portal
 from tools import farm_voucher_repository
 from tools import veggies_production_portal as veggies
+
+
+class AssetUrlParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.urls = []
+
+    def handle_starttag(self, _tag, attrs):
+        values = dict(attrs)
+        for name in ("href", "src"):
+            value = values.get(name, "")
+            if value.startswith(("/static/", "/business-os/assets/")):
+                self.urls.append(value)
 
 
 def empty_search(filters):
@@ -27,6 +41,27 @@ class BusinessOsPortalTest(unittest.TestCase):
         self.assertNotIn("POSTGRES_PASSWORD", html)
         self.assertNotIn("nc_pat_", html)
         self.assertIn('href="/business-os/farm-voucher"', html)
+
+    def test_dashboard_static_assets_are_mounted_and_served(self):
+        response = self.client.get("/business-os")
+        parser = AssetUrlParser()
+        parser.feed(response.get_data(as_text=True))
+
+        self.assertEqual(
+            ["/static/business_os.css", "/business-os/assets/logo", "/static/business_os.js"],
+            parser.urls,
+        )
+        expected_types = {
+            "/static/business_os.css": "text/css",
+            "/static/business_os.js": "text/javascript",
+            "/business-os/assets/logo": "image/jpeg",
+        }
+        for url, content_type in expected_types.items():
+            with self.subTest(url=url):
+                asset = self.client.get(url)
+                self.assertEqual(200, asset.status_code)
+                self.assertEqual(content_type, asset.mimetype)
+                self.assertTrue(asset.data)
 
     def test_integrated_farm_voucher_route_card_and_sidebar(self):
         with patch.object(farm_voucher_repository, "list_customers", return_value=[]), \
@@ -54,17 +89,16 @@ class BusinessOsPortalTest(unittest.TestCase):
         self.assertEqual(302, response.status_code)
         self.assertEqual("/business-os", response.headers["Location"])
 
-    def test_integrated_receive_payment_and_old_route_both_work(self):
+    def test_receive_payment_is_available_only_inside_business_os(self):
         with patch.object(receive_payment_server, "_list_vouchers", return_value=[]):
             integrated = self.client.get("/business-os/receive-payment")
             old = self.client.get("/receive-payment-basic")
         html = integrated.get_data(as_text=True)
         self.assertEqual(200, integrated.status_code)
-        self.assertEqual(200, old.status_code)
+        self.assertEqual(404, old.status_code)
         self.assertIn("BigShot Business OS", html)
         self.assertIn('aria-current="page">Receive Payment', html)
         self.assertIn('action="/business-os/receive-payment"', html)
-        self.assertIn("Receive Payment Basic", old.get_data(as_text=True))
 
     def test_integrated_veggies_routes_and_old_routes_work(self):
         crops = []

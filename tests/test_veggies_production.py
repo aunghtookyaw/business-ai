@@ -13,6 +13,7 @@ from tools.veggies_production import (
     CropDefinition,
     crop_header_map,
     default_crop_definitions,
+    format_quantity,
     import_veggies_preview,
     normalize_header,
     parse_production_date,
@@ -86,6 +87,12 @@ class FailingConnection:
 
 
 class VeggiesProductionTest(unittest.TestCase):
+    def test_quantity_display_uses_exactly_two_decimal_places(self):
+        self.assertEqual("10.00", format_quantity(10))
+        self.assertEqual("10.50", format_quantity(10.5))
+        self.assertEqual("10.57", format_quantity(Decimal("10.567")))
+        self.assertEqual("0.00", format_quantity(0))
+
     def test_excel_serial_date_conversion(self):
         self.assertEqual(date(2026, 1, 1), parse_production_date(46023))
         self.assertEqual(date(2026, 1, 2), parse_production_date(46024))

@@ -23,7 +23,7 @@ Browser
   |      +--> BI engine contracts
   |      +--> Qwen narrative only
   |
-  +--> receive_payment_server.py 127.0.0.1:5059
+  +--> business_os_server.py 0.0.0.0:5059
          +--> Payment_Receive
          +--> farm_transection
          +--> Sotephwar_Transection
@@ -45,8 +45,8 @@ macOS launchd
   |             +--> database readiness check
   |             +--> telegram_bot.py
   |
-  +--> com.bigshot.receive-payment (KeepAlive)
-  |      +--> receive_payment_server.py
+  +--> com.bigshot.businessos (KeepAlive)
+  |      +--> business_os_server.py
   |
   +--> com.bigshot.business-dashboard (KeepAlive)
          +--> dashboard_server.py
@@ -96,7 +96,7 @@ telegram_bot.py
   +--> comparison_reports.py
   +--> google_calendar_client.py
 
-receive_payment_server.py
+business_os_app.py
   +--> formula_engine.py
   +--> PostgreSQL
 
@@ -259,17 +259,18 @@ The dashboard API contains no SQL. It calls existing BI functions and returns
 their validated values. Browser components perform formatting and chart
 geometry only.
 
-### Receive Payment — `127.0.0.1:5059`
+### Business OS — port `5059`
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/` | Main Receive Payment page |
-| GET | `/receive-payment` | Main Receive Payment page |
-| GET/POST | `/receive-payment-basic` | Approved Basic workflow |
+| GET | `/` | Redirect to Business OS |
+| GET | `/business-os` | Business OS dashboard |
+| GET/POST | `/business-os/receive-payment` | Receive Payment module |
 | GET | `/api/vouchers` | Voucher search/list |
 | GET | `/api/voucher` | Exact grouped voucher |
 | POST | `/api/payment-receive` | Post payment |
 | GET | `/health` | Health check |
+| GET | `/status` | Windows launcher service discovery |
 
 ### Excel Import — `127.0.0.1:5055`
 

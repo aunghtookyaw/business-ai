@@ -10,6 +10,12 @@ from typing import Optional
 from tools import bi_search
 from tools import formula_engine
 from tools.ollama_client import ask_ai
+from tools.veggies_production import (
+    CropDefinition,
+    crop_header_map,
+    load_crop_definitions,
+    normalize_header,
+)
 
 
 DASHBOARD_CACHE_TTL_SECONDS = 30
@@ -67,6 +73,8 @@ class FarmProductionFilters:
     crop_ids: Optional[tuple[int, ...]] = None
     farm_area_ids: tuple[int, ...] = ()
     grouping: str = "daily"
+    sector: str = ""
+    business_unit: str = ""
 
 
 def parse_farm_production_filters(payload):
@@ -89,16 +97,357 @@ def parse_farm_production_filters(payload):
         farm_area_ids = tuple(sorted({int(value) for value in (raw.get("farm_area_ids") or [])}))
     except (TypeError, ValueError) as exc:
         raise ValueError("crop_ids and farm_area_ids must contain integer IDs") from exc
-    return FarmProductionFilters(start, end, crop_ids, farm_area_ids, grouping)
+    sector = str(raw.get("sector") or "").strip()
+    business_unit = str(raw.get("business_unit") or "").strip().lower()
+    return FarmProductionFilters(
+        start, end, crop_ids, farm_area_ids, grouping, sector, business_unit,
+    )
+
+
+def _farm_period_label(value, grouping):
+    """Return a stable, compact label; never expose Date.toString/GMT text."""
+    if not hasattr(value, "strftime"):
+        return str(value)
+    if grouping == "monthly":
+        return value.strftime("%b")
+    if grouping == "weekly":
+        return value.strftime("%d %b")
+    return value.strftime("%-d %b")
+
+
+def _farm_bucket_start(value, grouping):
+    if grouping == "monthly":
+        return value.replace(day=1)
+    if grouping == "weekly":
+        return value - timedelta(days=value.weekday())
+    return value
+
+
+def _next_farm_bucket(value, grouping):
+    if grouping == "monthly":
+        return (value.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return value + timedelta(days=7 if grouping == "weekly" else 1)
+
+
+INVALID_PRODUCTION_UNITS = {"", "unspecified", "unknown", "n/a", "na", "none", "null", "-"}
+
+
+def _usable_farm_unit(value):
+    unit = str(value or "").strip()
+    return unit if unit.lower() not in INVALID_PRODUCTION_UNITS else None
+
+
+def _farm_crop_resolver(master_rows, definitions=None):
+    """Reuse the Veggies Production name/code/alias resolver with live master values."""
+    definitions = list(load_crop_definitions() if definitions is None else definitions)
+    canonical_by_code = {}
+    canonical_by_id = {}
+    for row in master_rows:
+        definition = CropDefinition(
+            crop_code=str(row.get("crop_code") or ""),
+            crop_name=str(row.get("crop_name") or ""),
+            source_header=str(row.get("crop_name") or ""),
+            crop_id=row.get("id"),
+            default_unit=_usable_farm_unit(row.get("default_unit")),
+            category=str(row.get("category") or "Other"),
+        )
+        canonical_by_code[normalize_header(definition.crop_code)] = definition
+        if definition.crop_id is not None:
+            canonical_by_id[int(definition.crop_id)] = definition
+    resolver = {}
+    for key, definition in crop_header_map(definitions).items():
+        resolver[key] = canonical_by_code.get(normalize_header(definition.crop_code), definition)
+    for definition in canonical_by_code.values():
+        for key in (definition.crop_code, definition.crop_name):
+            resolver[normalize_header(key)] = definition
+    return resolver, canonical_by_id
+
+
+def _resolve_farm_crop(row, resolver, canonical_by_id):
+    crop_id = row.get("crop_id")
+    if crop_id is not None:
+        try:
+            definition = canonical_by_id.get(int(crop_id))
+        except (TypeError, ValueError):
+            definition = None
+        if definition:
+            return definition
+    for value in (row.get("crop_code"), row.get("crop_name")):
+        definition = resolver.get(normalize_header(value))
+        if definition:
+            return definition
+    return None
+
+
+def _resolve_farm_row(row, resolver, canonical_by_id):
+    resolved = dict(row)
+    definition = _resolve_farm_crop(resolved, resolver, canonical_by_id)
+    master_unit = _usable_farm_unit(definition.default_unit if definition else None)
+    historical_unit = _usable_farm_unit(resolved.get("unit"))
+    resolved["unit"] = master_unit or historical_unit or "Unspecified"
+    if definition:
+        resolved["crop_id"] = definition.crop_id or resolved.get("crop_id")
+        resolved["crop_code"] = definition.crop_code
+        resolved["crop_name"] = definition.crop_name
+    else:
+        resolved["crop_code"] = str(resolved.get("crop_code") or "")
+    return resolved
+
+
+def _unit_label(units):
+    usable = sorted({_usable_farm_unit(unit) for unit in units} - {None})
+    if len(usable) == 1:
+        return usable[0]
+    if len(usable) > 1:
+        return "Mixed units"
+    return "Unspecified"
+
+
+def _resolved_farm_summaries(trend, source_rows, dimensions):
+    resolver, canonical_by_id = _farm_crop_resolver(dimensions["crops"])
+    rows = [_resolve_farm_row(row, resolver, canonical_by_id) for row in source_rows]
+
+    combined = {}
+    scope_label = "All Fields" if not trend.get("selected_farm_area_ids") else "Selected Fields"
+    for row in rows:
+        key = (row.get("production_date"), row.get("crop_id"), row["unit"])
+        item = combined.setdefault(key, {
+            "production_date": row.get("production_date"),
+            "crop_id": row.get("crop_id"),
+            "crop_code": row.get("crop_code") or "",
+            "crop_name": row.get("crop_name") or "Unknown",
+            "farm_area_id": None,
+            "farm_area": scope_label,
+            "unit": row["unit"],
+            "quantity": 0,
+        })
+        item["quantity"] += row.get("quantity") or 0
+
+    crop_summary = {}
+    original_crop_summary = trend.get("summary_by_crop") or []
+    for row in original_crop_summary:
+        resolved = _resolve_farm_row(row, resolver, canonical_by_id)
+        key = (resolved.get("crop_id"), resolved["unit"])
+        item = crop_summary.setdefault(key, {
+            **resolved, "quantity": 0, "previous_quantity": 0,
+        })
+        item["quantity"] += resolved.get("quantity") or 0
+        prior = resolved.get("previous_quantity")
+        if prior is not None:
+            item["previous_quantity"] += prior
+    if not crop_summary:
+        for row in combined.values():
+            key = (row.get("crop_id"), row["unit"])
+            item = crop_summary.setdefault(key, {
+                "crop_id": row.get("crop_id"),
+                "crop_code": row.get("crop_code") or "",
+                "crop_name": row.get("crop_name") or "Unknown",
+                "unit": row["unit"],
+                "quantity": 0,
+                "previous_quantity": 0,
+            })
+            item["quantity"] += row.get("quantity") or 0
+    for item in crop_summary.values():
+        prior = item.get("previous_quantity")
+        item["percentage_change"] = (
+            ((item["quantity"] - prior) / prior * 100) if prior not in (None, 0) else None
+        )
+
+    area_metadata = {
+        row["farm_area_id"]: dict(row) for row in (trend.get("summary_by_area") or [])
+    }
+    area_quantities = {}
+    for row in rows:
+        area_metadata.setdefault(row.get("farm_area_id"), {
+            "farm_area_id": row.get("farm_area_id"),
+            "farm_area": row.get("farm_area") or "Unknown",
+            "crop_count": 0,
+            "latest_production_date": row.get("production_date"),
+            "quantities_by_unit": [],
+        })
+        key = (row.get("farm_area_id"), row["unit"])
+        area_quantities[key] = area_quantities.get(key, 0) + (row.get("quantity") or 0)
+    for area_id, metadata in area_metadata.items():
+        metadata["quantities_by_unit"] = [
+            {"unit": unit, "quantity": quantity}
+            for (row_area_id, unit), quantity in sorted(
+                area_quantities.items(), key=lambda item: (str(item[0][0]), item[0][1])
+            )
+            if row_area_id == area_id
+        ]
+
+    totals = {}
+    for row in rows:
+        totals[row["unit"]] = totals.get(row["unit"], 0) + (row.get("quantity") or 0)
+    return {
+        "rows": rows,
+        "combined_rows": sorted(combined.values(), key=lambda row: (
+            row["production_date"], row["crop_name"], row["unit"],
+        )),
+        "summary_by_crop": sorted(
+            crop_summary.values(), key=lambda row: (-float(row["quantity"]), row["crop_name"])
+        ),
+        "summary_by_area": list(area_metadata.values()),
+        "totals": [{"unit": unit, "quantity": quantity} for unit, quantity in sorted(totals.items())],
+        "selected_area_totals": [
+            {"unit": unit, "quantity": quantity} for unit, quantity in sorted(totals.items())
+        ],
+        "total_unit": _unit_label(totals),
+    }
+
+
+def _farm_scope_is_active(filters):
+    sector = normalize_header(filters.sector)
+    business_unit = normalize_header(filters.business_unit)
+    return (
+        sector in {"", "farm"}
+        and business_unit in {"", "farm"}
+    )
+
+
+def _selected_crop_totals(selected_crops, dimensions, resolved_rows):
+    totals = {}
+    for row in resolved_rows:
+        key = (row.get("crop_id"), row["unit"])
+        totals[key] = totals.get(key, 0) + (row.get("quantity") or 0)
+    result = []
+    for crop in dimensions["crops"]:
+        if crop["id"] not in selected_crops:
+            continue
+        units = {
+            unit: quantity for (crop_id, unit), quantity in totals.items()
+            if crop_id == crop["id"]
+        }
+        if not units:
+            units[_usable_farm_unit(crop.get("default_unit")) or "Unspecified"] = 0
+        unit = _unit_label(units)
+        result.append({
+            "crop_id": crop["id"],
+            "crop_code": str(crop.get("crop_code") or ""),
+            "crop_name": crop.get("crop_name") or str(crop["id"]),
+            "quantity": next(iter(units.values())) if len(units) == 1 else None,
+            "unit": unit,
+            "quantities_by_unit": [
+                {"unit": row_unit, "quantity": quantity}
+                for row_unit, quantity in sorted(units.items())
+            ],
+        })
+    return result
+
+
+def _farm_production_day_count(filters, selected_crops, source_rows):
+    if not source_rows:
+        return 0
+    if filters.grouping == "daily":
+        return len({row.get("production_date") for row in source_rows})
+    daily = formula_engine.farm_production_trend(
+        filters.start_date,
+        filters.end_date,
+        selected_crops,
+        filters.farm_area_ids,
+        "daily",
+    )
+    return len({
+        row.get("production_date") for row in (daily.get("rows") or [])
+        if row.get("production_date") is not None
+    })
 
 
 def farm_production_dashboard(filters):
     dimensions = formula_engine.farm_production_dimensions()
     selected_crops = (tuple(crop["id"] for crop in dimensions["crops"][:5])
                       if filters.crop_ids is None else filters.crop_ids)
-    trend = formula_engine.farm_production_analytics(
-        filters.start_date, filters.end_date, selected_crops,
-        filters.farm_area_ids, filters.grouping, dimensions["farm_areas"],
+    if _farm_scope_is_active(filters):
+        trend = formula_engine.farm_production_analytics(
+            filters.start_date, filters.end_date, selected_crops,
+            filters.farm_area_ids, filters.grouping, dimensions["farm_areas"],
+        )
+    else:
+        trend = {
+            "start_date": filters.start_date,
+            "end_date": filters.end_date,
+            "grouping": filters.grouping,
+            "rows": [],
+            "combined_rows": [],
+            "summary_by_area": [],
+            "summary_by_crop": [],
+            "totals": [],
+            "last_data_date": None,
+        }
+    trend["selected_farm_area_ids"] = list(filters.farm_area_ids)
+    resolved = _resolved_farm_summaries(trend, trend.get("rows") or [], dimensions)
+    trend.update(resolved)
+    source_rows = trend.get("rows") or []
+    crop_totals_payload = _selected_crop_totals(selected_crops, dimensions, source_rows)
+    selected_crop_names = [
+        crop.get("crop_name") or str(crop["id"])
+        for crop in dimensions["crops"] if crop["id"] in selected_crops
+    ]
+    selected_crop_units = {
+        crop.get("crop_name") or str(crop["id"]):
+            _usable_farm_unit(crop.get("default_unit")) or "Unspecified"
+        for crop in dimensions["crops"] if crop["id"] in selected_crops
+    }
+    selected_crop_codes = {
+        crop.get("crop_name") or str(crop["id"]): str(crop.get("crop_code") or "")
+        for crop in dimensions["crops"] if crop["id"] in selected_crops
+    }
+    def _aggregate(key):
+        buckets = {}
+        for row in source_rows:
+            bucket = row.get(key)
+            if bucket is None:
+                continue
+            bucket_key = bucket.isoformat() if hasattr(bucket, "isoformat") else str(bucket)
+            item = buckets.setdefault(bucket_key, {"period": bucket_key, "label": _farm_period_label(bucket, filters.grouping), "crops": {}, "crop_codes": {}, "crop_units": {}, "total": 0})
+            crop = row.get("crop_name") or "Unknown"
+            quantity = float(row.get("quantity") or 0)
+            item["crops"][crop] = item["crops"].get(crop, 0) + quantity
+            item["crop_codes"][crop] = row.get("crop_code") or ""
+            item["crop_units"][crop] = row["unit"]
+            item["total"] += quantity
+        current = _farm_bucket_start(filters.start_date, filters.grouping)
+        bucket_end = _farm_bucket_start(filters.end_date, filters.grouping)
+        if filters.grouping == "monthly" and trend.get("last_data_date"):
+            latest_bucket = _farm_bucket_start(trend["last_data_date"], "monthly")
+            bucket_end = min(bucket_end, latest_bucket)
+        while current <= bucket_end:
+            bucket_key = current.isoformat()
+            item = buckets.setdefault(bucket_key, {
+                "period": bucket_key,
+                "label": _farm_period_label(current, filters.grouping),
+                "crops": {},
+                "crop_codes": {},
+                "crop_units": {},
+                "total": 0,
+            })
+            for crop_name in selected_crop_names:
+                item["crops"].setdefault(crop_name, 0)
+                item["crop_codes"].setdefault(crop_name, selected_crop_codes[crop_name])
+                item["crop_units"].setdefault(crop_name, selected_crop_units[crop_name])
+            item["total_unit"] = _unit_label(item["crop_units"].values())
+            current = _next_farm_bucket(current, filters.grouping)
+        for item in buckets.values():
+            item["total_unit"] = _unit_label(item["crop_units"].values())
+        return [buckets[key] for key in sorted(buckets)]
+    daily_stacked = _aggregate("production_date")
+    field_totals = {}
+    for row in source_rows:
+        field = row.get("farm_area") or "Unknown"
+        field_totals[field] = field_totals.get(field, 0) + float(row.get("quantity") or 0)
+    total_quantity = sum(float(row.get("quantity") or 0) for row in source_rows)
+    crop_totals = {}
+    for row in source_rows:
+        crop = row.get("crop_name") or "Unknown"
+        crop_totals[crop] = crop_totals.get(crop, 0) + float(row.get("quantity") or 0)
+    total_unit = (
+        resolved["total_unit"] if source_rows
+        else _unit_label(selected_crop_units.values())
+    )
+    production_days = _farm_production_day_count(filters, selected_crops, source_rows)
+    active_crop_count = len(crop_totals)
+    latest_production_date = trend.get("last_data_date") or max(
+        (row.get("production_date") for row in source_rows), default=None,
     )
     return {
         **trend,
@@ -106,11 +455,45 @@ def farm_production_dashboard(filters):
         "available_farm_areas": dimensions["farm_areas"],
         "selected_crop_ids": list(selected_crops),
         "selected_farm_area_ids": list(filters.farm_area_ids),
+        "bucket_grouping": filters.grouping,
+        "daily_stacked": daily_stacked,
+        "crop_totals": crop_totals_payload,
+        "summary": {
+            "total_production": total_quantity,
+            "total_quantity": total_quantity,
+            "total_unit": total_unit,
+            "unit": total_unit,
+            "production_days": production_days,
+            "production_day_count": production_days,
+            "active_crops": active_crop_count,
+            "active_crop_count": active_crop_count,
+            "top_field": max(field_totals, key=field_totals.get) if field_totals else None,
+            "top_crop": max(crop_totals, key=crop_totals.get) if crop_totals else None,
+            "top_crop_unit": next((
+                row["unit"] for row in resolved["summary_by_crop"]
+                if row["crop_name"] == (max(crop_totals, key=crop_totals.get) if crop_totals else None)
+            ), "Unspecified"),
+            "latest_production_date": latest_production_date,
+        },
     }
 
 
-def inventory_dashboard():
-    return formula_engine.sotephwar_inventory_dashboard()
+def inventory_dashboard(year=None, month=None):
+    report = formula_engine.sotephwar_production_inventory_dashboard(year=year, month=month)
+    available = [int(row["month"].split("-")[1]) for row in report.get("monthly_production") or []
+                 if int(row.get("total_production") or 0) > 0]
+    if month is None and available:
+        selected_month = available[-1]
+        if selected_month != report["selected_month"]:
+            report = formula_engine.sotephwar_production_inventory_dashboard(
+                year=report["selected_year"], month=selected_month,
+            )
+    report["available_production_months"] = available
+    report["production_summary_label"] = date(
+        report["selected_year"], report["selected_month"], 1,
+    ).strftime("%B %Y")
+    report["production_summary_has_data"] = report["selected_month"] in available
+    return report
 
 
 def payments_dashboard(filters):
@@ -410,15 +793,29 @@ def _trend_row(label, period, filters):
     cash = formula_engine.cash_flow(period, filters)
     sales = formula_engine.sales_total(period, filters)
     customer_scope = bool((filters or {}).get("customer"))
+    sources = sales.get("sources") or {}
+    has_source_data = bool(
+        sales.get("transection_income_rows")
+        or int(sources.get("sotephwar_invoice_count") or 0)
+        or int(sources.get("farm_invoice_count") or 0)
+    )
     return {
         "label": label,
         "period": period,
-        "revenue": kpi["total_income"],
-        "expense": None if customer_scope else kpi["total_expense"],
-        "profit": None if customer_scope else kpi["net_profit"],
-        "cash_flow": cash["net_cash_flow"],
-        "outstanding": sales["outstanding_amount"],
+        "has_source_data": has_source_data,
+        "revenue": kpi["total_income"] if has_source_data else None,
+        "expense": None if customer_scope or not has_source_data else kpi["total_expense"],
+        "profit": None if customer_scope or not has_source_data else kpi["net_profit"],
+        "cash_flow": cash["net_cash_flow"] if has_source_data else None,
+        "outstanding": sales["outstanding_amount"] if has_source_data else None,
     }
+
+
+def _trim_trailing_missing_periods(rows):
+    """Omit calendar buckets after the last bucket backed by canonical source rows."""
+    last_real = next((index for index in range(len(rows) - 1, -1, -1)
+                      if rows[index].get("has_source_data")), -1)
+    return rows[:last_real + 1]
 
 
 def executive_dashboard(filters):
@@ -498,15 +895,19 @@ def _build_executive_dashboard(filters):
 
     trend_buckets = _trend_periods(filters.period)
     with ThreadPoolExecutor(max_workers=min(12, len(trend_buckets) or 1)) as executor:
-        trend = list(executor.map(
+        trend = _trim_trailing_missing_periods(list(executor.map(
             lambda item: _trend_row(item[0], item[1], engine_filters),
             trend_buckets,
-        ))
+        )))
 
     kpi = results["kpi"]
     sales = results["sales"]
     cash = results["cash"]
     receivables = results["receivables"]
+    inventory_bottles = sum(
+        int(row.get("stock_qty", row.get("qty", 0)) or 0)
+        for row in results["inventory"].get("stock", [])
+    )
     return {
         "filters": filters.to_dict(),
         "filter_label": filter_label(filters),
@@ -517,11 +918,13 @@ def _build_executive_dashboard(filters):
             "cash_received": cash["total_inflow"],
             "outstanding_receivables": receivables["outstanding_receivables"],
             "inventory_value": results["inventory"].get("total_inventory_value", 0),
+            "inventory_bottles": inventory_bottles,
             "profit_margin_percent": None if filters.customer else kpi["profit_margin_percent"],
             "collection_rate_percent": receivables["collection_rate_percent"],
             "sales_received": sales["amount_received"],
         },
         "trend": trend,
+        "latest_trend_period": trend[-1]["label"] if trend else None,
         "cash_flow": cash,
         "receivables": receivables,
         "inventory": results["inventory"],

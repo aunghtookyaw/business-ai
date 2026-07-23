@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 from tools import voucher_engine
 
 

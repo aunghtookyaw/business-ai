@@ -13,7 +13,7 @@ The system does not rename, modify, delete, or migrate the legacy `farm_producti
 Read these files in order:
 
 1. `tools/veggies_production_portal.py` — browser routes, validation, HTML, search, details, corrections, and transactional database writes.
-2. `scripts/receive_payment_server.py` — existing localhost Flask/Waitress service that hosts the portal.
+2. `business_os_app.py` — shared Business OS Flask application that hosts the module.
 3. `tools/veggies_production.py` — shared crop, quantity, date, and category helpers.
 4. `migrations/20260714_001_veggies_production_up.sql` — normalized base schema.
 5. `migrations/20260714_002_veggies_production_portal_up.sql` — browser submission token and corrected Romaine Lettuce name.
@@ -30,12 +30,12 @@ python3 scripts/migrate_veggies_production.py up
 Start the existing local Business OS service:
 
 ```bash
-python3 scripts/receive_payment_server.py
+python3 ops/business_os_server.py
 ```
 
 Open:
 
-`http://127.0.0.1:5059/veggies-production`
+`http://127.0.0.1:5059/business-os/veggies-production`
 
 The server binds to localhost by default. PostgreSQL is never exposed publicly.
 
@@ -265,7 +265,7 @@ No PostgreSQL production-table alteration is required.
 
 ## Troubleshooting
 
-- **Portal does not open:** confirm `scripts/receive_payment_server.py` is running, then use the exact localhost URL above.
+- **Portal does not open:** confirm `ops/business_os_server.py` is running, then use the exact Business OS URL above.
 - **Crop is missing:** confirm it exists and is active in `veggies_crop_master`, then refresh.
 - **Crop is in the wrong group:** open Veggies Crop Master, correct its category, save, and refresh.
 - **Long crop form:** use Search crop, or select Entered Crops Only after entering quantities.

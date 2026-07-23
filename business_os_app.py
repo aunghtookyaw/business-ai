@@ -4,7 +4,7 @@ from datetime import date
 from html import escape
 import json
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -21,10 +21,6 @@ app = Flask(
     static_folder=os.path.join(PROJECT_ROOT, "static"),
     static_url_path="/static",
 )
-DEFAULT_HOST = os.environ.get("RECEIVE_PAYMENT_HOST", "127.0.0.1")
-# Chromium blocks 5060 as an unsafe SIP port, so default to a nearby browser-safe port.
-DEFAULT_PORT = int(os.environ.get("RECEIVE_PAYMENT_PORT", "5059"))
-
 from tools.veggies_production_portal import register_routes as register_veggies_production_routes
 
 register_veggies_production_routes(app)
@@ -482,7 +478,7 @@ def _basic_payment_page(
         <main>
           {status_html}
           <section class="filters">
-            <form method="get" action="/receive-payment-basic">
+            <form method="get" action="/business-os/receive-payment">
               <div>
                 <label>Sector</label>
                 <select name="sector">
@@ -509,7 +505,7 @@ def _basic_payment_page(
               <button type="submit">View</button>
             </form>
           </section>
-          <form method="post" action="/receive-payment-basic">
+          <form method="post" action="/business-os/receive-payment">
             <input type="hidden" name="sector_filter" value="{escape(sector_filter)}">
             <input type="hidden" name="voucher_number_filter" value="{escape(voucher_number_filter)}">
             <input type="hidden" name="invoice_date_filter" value="{escape(invoice_date_filter)}">
@@ -582,7 +578,6 @@ def _basic_payment_page(
     ''', 200, {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
 
-@app.get("/receive-payment")
 def receive_payment_page():
     vouchers = _list_vouchers()
     return (
@@ -597,7 +592,6 @@ def health():
     return jsonify({"ok": True})
 
 
-@app.get("/debug")
 def debug_page():
     return '''
     <!doctype html>
@@ -612,7 +606,6 @@ def debug_page():
     ''', 200, {"Cache-Control": "no-store, max-age=0"}
 
 
-@app.get("/visible")
 def visible_page():
     return '''
     <!doctype html>
@@ -632,7 +625,6 @@ def visible_page():
     ''', 200, {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
 
-@app.get("/plain")
 def plain_page():
     vouchers = _list_vouchers()
     rows = "\n".join(
@@ -684,7 +676,7 @@ def plain_page():
     ''', 200, {"Cache-Control": "no-store, max-age=0"}
 
 
-@app.route("/receive-payment-basic", methods=["GET", "POST"])
+@app.route("/business-os/receive-payment", methods=["GET", "POST"])
 def receive_payment_basic_page():
     sector_filter = _normalize_sector_filter(
         request.values.get("sector") or request.values.get("sector_filter") or "Farm"
@@ -1181,9 +1173,3 @@ PAGE_HTML = r'''<!doctype html>
 </body>
 </html>
 '''
-
-
-if __name__ == "__main__":
-    from waitress import serve
-
-    serve(app, host=DEFAULT_HOST, port=DEFAULT_PORT, threads=4)

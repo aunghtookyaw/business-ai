@@ -27,9 +27,9 @@ docker compose up -d
 
 cd /Users/bigshot/ai-automation/business-ai
 python3 -m unittest discover -s tests
-python3 -m py_compile telegram_bot.py business_agent.py scripts/receive_payment_server.py tools/formula_engine.py
+python3 -m py_compile telegram_bot.py business_agent.py business_os_app.py ops/business_os_server.py tools/formula_engine.py
 launchctl kickstart -k gui/$(id -u)/com.bigshot.business-ai.telegram-bot
-launchctl kickstart -k gui/$(id -u)/com.bigshot.receive-payment
+launchctl kickstart -k gui/$(id -u)/com.bigshot.businessos
 launchctl kickstart -k gui/$(id -u)/com.bigshot.business-dashboard
 ```
 
@@ -40,8 +40,8 @@ suite fails or when the database backup cannot be listed by `pg_restore -l`.
 
 - Finance bot stdout: `/private/tmp/business-ai-telegram-bot.out.log`
 - Finance bot stderr: `/private/tmp/business-ai-telegram-bot.err.log`
-- Payment stdout: `logs/receive_payment_server.out.log`
-- Payment stderr: `logs/receive_payment_server.err.log`
+- Business OS stdout: `~/Library/Logs/BigShotBusinessOS/businessos.log`
+- Business OS stderr: `~/Library/Logs/BigShotBusinessOS/businessos-error.log`
 - Dashboard stdout: `logs/dashboard_server.out.log`
 - Dashboard stderr: `logs/dashboard_server.err.log`
 
@@ -49,7 +49,7 @@ suite fails or when the database backup cannot be listed by `pg_restore -l`.
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.bigshot.business-ai.telegram-bot
-launchctl kickstart -k gui/$(id -u)/com.bigshot.receive-payment
+launchctl kickstart -k gui/$(id -u)/com.bigshot.businessos
 launchctl kickstart -k gui/$(id -u)/com.bigshot.business-dashboard
 ```
 
@@ -125,7 +125,8 @@ python3 -m unittest discover -s tests
 python3 -m py_compile \
   telegram_bot.py \
   business_agent.py \
-  scripts/receive_payment_server.py \
+  business_os_app.py \
+  ops/business_os_server.py \
   tools/formula_engine.py \
   tools/ollama_client.py
 ```

@@ -13,7 +13,7 @@
   <link rel="icon" type="image/x-icon" href="/static/icons/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/bigshot-32.png">
   <link rel="shortcut icon" href="/static/icons/favicon.ico">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260723-farm-summary1">
 </head>
 <body>
   <section class="startup-screen" id="startupScreen" role="status" aria-live="polite" aria-label="BigShot Dashboard is loading">
@@ -69,20 +69,11 @@
         <button class="nav-item active" data-page="executive">
           <span class="nav-icon">⌂</span><span>Executive</span>
         </button>
-        <button class="nav-item" data-page="payments">
-          <span class="nav-icon">₭</span><span>Payments</span>
-        </button>
         <button class="nav-item" data-page="inventory">
           <span class="nav-icon">□</span><span>Inventory</span>
         </button>
         <button class="nav-item" data-page="farm-production">
           <span class="nav-icon">♧</span><span>Farm Production</span>
-        </button>
-        <button class="nav-item" data-page="farm-voucher">
-          <span class="nav-icon">✎</span><span>Farm Voucher</span>
-        </button>
-        <button class="nav-item" data-page="customers">
-          <span class="nav-icon">◎</span><span>Customers</span>
         </button>
         <button class="nav-item" data-page="financial">
           <span class="nav-icon">▥</span><span>Financial</span>
@@ -90,6 +81,10 @@
         <button class="nav-item" data-page="insights">
           <span class="nav-icon">✦</span><span>AI Insights</span>
         </button>
+        <p class="nav-section-label">Admin</p>
+        <a class="nav-item" href="/data-audit">
+          <span class="nav-icon">✓</span><span>Data Audit</span>
+        </a>
       </nav>
 
       <div class="sidebar-footer">
@@ -199,17 +194,17 @@
         <strong id="metricOutstanding">—</strong><small>MMK</small>
         <p class="negative">Collection focus <span>required</span></p>
       </article>
-      <article class="metric-card">
-        <div class="metric-label"><span>Inventory Bottles</span><span class="metric-icon">□</span></div>
-        <strong id="metricInventoryValue">—</strong><small>Total current bottles</small>
-        <p class="neutral"><span>Current movement-ledger quantity</span></p>
+      <article class="metric-card" data-page="inventory" role="button" tabindex="0" aria-label="Open Inventory section">
+        <div class="metric-label"><span>Inventory Value</span><span class="metric-icon">□</span></div>
+        <strong id="metricInventoryValue">—</strong>
+        <p class="neutral"><span>Current SotePhwar inventory valuation</span></p>
       </article>
     </div>
 
     <div class="executive-grid">
       <article class="panel chart-panel span-8">
         <div class="panel-header">
-          <div><p class="eyebrow">PERFORMANCE</p><h2>Revenue, expense & profit trend</h2></div>
+          <div><p class="eyebrow">PERFORMANCE</p><h2>Revenue, expense & profit trend</h2><small id="trendDataThrough">Latest data period: —</small></div>
           <div class="legend"><span class="revenue-dot">Revenue</span><span class="expense-dot">Expenses</span><span class="profit-dot">Profit</span></div>
         </div>
         <div class="chart-shell line-chart">
@@ -268,7 +263,7 @@
       </article>
 
       <article class="panel table-panel span-7">
-        <div class="panel-header"><div><p class="eyebrow">CUSTOMERS</p><h2>Top customers</h2></div><button class="text-button nav-link" data-page="customers">View customer dashboard →</button></div>
+        <div class="panel-header"><div><p class="eyebrow">CUSTOMERS</p><h2>Top customers</h2></div><span class="api-chip">Executive metric</span></div>
         <div class="table-scroll">
           <table>
             <thead><tr><th>Customer</th><th>Revenue</th><th>Received</th><th>Outstanding</th><th>Invoices</th></tr></thead>
@@ -309,29 +304,12 @@
     </div>
   </template>
 
-  <template id="paymentsTemplate">
-    <div class="module-kpis payments-kpis">
-      <article class="metric-card featured"><div class="metric-label"><span>Invoiced</span><span class="metric-icon">▤</span></div><strong id="paymentsInvoiced">—</strong><small>MMK</small></article>
-      <article class="metric-card"><div class="metric-label"><span>Received</span><span class="metric-icon">₭</span></div><strong id="paymentsReceived">—</strong><small>MMK</small></article>
-      <article class="metric-card alert"><div class="metric-label"><span>Outstanding</span><span class="metric-icon">!</span></div><strong id="paymentsOutstanding">—</strong><small>MMK</small></article>
-      <article class="metric-card"><div class="metric-label"><span>Collection rate</span><span class="metric-icon">%</span></div><strong id="paymentsRate">—</strong><small>Received ÷ invoiced</small></article>
-      <article class="metric-card"><div class="metric-label"><span>Displayed vouchers</span><span class="metric-icon">#</span></div><strong id="paymentsVoucherCount">—</strong><small>Top 100 by outstanding balance</small></article>
-    </div>
-    <div class="executive-grid">
-      <article class="panel span-7"><div class="panel-header"><div><p class="eyebrow">INVOICE AGE</p><h2>Outstanding by invoice-age bucket</h2></div><span class="api-chip">Not due-date aging</span></div><p class="panel-note warning-note">Due dates are not yet an approved business field. These buckets measure days since invoice date.</p><div id="paymentsAging" class="bar-comparison"></div></article>
-      <article class="panel table-panel span-5"><div class="panel-header"><div><p class="eyebrow">COLLECTION FOCUS</p><h2>Top customer balances</h2></div></div><div class="table-scroll"><table><thead><tr><th>Customer</th><th>Outstanding</th></tr></thead><tbody id="paymentsCustomersBody"></tbody></table></div></article>
-      <article class="panel table-panel span-12"><div class="panel-header"><div><p class="eyebrow">RECEIVABLES</p><h2>Voucher status</h2></div><span class="api-chip">Canonical identity</span></div><div class="table-scroll"><table><thead><tr><th>Customer</th><th>Sector</th><th>Voucher</th><th>Invoice date</th><th>Invoiced</th><th>Received</th><th>Outstanding</th><th>Status</th></tr></thead><tbody id="paymentsInvoicesBody"></tbody></table></div></article>
-      <article class="panel table-panel span-12"><div class="panel-header"><div><p class="eyebrow">PAYMENT RECEIVE</p><h2>Receipt history</h2></div><span class="api-chip">Read only</span></div><div class="table-scroll"><table><thead><tr><th>Date</th><th>Customer</th><th>Sector</th><th>Voucher</th><th>Amount</th><th>Method</th><th>Reference</th></tr></thead><tbody id="paymentsHistoryBody"></tbody></table></div></article>
-    </div>
-  </template>
-
   <template id="farmProductionTemplate">
     <section class="panel analytics-controls">
       <div class="panel-header"><div><p class="eyebrow">FARM OPERATIONS</p><h2>Production analytics</h2></div><span class="api-chip">Read only</span></div>
       <div class="analytics-filter-grid">
         <label>Start date<input id="farmStartDate" type="date"></label>
         <label>End date<input id="farmEndDate" type="date"></label>
-        <label>Grouping<select id="farmGrouping"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
         <div class="field-filter farm-selector">
           <button id="farmFieldToggle" class="selector-toggle" type="button" aria-expanded="false" aria-controls="farmFieldPanel">Fields: All Fields <span>▾</span></button>
           <div id="farmFieldPanel" class="selector-panel"><span class="selector-label">Fields <b id="farmFieldCount">All Fields</b></span><div id="farmAreaFilter" class="field-choice-grid"></div><button id="farmFieldApply" class="selector-apply" type="button">Apply</button></div>
@@ -349,10 +327,33 @@
       </div>
     </section>
     <div id="farmProductionError"></div>
-    <div class="module-kpis" id="farmProductionKpis"></div>
-    <section class="panel"><div class="panel-header"><div><p class="eyebrow">FIELD SUMMARY</p><h2>Production by field</h2></div></div><div id="farmFieldSummary" class="summary-card-grid"></div></section>
-    <section class="panel"><div class="panel-header"><div><p class="eyebrow">VEGETABLE TOTALS</p><h2>Combined selected-field production</h2></div><label class="inline-search">Search crops<input id="farmTotalsSearch" type="search" placeholder="Crop name"></label></div><div id="farmVegetableTotals" class="summary-card-grid"></div></section>
-    <section class="panel"><div class="panel-header"><div><p class="eyebrow">TREND</p><h2>Selected crop production</h2></div><span id="farmLastData" class="api-chip">—</span></div><div id="farmTrendChart" class="analytics-chart"></div><div id="farmLegend" class="analytics-legend"></div></section>
+    <section class="farm-production-summary" aria-label="Farm Production summary">
+      <div id="farmProductionKpis" class="farm-summary-kpis"></div>
+      <div>
+        <div class="farm-summary-heading"><p class="eyebrow">SELECTED CROP TOTALS</p><small>Canonical crop units</small></div>
+        <div id="farmCropTotals" class="farm-crop-total-grid"></div>
+      </div>
+      <p id="farmSummaryEmpty" class="farm-summary-empty" hidden>No production recorded for the selected period.</p>
+    </section>
+    <section class="panel farm-chart-panel">
+      <div class="panel-header farm-chart-header">
+        <div><p class="eyebrow">PRODUCTION</p><h2>Production composition by period</h2><small id="farmChartGrouping">—</small></div>
+        <div class="farm-chart-actions">
+          <span id="farmLastData" class="api-chip">—</span>
+          <div class="farm-zoom-controls" role="group" aria-label="Chart zoom controls">
+            <button id="farmZoomOut" class="icon-button" type="button" aria-label="Zoom Out" title="Zoom Out">−</button>
+            <button id="farmZoomReset" class="icon-button" type="button" aria-label="Reset Zoom" title="Reset Zoom">↺</button>
+            <button id="farmZoomIn" class="icon-button" type="button" aria-label="Zoom In" title="Zoom In">+</button>
+          </div>
+        </div>
+      </div>
+      <div id="farmDailyStackedChart" class="farm-production-chart" tabindex="0" aria-label="Scrollable production chart"></div>
+      <div class="farm-chart-navigation">
+        <small id="farmScrollHint" hidden>Scroll horizontally to view more periods</small>
+        <button id="farmScrollStart" class="text-button" type="button" hidden>Scroll to start</button>
+        <button id="farmScrollLatest" class="text-button" type="button" hidden>Jump to latest data</button>
+      </div>
+    </section>
     <section class="panel table-panel"><div class="panel-header"><div><p class="eyebrow">SUMMARY</p><h2>Production by date, crop and area</h2></div></div><div class="table-scroll"><table><thead><tr><th>Period</th><th>Crop</th><th>Farm area</th><th>Quantity</th><th>Unit</th></tr></thead><tbody id="farmProductionBody"></tbody></table></div></section>
   </template>
 
@@ -393,7 +394,13 @@
   </template>
 
   <template id="inventoryTemplate">
+    <section class="panel inventory-production-filter"><div class="panel-header"><div><p class="eyebrow">PRODUCTION PERIOD</p><h2>Monthly production summary</h2></div><div class="inventory-month-controls"><label id="inventorySummaryMonthLabel">Summary month<select id="inventorySummaryMonth"></select></label></div></div></section>
     <div id="inventoryError"></div><div class="module-kpis" id="inventoryKpis"></div>
+    <section class="panel table-panel"><div class="panel-header"><div><p class="eyebrow">LIFETIME PRODUCTION</p><h2>Production, stock, sales and value by bottle type</h2></div></div><div class="table-scroll"><table id="inventoryProductValues"></table></div></section>
+    <section class="panel"><div class="panel-header"><div><p class="eyebrow">SELECTED MONTH</p><h2 id="inventoryMonthTitle">Monthly Production Summary</h2><small id="inventorySummaryStatus"></small></div><strong id="inventoryMonthTotal">0 bottles</strong></div><div id="inventoryMonthSummary" class="production-summary-grid"></div></section>
+    <section class="panel"><div class="panel-header"><div><p class="eyebrow">PRODUCTION TREND</p><h2>Monthly production by bottle type</h2></div></div><div id="inventoryProductionChart" class="production-chart"></div></section>
+    <section class="panel"><div class="panel-header"><div><p class="eyebrow">INVENTORY VALUE</p><h2>Inventory value by bottle type</h2></div></div><div id="inventoryValueChart" class="horizontal-value-chart"></div></section>
+    <section class="panel"><div class="panel-header"><div><p class="eyebrow">OUTPUT VS DEMAND</p><h2>Production vs sales by month</h2></div></div><div id="inventoryProductionSalesChart" class="production-chart comparison-chart"></div></section>
     <section class="panel"><div class="panel-header"><div><p class="eyebrow">CURRENT STOCK</p><h2>Bottle quantities by store</h2></div><span id="inventoryLastUpdated" class="api-chip">—</span></div><div id="inventoryStackedChart" class="stacked-chart"></div><div id="inventoryLegend" class="analytics-legend"></div></section>
     <section class="panel table-panel"><div class="panel-header"><div><p class="eyebrow">STORE × BOTTLE TYPE</p><h2>Current stock matrix</h2></div></div><div class="table-scroll"><table id="inventoryMatrix"></table></div></section>
   </template>
@@ -439,6 +446,6 @@
     </div>
   </template>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260723-farm-summary1"></script>
 </body>
 </html>

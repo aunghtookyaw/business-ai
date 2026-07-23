@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Operational WSGI wrapper for BigShot Business OS.
 
-This module adds observability only; application routes and business logic remain
-in scripts.receive_payment_server.
+This module is the sole production server entrypoint. Application routes and
+business logic remain in business_os_app.
 """
 
 import os
@@ -18,7 +18,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from scripts.receive_payment_server import app
+from business_os_app import app
 
 
 STARTED_AT = time.monotonic()

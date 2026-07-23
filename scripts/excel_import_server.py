@@ -12,6 +12,7 @@ if PROJECT_ROOT not in sys.path:
 from flask import Flask, Response, jsonify, request, send_file
 
 from tools.excel_importer import import_excel_payload
+from tools import data_audit
 from tools.veggies_production import (
     import_veggies_preview,
     load_crop_definitions,
@@ -22,6 +23,7 @@ from tools.veggies_production import (
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 _VEGGIES_PREVIEWS = {}
+_AUDIT_IMPORT_SESSIONS = {}
 VEGGIES_TEMPLATE = Path(PROJECT_ROOT) / "excel_import" / "BigShot_Veggies_Production_Template.xlsx"
 
 
@@ -49,6 +51,17 @@ IMPORT_PAGE = """<!doctype html>
   <p>The existing Excel macro import workflow remains available through its established API endpoints.</p>
   <p>Daily vegetable production is entered directly in <strong>Veggies Production Basic</strong>, not through Excel.</p>
   <div class="actions"><a class="button secondary" href="/business-os/veggies-production">Open Veggies Production Basic</a></div>
+  <h2>Safe Excel Workflow</h2>
+  <p>Every spreadsheet follows one safe workflow: upload, audit, review and apply approved changes.</p>
+  <form id="dataAuditForm">
+    <input type="hidden" name="operation" value="audit">
+    <label>Target
+      <select name="target_key"><option value="sotephwar_transection">SotePhwar Transaction</option><option value="farm_transection">Farm Transaction</option><option value="transection">General Transaction</option></select>
+    </label>
+    <label>Excel, XLS or CSV file<input name="file" type="file" accept=".xlsx,.xls,.csv" required></label>
+    <button type="submit">Upload Preview</button>
+  </form>
+  <div id="auditResult" role="status">Audit Existing Records is the safe default.</div>
   <!-- Optional legacy utilities below are intentionally not part of the normal production workflow. -->
   <div hidden>
   <label>Import type
@@ -69,6 +82,13 @@ IMPORT_PAGE = """<!doctype html>
   <div id="result" role="status">Select a workbook to preview.</div></div>
 </section></main>
 <script>
+document.getElementById('dataAuditForm').addEventListener('submit', async (event) => {
+  event.preventDefault(); const result=document.getElementById('auditResult');
+  const response=await fetch('/data-audit/session',{method:'POST',body:new FormData(event.target)});
+  const payload=await response.json();
+  if(!response.ok){result.textContent=payload.error||'Upload preview failed.';return;}
+  result.textContent=`Session ${payload.session_id}\nTarget: ${payload.target_label}\nFilename: ${payload.filename}\nSheet: ${payload.sheet_name}\nRows: ${payload.source_rows}\nColumns: ${payload.source_columns}\nDetected date: ${payload.detected_date||'—'}\nStatus: ${payload.status}`;
+});
 let previewId = null;
 const result = document.getElementById('result');
 document.getElementById('uploadForm').addEventListener('submit', async (event) => {
@@ -177,6 +197,58 @@ def import_rows():
         "ok": not has_errors,
         "results": results,
     }), 207 if has_errors else 200
+
+
+@app.post("/data-audit/session")
+def data_audit_session():
+    """Create a preview session through the existing Data Audit Center.
+
+    This endpoint intentionally stops after upload/profile creation.  Audit,
+    review, and transactional apply continue through the authenticated Data
+    Audit Center routes; no production transaction rows are inserted here.
+    """
+    operation = (request.form.get("operation") or "audit").strip().casefold()
+    target_key = (request.form.get("target_key") or "").strip()
+    if operation != "audit":
+        return jsonify({"ok": False, "error": "Use the unified Audit & Compare workflow."}), 400
+    if target_key not in data_audit.TARGETS:
+        return jsonify({"ok": False, "error": "Choose a supported transaction target."}), 400
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"ok": False, "error": "Choose an Excel, XLS or CSV file."}), 400
+    try:
+        audit = data_audit.upload_audit(upload, target_key, request.remote_addr or "excel-import")
+    except Exception as exc:
+        app.logger.exception("Data Audit upload preview failed")
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    session_id = secrets.token_urlsafe(24)
+    _AUDIT_IMPORT_SESSIONS[session_id] = {"audit_id": audit["id"], "operation": operation}
+    return jsonify({
+        "ok": True,
+        "session_id": session_id,
+        "audit_id": audit["id"],
+        "operation": operation,
+        "target_key": target_key,
+        "target_label": data_audit.TARGETS[target_key]["label"],
+        "filename": audit["filename"],
+        "sheet_name": audit["sheet_name"],
+        "source_rows": audit["source_rows"],
+        "source_columns": audit["source_columns"],
+        "detected_date": audit.get("detected_date"),
+        "status": audit["status"],
+    })
+
+
+@app.get("/data-audit/session/<session_id>")
+def data_audit_session_detail(session_id):
+    session = _AUDIT_IMPORT_SESSIONS.get(session_id)
+    if session is None:
+        return jsonify({"ok": False, "error": "Import preview session expired or does not exist."}), 404
+    try:
+        audit = data_audit.get_audit(session["audit_id"])
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    return jsonify({"ok": True, "session_id": session_id, "operation": session["operation"], "audit": audit})
 
 
 @app.post("/import-vba")

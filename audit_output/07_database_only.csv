@@ -1,0 +1,4 @@
+﻿classification,db_id,invoice_number_original,normalized_invoice_number,invoice_date,customer_original,canonical_customer,normalized_customer,customer_master_id,product_original,normalized_product,quantity,total_amount,legacy_amount_received,total_received,outstanding_balance,payment_status,created_at,reason
+database_only,703,64,64,2026-06-16,Ma Shwe War,Ma Shwe War,Ma Shwe War,176,Sote Phwar 1 L,Sote Phwar 1L,1100,33000000,0,0,33000000,Outstanding,,no Excel row matched or referenced this database row
+database_only,710,69,69,2026-06-16,Pwint Aung Kyaw (MDY),Pwint Aung Kyaw MDY,Pwint Aung Kyaw MDY,142,Sote Phwar 1 L,Sote Phwar 1L,150,4500000,0,0,4500000,Outstanding,,no Excel row matched or referenced this database row
+database_only,711,69,69,2026-06-16,Pwint Aung Kyaw (MDY),Pwint Aung Kyaw MDY,Pwint Aung Kyaw MDY,142,Sote Phwar 4L,Sote Phwar 4L,8,1000000,0,0,1000000,Outstanding,,no Excel row matched or referenced this database row

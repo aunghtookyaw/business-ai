@@ -1,0 +1,10 @@
+﻿sheet_name,column_number,exact_header,normalized_header,logical_field,mapping_status,required
+Sheet1,1,Invoice_Number,invoice number,invoice_number,mapped,yes
+Sheet1,2,Item,item,product,mapped,yes
+Sheet1,3,Quantity,quantity,quantity,mapped,yes
+Sheet1,4,Total_Amount,total amount,total_amount,mapped,yes
+Sheet1,5,Amount_Received,amount received,amount_received,mapped,no
+Sheet1,6,Note,note,note,mapped,no
+Sheet1,7,AI_comment,ai comment,ai_comment,mapped,no
+Sheet1,8,Invoice_Date,invoice date,invoice_date,mapped,yes
+Sheet1,9,Customer_Name,customer name,customer_name,mapped,yes

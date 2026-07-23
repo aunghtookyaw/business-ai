@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 import uuid
 from collections import OrderedDict
 from datetime import date
@@ -12,13 +13,17 @@ from typing import Any
 from urllib.parse import urlencode
 
 import psycopg2.extras
-from flask import redirect, request, url_for
+from flask import redirect, request, send_file, url_for
+from openpyxl import Workbook
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 from tools import formula_engine
 from tools.veggies_production import (
     CROP_CATEGORIES,
     CropDefinition,
     load_crop_definitions,
+    format_quantity,
     parse_production_date,
     parse_quantity,
 )
@@ -46,13 +51,16 @@ def _date_text(value: Any) -> str:
 
 
 def _quantity_text(value: Any) -> str:
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return ""
-    return format(Decimal(str(value)), ".1f")
+    return format_quantity(value)
 
 
 def _quantity_input_text(value: Any) -> str:
-    """Keep stored precision in editable fields while display values use one decimal."""
+    """Apply the shared display precision to browser quantity fields."""
+    return format_quantity(value)
+
+
+def _quantity_storage_text(value: Any) -> str:
+    """Serialize untouched input precision so an edit-only save cannot round the database value."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return ""
     return format(Decimal(str(value)), "f")
@@ -466,7 +474,7 @@ def _entry_form(crops, farm_areas, values, errors, action, edit=False):
             field = _crop_field(crop)
             value = values.get(field, item_values.get(crop.crop_code, ""))
             input_id = f"input_{field}"
-            fields.append(f'''<div class="crop-field" data-crop-name="{escape(crop.crop_name.casefold())}"><label for="{input_id}">{escape(crop.crop_name)}</label><input class="crop-input" id="{input_id}" type="number" step="any" min="0" name="{field}" value="{escape(_quantity_input_text(value))}" inputmode="decimal" data-crop-label="{escape(crop.crop_name)}">{_error(errors, field)}</div>''')
+            fields.append(f'''<div class="crop-field" data-crop-name="{escape(crop.crop_name.casefold())}"><label for="{input_id}">{escape(crop.crop_name)}</label><input class="crop-input" id="{input_id}" type="number" step="any" min="0" name="{field}" value="{escape(_quantity_input_text(value))}" inputmode="decimal" data-stored-value="{escape(_quantity_storage_text(value))}" data-crop-label="{escape(crop.crop_name)}">{_error(errors, field)}</div>''')
         categories.append(f'''<div class="crop-category" data-category="{escape(category)}"><h4>{escape(category)}</h4><div class="crop-grid">{''.join(fields)}</div></div>''')
     confirm = '<label><input style="width:auto;min-height:auto" type="checkbox" name="confirm_changes" value="yes" required> I reviewed the original values and confirm these changes.</label>' if edit else ""
     selected_area = _text(values.get("farm_area_id"))
@@ -489,17 +497,67 @@ def _entry_form(crops, farm_areas, values, errors, action, edit=False):
         <label>Note<textarea name="note" rows="3">{escape(_text(values.get('note')))}</textarea></label>
         <label>AI Note<textarea name="ai_note" rows="3">{escape(_text(values.get('ai_note')))}</textarea></label>
       </div>
-      <section class="preview" aria-live="polite"><h3>Entry preview</h3><div class="grid"><p><b>Production Date</b><br><span id="previewDate">—</span></p><p><b>Assignee</b><br><span id="previewAssignee">—</span></p><p><b>Number of Entered Crops</b><br><span id="previewCount">0</span></p><p><b>Total Entered Quantity</b><br><span id="previewTotal">0</span></p></div><ul id="previewItems"><li>No crop quantities entered.</li></ul></section>{confirm}
+      <section class="preview" aria-live="polite"><h3>Entry preview</h3><div class="grid"><p><b>Production Date</b><br><span id="previewDate">—</span></p><p><b>Assignee</b><br><span id="previewAssignee">—</span></p><p><b>Number of Entered Crops</b><br><span id="previewCount">0</span></p><p><b>Total Entered Quantity</b><br><span id="previewTotal">0.00</span></p></div><ul id="previewItems"><li>No crop quantities entered.</li></ul></section>{confirm}
       <div class="actions"><button id="saveButton" type="submit">{'Save Changes' if edit else 'Save Production'}</button></div>
     </form><script>
     (()=>{{
       const form=document.getElementById('productionForm'),inputs=[...form.querySelectorAll('.crop-input')],search=document.getElementById('cropSearch'),mode=document.getElementById('cropMode'),dateInput=form.querySelector('[name="production_date"]'),assigneeInput=form.querySelector('[name="assignee"]');
       const entered=input=>input.value.trim()!=='';
       function safe(text){{return text.replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
-      function refresh(){{const query=search.value.trim().toLowerCase();let count=0,total=0,items=[];inputs.forEach(input=>{{const field=input.closest('.crop-field'),isEntered=entered(input),matches=!query||field.dataset.cropName.includes(query),visible=matches&&(mode.value==='all'||isEntered);field.classList.toggle('hidden',!visible);if(isEntered){{count++;const quantity=Number(input.value)||0;total+=quantity;items.push(`${{input.dataset.cropLabel}} — ${{quantity.toFixed(1)}}`);}}}});document.querySelectorAll('.crop-category').forEach(section=>section.classList.toggle('hidden',![...section.querySelectorAll('.crop-field')].some(field=>!field.classList.contains('hidden'))));document.getElementById('previewDate').textContent=dateInput.value||'—';document.getElementById('previewAssignee').textContent=assigneeInput.value.trim()||'—';document.getElementById('previewCount').textContent=count;document.getElementById('previewTotal').textContent=total.toFixed(1);document.getElementById('previewItems').innerHTML=items.length?items.map(item=>`<li>${{safe(item)}}</li>`).join(''):'<li>No crop quantities entered.</li>';}}
-      inputs.forEach(input=>input.addEventListener('input',refresh));search.addEventListener('input',refresh);mode.addEventListener('change',refresh);dateInput.addEventListener('input',refresh);assigneeInput.addEventListener('input',refresh);refresh();form.addEventListener('submit',()=>{{const b=document.getElementById('saveButton');b.disabled=true;b.textContent='Saving…';}});
+      const formatQuantity=value=>(Number(value)||0).toFixed(2);
+      function refresh(){{const query=search.value.trim().toLowerCase();let count=0,total=0,items=[];inputs.forEach(input=>{{const field=input.closest('.crop-field'),isEntered=entered(input),matches=!query||field.dataset.cropName.includes(query),visible=matches&&(mode.value==='all'||isEntered);field.classList.toggle('hidden',!visible);if(isEntered){{count++;const quantity=Number(input.value)||0;total+=quantity;items.push(`${{input.dataset.cropLabel}} — ${{formatQuantity(quantity)}}`);}}}});document.querySelectorAll('.crop-category').forEach(section=>section.classList.toggle('hidden',![...section.querySelectorAll('.crop-field')].some(field=>!field.classList.contains('hidden'))));document.getElementById('previewDate').textContent=dateInput.value||'—';document.getElementById('previewAssignee').textContent=assigneeInput.value.trim()||'—';document.getElementById('previewCount').textContent=count;document.getElementById('previewTotal').textContent=formatQuantity(total);document.getElementById('previewItems').innerHTML=items.length?items.map(item=>`<li>${{safe(item)}}</li>`).join(''):'<li>No crop quantities entered.</li>';}}
+      inputs.forEach(input=>{{input.addEventListener('input',()=>{{input.dataset.changed='1';refresh();}});input.addEventListener('focus',()=>{{if(input.dataset.changed!=='1'&&entered(input))input.value=input.dataset.storedValue;}});input.addEventListener('blur',()=>{{if(entered(input))input.value=formatQuantity(input.value);refresh();}});}});search.addEventListener('input',refresh);mode.addEventListener('change',refresh);dateInput.addEventListener('input',refresh);assigneeInput.addEventListener('input',refresh);refresh();form.addEventListener('submit',()=>{{inputs.forEach(input=>{{if(input.dataset.changed!=='1')input.value=input.dataset.storedValue;}});const b=document.getElementById('saveButton');b.disabled=true;b.textContent='Saving…';}});
     }})();
     </script>'''
+
+
+def _record_pdf(record: dict[str, Any]) -> io.BytesIO:
+    output = io.BytesIO()
+    pdf = canvas.Canvas(output, pagesize=A4)
+    pdf.setTitle(f"Veggies Production {record['id']}")
+    y = A4[1] - 48
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(42, y, "Veggies Production Record")
+    pdf.setFont("Helvetica", 10)
+    for text in (
+        f"Record: {record['id']}", f"Production date: {_date_text(record['production_date'])}",
+        f"Farm area: {_text(record['farm_area'])}", f"Assignee: {_text(record['assignee']) or '-'}",
+    ):
+        y -= 20
+        pdf.drawString(42, y, text)
+    y -= 28
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(42, y, "Crop")
+    pdf.drawString(300, y, "Quantity")
+    pdf.drawString(390, y, "Unit")
+    pdf.setFont("Helvetica", 10)
+    for item in record["items"]:
+        y -= 18
+        pdf.drawString(42, y, _text(item["crop_name"])[:38])
+        pdf.drawRightString(365, y, format_quantity(item["quantity"]))
+        pdf.drawString(390, y, _text(item["unit"]) or "-")
+    pdf.save()
+    output.seek(0)
+    return output
+
+
+def _record_excel(record: dict[str, Any]) -> io.BytesIO:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Production Record"
+    sheet.append(["Record ID", record["id"]])
+    sheet.append(["Production Date", record["production_date"]])
+    sheet.append(["Farm Area", record["farm_area"]])
+    sheet.append(["Assignee", record["assignee"] or ""])
+    sheet.append([])
+    sheet.append(["Crop", "Quantity", "Unit"])
+    for item in record["items"]:
+        sheet.append([item["crop_name"], item["quantity"], item["unit"] or ""])
+        sheet.cell(sheet.max_row, 2).number_format = "0.00"
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return output
 
 
 def _filters() -> dict[str, str]:
@@ -625,7 +683,24 @@ def register_routes(app) -> None:
         if not record:
             return "Production record not found.", 404
         item_rows = ''.join(f'<tr><td>{escape(item["crop_name"])}</td><td>{escape(_quantity_text(item["quantity"]))}</td><td>{escape(_text(item["unit"]) or "—")}</td><td>{escape(_text(item["created_at"]))}</td><td>{escape(_text(item["updated_at"]))}</td></tr>' for item in record["items"])
-        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veggies Production Detail</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Production record #{batch_id}</h2><div class="grid"><p><b>Production Date</b><br>{escape(_date_text(record['production_date']))}</p><p><b>Farm Area</b><br>{escape(_text(record['farm_area']))}</p><p><b>Assignee</b><br>{escape(_text(record['assignee']) or '—')}</p><p><b>Date of Entry</b><br>{escape(_date_text(record['entry_date']) or '—')}</p><p><b>Created</b><br>{escape(_text(record['created_at']))}</p><p><b>Updated</b><br>{escape(_text(record['updated_at']))}</p></div><p><b>Note</b><br>{escape(_text(record['note']) or '—')}</p><p><b>AI Note</b><br>{escape(_text(record['ai_note']) or '—')}</p><div class="table-wrap"><table><thead><tr><th>Crop</th><th>Quantity</th><th>Unit</th><th>Created time</th><th>Updated time</th></tr></thead><tbody>{item_rows}</tbody></table></div><div class="actions"><a class="button" href="/veggies-production/{batch_id}/edit">Edit</a><a class="button secondary" href="/veggies-production">Back</a></div><hr><h3>Delete Production Record</h3><p>Imported workbook records are protected. Type record ID <strong>{batch_id}</strong> and provide a reason.</p><form method="post" action="/veggies-production/{batch_id}/delete" onsubmit="return confirm('Permanently delete production record {batch_id}?')"><div class="grid"><label>Record ID<input name="confirmation" required></label><label>Deletion reason<input name="reason" required></label></div><div class="actions"><button type="submit" class="secondary">Delete Record</button></div></form></section></main></body></html>'''
+        return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veggies Production Detail</title><style>{BASE_STYLE}</style></head><body><header><h1>Veggies Production Basic</h1></header><main><section><h2>Production record #{batch_id}</h2><div class="grid"><p><b>Production Date</b><br>{escape(_date_text(record['production_date']))}</p><p><b>Farm Area</b><br>{escape(_text(record['farm_area']))}</p><p><b>Assignee</b><br>{escape(_text(record['assignee']) or '—')}</p><p><b>Date of Entry</b><br>{escape(_date_text(record['entry_date']) or '—')}</p><p><b>Created</b><br>{escape(_text(record['created_at']))}</p><p><b>Updated</b><br>{escape(_text(record['updated_at']))}</p></div><p><b>Note</b><br>{escape(_text(record['note']) or '—')}</p><p><b>AI Note</b><br>{escape(_text(record['ai_note']) or '—')}</p><div class="table-wrap"><table><thead><tr><th>Crop</th><th>Quantity</th><th>Unit</th><th>Created time</th><th>Updated time</th></tr></thead><tbody>{item_rows}</tbody></table></div><div class="actions"><a class="button" href="/veggies-production/{batch_id}/edit">Edit</a><a class="button secondary" href="/veggies-production/{batch_id}/pdf">PDF</a><a class="button secondary" href="/veggies-production/{batch_id}/excel">Excel</a><a class="button secondary" href="/veggies-production">Back</a></div><hr><h3>Delete Production Record</h3><p>Imported workbook records are protected. Type record ID <strong>{batch_id}</strong> and provide a reason.</p><form method="post" action="/veggies-production/{batch_id}/delete" onsubmit="return confirm('Permanently delete production record {batch_id}?')"><div class="grid"><label>Record ID<input name="confirmation" required></label><label>Deletion reason<input name="reason" required></label></div><div class="actions"><button type="submit" class="secondary">Delete Record</button></div></form></section></main></body></html>'''
+
+    @app.get("/veggies-production/<int:batch_id>/pdf")
+    def veggies_production_pdf(batch_id):
+        record = get_record(batch_id)
+        if not record:
+            return "Production record not found.", 404
+        return send_file(_record_pdf(record), mimetype="application/pdf", as_attachment=True,
+                         download_name=f"Veggies_Production_{batch_id}.pdf")
+
+    @app.get("/veggies-production/<int:batch_id>/excel")
+    def veggies_production_excel(batch_id):
+        record = get_record(batch_id)
+        if not record:
+            return "Production record not found.", 404
+        return send_file(_record_excel(record),
+                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         as_attachment=True, download_name=f"Veggies_Production_{batch_id}.xlsx")
 
     @app.post("/veggies-production/<int:batch_id>/delete")
     def veggies_production_delete(batch_id):

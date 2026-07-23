@@ -30,6 +30,227 @@ class DashboardServerTest(unittest.TestCase):
         )
         self.assertEqual(200, response.status_code)
 
+    def test_executive_frontend_uses_api_inventory_value_without_recalculation(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        self.assertIn("Inventory Value", html)
+        self.assertIn("Current SotePhwar inventory valuation", html)
+        self.assertIn('formatCompactMmk(metrics.inventory_value)', script)
+        self.assertNotIn('inventoryRows.reduce', script)
+        self.assertIn('data-page="inventory"', html)
+
+    def test_inventory_frontend_preserves_bottle_quantities_and_labels_values(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        self.assertIn("Bottle quantities by store", html)
+        self.assertIn("Current stock matrix", html)
+        self.assertIn("Current Inventory Value", script)
+        self.assertIn("Current Stock Bottles", script)
+        self.assertIn("Lifetime Production Bottles", script)
+        self.assertIn("Current Month Production", script)
+        self.assertIn("Current Month Sales", script)
+        self.assertIn("current_quantity", script)
+        self.assertIn("inventory_value", script)
+
+    def test_inventory_frontend_is_production_focused_and_hides_management_filters(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        css = (root / "dashboard-prototype/styles.css").read_text()
+        for label in ("LIFETIME PRODUCTION", "Monthly production by bottle type", "Production vs sales by month", "Bottle quantities by store"):
+            self.assertIn(label, html)
+        self.assertIn('classList.toggle("inventory-mode"', script)
+        self.assertIn("body.inventory-mode #moreFilters", css)
+        self.assertIn("#expandedFilters label:not(.period-detail)", css)
+        self.assertIn("/api/dashboard/inventory?year=", script)
+        self.assertIn("period_mode", script)
+        self.assertIn("inventoryState", script)
+        self.assertIn('inventoryState = { period_mode: "year", year: currentYear, month: null }', script)
+        self.assertIn("syncInventoryStateFromGlobal", script)
+        self.assertIn("Loading production summary...", script)
+        self.assertIn("No production recorded for ${monthName}.", script)
+        self.assertNotIn("July 2026 Production Summary", html)
+        self.assertNotIn("month = 7", script)
+
+    @patch("scripts.dashboard_server.dashboard_service.inventory_dashboard")
+    def test_inventory_api_forwards_selected_year_and_month(self, inventory):
+        self.login()
+        inventory.return_value = {"selected_year": 2026, "selected_month": 6}
+        response = self.client.get("/api/dashboard/inventory?year=2026&month=6")
+        self.assertEqual(200, response.status_code)
+        inventory.assert_called_once_with(year="2026", month="6")
+
+    def test_farm_voucher_navigation_removed_but_api_routes_remain(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        self.assertNotIn('data-page="farm-voucher"', html)
+        self.assertNotIn('page === "farm-voucher"', script)
+        self.assertIn('/api/vouchers/farm/drafts', script)
+        self.assertIn("/api/vouchers/farm/drafts", [rule.rule for rule in dashboard_server.app.url_map.iter_rules()])
+
+    def test_retired_dashboard_navigation_and_field_chart_are_absent(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        for page in ("payments", "customers"):
+            self.assertNotIn(f'data-page="{page}"', html)
+            self.assertNotIn(f'page === "{page}"', script)
+        self.assertNotIn('id="paymentsTemplate"', html)
+        self.assertNotIn('id="farmFieldStackedChart"', html)
+        self.assertNotIn("field_stacked", script)
+        self.assertNotIn("field_totals", script)
+        self.assertIn('id="farmFieldToggle"', html)
+        self.assertIn('id="farmDailyStackedChart"', html)
+        self.assertNotIn('id="farmTrendChart"', html)
+        self.assertNotIn('id="farmLegend"', html)
+        self.assertNotIn("renderFarmTrend", script)
+        self.assertNotIn("FARM_STACKED_BAR_OPTIONS", script)
+        self.assertIn('id="farmProductionKpis"', html)
+        self.assertIn('id="farmCropTotals"', html)
+        self.assertIn('id="farmSummaryEmpty"', html)
+        self.assertNotIn('id="farmFieldSummary"', html)
+        self.assertNotIn('id="farmVegetableTotals"', html)
+        self.assertNotIn('id="farmGrouping"', html)
+        self.assertIn('id="farmProductionBody"', html)
+        self.assertLess(html.index('id="farmCropTotals"'), html.index('id="farmDailyStackedChart"'))
+        self.assertLess(html.index('id="farmDailyStackedChart"'), html.index('id="farmProductionBody"'))
+        self.assertNotIn('transform="rotate(90 ', script)
+        self.assertIn("labelStride", script)
+        self.assertIn("/api/dashboard/farm-production", script)
+        self.assertIn("`/api/dashboard/farm-production/export/${kind}`", script)
+        self.assertIn(
+            "/api/dashboard/farm-production/export/pdf",
+            [rule.rule for rule in dashboard_server.app.url_map.iter_rules()],
+        )
+        self.assertIn(
+            "/api/dashboard/farm-production/export/excel",
+            [rule.rule for rule in dashboard_server.app.url_map.iter_rules()],
+        )
+        self.assertIn("canonicalFarmDateRange", script)
+
+    def test_farm_chart_grouping_scroll_zoom_and_tooltip_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        css = (root / "dashboard-prototype/styles.css").read_text()
+        self.assertIn('if (period.type === "year") return "monthly"', script)
+        self.assertIn('period.type === "month" || period.type === "week"', script)
+        self.assertIn("if (days <= 45) return \"daily\"", script)
+        self.assertIn("if (days <= 120) return \"weekly\"", script)
+        self.assertIn("return \"monthly\"", script)
+        self.assertIn("daily:52", script)
+        self.assertIn("weekly:80", script)
+        self.assertIn("monthly:90", script)
+        self.assertIn("FARM_BUCKET_WIDTH_MIN = 28", script)
+        self.assertIn("FARM_BUCKET_WIDTH_MAX = 120", script)
+        self.assertIn("normalized.length * step", script)
+        self.assertIn("overflow-x:auto", css)
+        for element_id in ("farmZoomIn", "farmZoomOut", "farmZoomReset",
+                           "farmScrollHint", "farmScrollStart", "farmScrollLatest"):
+            self.assertIn(f'id="{element_id}"', html)
+        zoom_code = script[script.index("function adjustFarmChartZoom"):
+                           script.index("function updateFarmZoomControls")]
+        self.assertNotIn("loadFarmProduction", zoom_code)
+        self.assertNotIn("apiJson", zoom_code)
+        self.assertIn("replaceChildren()", script)
+        self.assertIn("farmChartLabel", script)
+        self.assertIn("farmTooltipPeriod", script)
+        self.assertIn('${totalKind} Total:', script)
+        self.assertNotIn("GMT", script[script.index("function renderFarmStackedBars"):
+                                       script.index("function handleFarmAreaChange")])
+        farm_chart_code = script[script.index("function normalizeFarmChartRows"):
+                                 script.index("function handleFarmAreaChange")]
+        self.assertIn("row.crop_units", farm_chart_code)
+        self.assertIn("row.cropUnits[crop]", farm_chart_code)
+        self.assertNotIn(" kg", farm_chart_code.lower())
+
+    def test_farm_summary_reuses_single_api_response_and_connected_filters(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        css = (root / "dashboard-prototype/styles.css").read_text()
+        load_code = script[script.index("async function loadFarmProduction"):
+                           script.index("function renderFarmProduction(data)")]
+        summary_code = script[script.index("function renderFarmProductionSummary"):
+                              script.index("function normalizeFarmChartRows")]
+        self.assertEqual(1, load_code.count('apiJson("/api/dashboard/farm-production"'))
+        self.assertNotIn("apiJson(", summary_code)
+        self.assertIn("data.summary", summary_code)
+        self.assertIn("data.crop_totals", summary_code)
+        self.assertIn("TOTAL PRODUCTION", summary_code)
+        self.assertIn("ACTIVE CROPS", summary_code)
+        self.assertIn("PRODUCTION DAYS", summary_code)
+        self.assertIn("LATEST PRODUCTION DATE", summary_code)
+        self.assertIn("Mixed units", summary_code)
+        self.assertIn("No production recorded for the selected period.", html)
+        self.assertIn("sector:filterElements.sector.value", script)
+        self.assertIn("business_unit:filterElements.businessUnit.value", script)
+        self.assertIn("farm-summary-kpis", css)
+
+    def test_retired_dashboard_routes_redirect_safely_to_executive(self):
+        self.login()
+        for path in ("/payments", "/customers"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(302, response.status_code)
+                self.assertEqual("/executive", response.headers["Location"])
+
+    def test_dashboard_metadata_excludes_retired_pages(self):
+        self.login()
+        pages = self.client.get("/api/dashboard/meta").get_json()["pages"]
+        self.assertEqual(
+            ["executive", "inventory", "farm-production", "financial", "insights"],
+            pages,
+        )
+
+    def test_financial_chart_preserves_null_gaps_without_zero_coercion(self):
+        script = (Path(__file__).resolve().parents[1] / "dashboard-prototype/app.js").read_text()
+        line_path = script[script.index("function linePath"):script.index("function renderFinancialTrend")]
+        self.assertIn("value === null || value === undefined", line_path)
+        self.assertNotIn("value || 0", line_path)
+        self.assertIn('drawing = false', line_path)
+        self.assertIn("spanGaps: false", script)
+        self.assertIn("row.has_source_data === true", script)
+
+    def test_dashboard_assets_are_versioned_with_cache_policy(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        self.assertIn("styles.css?v=20260723-farm-summary1", html)
+        self.assertIn("app.js?v=20260723-farm-summary1", html)
+        response = self.client.get("/")
+        self.assertIn("no-cache", response.headers["Cache-Control"])
+        asset = self.client.get("/app.js?v=20260722-production3")
+        self.assertIn("immutable", asset.headers["Cache-Control"])
+
+    def test_frontend_uses_api_week_labels_and_dynamic_cutoff_subtitle(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "dashboard-prototype/index.html").read_text()
+        script = (root / "dashboard-prototype/app.js").read_text()
+        self.assertIn('id="trendDataThrough"', html)
+        self.assertIn("Data through ${finalPeriod}", script)
+        self.assertNotIn('["W1", "W2", "W3", "W4", "W5"]', script)
+
+    @patch("scripts.dashboard_server.requests.request")
+    def test_proxy_trims_only_future_months_from_legacy_current_year_payload(self, upstream):
+        self.login()
+        rows = [{"label": label, "revenue": 1 if index < 7 else 0}
+                for index, label in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))]
+        upstream.return_value = Mock(
+            ok=True, status_code=200, content=b"", headers={"Content-Type": "application/json"},
+            json=lambda: {"ok": True, "data": {"trend": rows}},
+        )
+        with patch.dict(os.environ, {"DASHBOARD_INTERNAL_API_BASE_URL": "http://127.0.0.1:6062/internal/v1/dashboard"}), \
+                patch("scripts.dashboard_server.date") as today:
+            today.today.return_value = __import__("datetime").date(2026, 7, 22)
+            today.side_effect = __import__("datetime").date
+            response = self.client.post("/api/dashboard/executive", json={"filters": {"period": {"type": "year", "year": 2026}}})
+        self.assertEqual(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+                         [row["label"] for row in response.get_json()["data"]["trend"]])
+        self.assertEqual("Jul", response.get_json()["data"]["latest_trend_period"])
+
     def test_health_reports_public_status(self):
         response = self.client.get("/health")
         self.assertEqual(200, response.status_code)
@@ -133,19 +354,19 @@ class DashboardServerTest(unittest.TestCase):
         self.assertEqual(456, response.get_json()["data"]["metrics"]["revenue"])
         executive_dashboard.assert_called_once()
 
-    def test_dashboard_page_redirects_to_login_when_logged_out(self):
+    def test_retired_dashboard_page_redirects_to_executive_when_logged_out(self):
         response = self.client.get("/payments")
 
         self.assertEqual(302, response.status_code)
-        self.assertIn("login=required", response.headers["Location"])
+        self.assertEqual("/executive", response.headers["Location"])
 
-    def test_dashboard_page_loads_after_login(self):
+    def test_retired_dashboard_page_redirects_after_login(self):
         self.login()
 
         response = self.client.get("/payments")
 
-        self.assertEqual(200, response.status_code)
-        self.assertIn(b"<title>BigShot Dashboard</title>", response.data)
+        self.assertEqual(302, response.status_code)
+        self.assertEqual("/executive", response.headers["Location"])
 
     def test_pwa_manifest_and_icons_are_public(self):
         expected_assets = {

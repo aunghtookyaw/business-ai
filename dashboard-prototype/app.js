@@ -3,10 +3,6 @@ const pageConfig = {
     title: "Executive Dashboard",
     subtitle: "A thirty-second view of performance, cash and operational risk."
   },
-  payments: {
-    title: "Payment Analytics",
-    subtitle: "Collections, invoice-age analysis and canonical payment history."
-  },
   inventory: {
     title: "Inventory Dashboard",
     subtitle: "Milestone 2 — stock position and movement by location.",
@@ -21,21 +17,6 @@ const pageConfig = {
   "farm-production": {
     title: "Farm Production",
     subtitle: "Read-only vegetable production trends by crop, farm area and unit."
-  },
-  "farm-voucher": {
-    title: "Farm Voucher",
-    subtitle: "Create, validate, preview, print and atomically submit Farm sales vouchers."
-  },
-  customers: {
-    title: "Customer Dashboard",
-    subtitle: "Milestone 3 — customer revenue and collection behaviour.",
-    eyebrow: "CUSTOMER INTELLIGENCE",
-    headline: "Customer Dashboard is scheduled for Milestone 3.",
-    description: "Customer ranking and payment behaviour will use canonical sales and receivable reports.",
-    kpis: ["Active Customers", "Top Customer Revenue", "Outstanding Customers", "Average Collection"],
-    primary: "Revenue by customer trend",
-    breakdown: "Customer payment behaviour",
-    table: "Revenue and outstanding ranking"
   },
   financial: {
     title: "Financial Dashboard",
@@ -74,7 +55,6 @@ const moduleTemplate = document.getElementById("moduleTemplate");
 const farmProductionTemplate = document.getElementById("farmProductionTemplate");
 const inventoryTemplate = document.getElementById("inventoryTemplate");
 const farmVoucherTemplate = document.getElementById("farmVoucherTemplate");
-const paymentsTemplate = document.getElementById("paymentsTemplate");
 const pageTitle = document.getElementById("pageTitle");
 const pageSubtitle = document.getElementById("pageSubtitle");
 const sidebar = document.getElementById("sidebar");
@@ -86,6 +66,13 @@ let periodType = "year";
 let refreshTimer;
 let initializedDashboard = false;
 let authenticatedUser = null;
+const inventoryState = { period_mode: "year", year: currentYear, month: null };
+const FARM_BUCKET_WIDTH = Object.freeze({daily:52, weekly:80, monthly:90});
+const FARM_BUCKET_WIDTH_MIN = 28;
+const FARM_BUCKET_WIDTH_MAX = 120;
+let farmChartModel = null;
+let farmChartResizeTimer = null;
+let farmChartResizeBound = false;
 
 const filterElements = {
   year: document.getElementById("yearFilter"),
@@ -126,8 +113,27 @@ function formatMmk(value) {
   return `${Number(value || 0).toLocaleString()} MMK`;
 }
 
+function formatCompactMmk(value) {
+  if (value === null || value === undefined) return "—";
+  const number = Number(value || 0), absolute = Math.abs(number);
+  if (absolute >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(2)}B MMK`;
+  if (absolute >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M MMK`;
+  return `${number.toLocaleString()} MMK`;
+}
+
 function formatFull(value) {
   return Number(value || 0).toLocaleString();
+}
+
+function formatProductionQuantity(value) {
+  return Number(value || 0).toFixed(2);
+}
+
+function formatProductionTotal(value) {
+  return Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatDate(value) {
@@ -135,6 +141,16 @@ function formatDate(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value);
   return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function formatFarmPeriodLabel(value, mode = "daily") {
+  const raw = String(value || "");
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return raw.replace(/,? 00:00:00 GMT$/, "");
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (mode === "monthly") return date.toLocaleDateString("en-US", {month:"short", timeZone:"UTC"});
+  if (mode === "weekly") return date.toLocaleDateString("en-US", {day:"2-digit", month:"short", timeZone:"UTC"});
+  return `${Number(match[3])} ${date.toLocaleDateString("en-US", {month:"short", timeZone:"UTC"})}`;
 }
 
 function initials(value) {
@@ -154,6 +170,8 @@ function metricCard(label, index) {
 function renderPage(page) {
   const config = pageConfig[page] || pageConfig.executive;
   activePage = page;
+  document.body.classList.toggle("inventory-mode", page === "inventory");
+  document.body.classList.toggle("farm-production-mode", page === "farm-production");
   pageTitle.textContent = config.title;
   pageSubtitle.textContent = config.subtitle;
   content.innerHTML = "";
@@ -166,13 +184,7 @@ function renderPage(page) {
     initializeFarmProduction();
   } else if (page === "inventory") {
     content.appendChild(inventoryTemplate.content.cloneNode(true));
-    loadInventoryDashboard();
-  } else if (page === "payments") {
-    content.appendChild(paymentsTemplate.content.cloneNode(true));
-    loadPaymentsDashboard();
-  } else if (page === "farm-voucher") {
-    content.appendChild(farmVoucherTemplate.content.cloneNode(true));
-    initializeFarmVoucher();
+    initializeInventoryDashboard();
   } else {
     const fragment = moduleTemplate.content.cloneNode(true);
     fragment.querySelector("#moduleEyebrow").textContent = config.eyebrow;
@@ -191,43 +203,6 @@ function renderPage(page) {
   sidebar.classList.remove("open");
   history.replaceState(null, "", `#${page}`);
   window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-async function loadPaymentsDashboard(refresh = false) {
-  if (activePage !== "payments") return;
-  setLoading(true);
-  removeDashboardError();
-  try {
-    const payload = await apiJson("/api/dashboard/payments", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(filterPayload(refresh))
-    });
-    renderPaymentsDashboard(payload.data);
-  } catch (error) { showDashboardError(error.message); }
-  finally { setLoading(false); }
-}
-
-function renderPaymentsDashboard(data) {
-  const metrics = data.metrics || {};
-  setText("paymentsInvoiced", formatAmount(metrics.invoiced));
-  setText("paymentsReceived", formatAmount(metrics.received));
-  setText("paymentsOutstanding", formatAmount(metrics.outstanding));
-  setText("paymentsRate", `${Number(metrics.collection_rate_percent || 0).toFixed(1)}%`);
-  setText("paymentsVoucherCount", formatFull(metrics.voucher_count));
-  const aging = data.aging || {};
-  const agingMax = Math.max(1, ...Object.values(aging).map(Number));
-  document.getElementById("paymentsAging").innerHTML = ["0-30", "31-60", "61-90", "90+"].map(bucket =>
-    `<div><span>${bucket} days</span><strong>${formatMmk(aging[bucket] || 0)}</strong><i style="--value:${Number(aging[bucket] || 0) / agingMax * 100}%"></i></div>`
-  ).join("");
-  document.getElementById("paymentsCustomersBody").innerHTML = (data.customer_balances || []).map(row =>
-    `<tr><td>${escapeHtml(row.customer || "—")}</td><td>${formatFull(row.outstanding_balance)} MMK</td></tr>`
-  ).join("") || '<tr><td colspan="2"><div class="empty-state">No customer balances match this scope.</div></td></tr>';
-  document.getElementById("paymentsInvoicesBody").innerHTML = (data.invoices || []).map(row =>
-    `<tr><td>${escapeHtml(row.customer || "—")}</td><td>${escapeHtml(row.sector)}</td><td>${escapeHtml(row.voucher_number)}</td><td>${formatDate(row.invoice_date)}</td><td>${formatFull(row.invoice_amount)}</td><td>${formatFull(row.received_amount)}</td><td>${formatFull(row.outstanding_balance)}</td><td><span class="pill ${row.payment_status === "Paid" ? "good" : row.payment_status === "Partial" ? "warn" : "alert-pill"}">${row.payment_status}</span></td></tr>`
-  ).join("") || '<tr><td colspan="8"><div class="empty-state">No vouchers match this scope.</div></td></tr>';
-  document.getElementById("paymentsHistoryBody").innerHTML = (data.recent_payments || []).map(row =>
-    `<tr><td>${formatDate(row.receive_date)}</td><td>${escapeHtml(row.customer || "—")}</td><td>${escapeHtml(row.sector)}</td><td>${escapeHtml(row.voucher_number)}</td><td>${formatFull(row.receive_amount)}</td><td>${escapeHtml(row.payment_method || "—")}</td><td>${escapeHtml(row.reference_number || "—")}</td></tr>`
-  ).join("") || '<tr><td colspan="7"><div class="empty-state">No payment receipts match this scope.</div></td></tr>';
 }
 
 function showToast(message) {
@@ -380,12 +355,12 @@ function renderExecutiveData(data) {
   setText("metricCash", formatAmount(metrics.cash_received));
   setText("metricOutstanding", formatAmount(metrics.outstanding_receivables));
   const inventoryRows = data.inventory.stock || [];
-  setText("metricInventoryValue", formatFull(inventoryRows.reduce((total, row) => total + Number(row.stock_qty || row.qty || 0), 0)));
+  setText("metricInventoryValue", formatCompactMmk(metrics.inventory_value));
   setText("metricMargin", metrics.profit_margin_percent === null ? "Unavailable for customer scope" : `${metrics.profit_margin_percent}% profit margin`);
   setText("metricPeriodLabel", data.filter_label);
   setText("expenseTotalPanel", formatAmount(metrics.expenses));
 
-  renderFinancialTrend(data.trend);
+  renderFinancialTrend(data.trend, data.latest_trend_period, data.filter_label);
   renderCash(data.cash_flow, data.trend);
   renderCollections(data.receivables, data.trend);
   renderInventory(inventoryRows);
@@ -403,23 +378,41 @@ function setText(id, value) {
 
 function linePath(values, width = 820, height = 240, padding = 10, scaleMinimum, scaleMaximum) {
   if (!values.length) return "";
-  const maximum = scaleMaximum ?? Math.max(...values.map(value => Number(value || 0)));
-  const minimum = scaleMinimum ?? Math.min(...values.map(value => Number(value || 0)), 0);
+  const available = values.filter(value => value !== null && value !== undefined).map(Number);
+  if (!available.length) return "";
+  const maximum = scaleMaximum ?? Math.max(...available);
+  const minimum = scaleMinimum ?? Math.min(...available, 0);
   const range = maximum - minimum || 1;
+  let drawing = false;
   return values.map((value, index) => {
+    if (value === null || value === undefined) { drawing = false; return ""; }
     const x = values.length === 1 ? width / 2 : index * width / (values.length - 1);
-    const y = padding + (height - padding * 2) * (1 - (Number(value || 0) - minimum) / range);
-    return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
+    const y = padding + (height - padding * 2) * (1 - (Number(value) - minimum) / range);
+    const command = drawing ? "L" : "M";
+    drawing = true;
+    return `${command}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).filter(Boolean).join(" ");
 }
 
-function renderFinancialTrend(trend) {
+const FINANCIAL_TREND_OPTIONS = Object.freeze({ spanGaps: false });
+
+function normalizeFinancialTrend(trend) {
+  const rows = Array.isArray(trend) ? trend : [];
+  const lastReal = rows.findLastIndex(row => row.has_source_data === true);
+  if (lastReal >= 0) return rows.slice(0, lastReal + 1);
+  return rows;
+}
+
+function renderFinancialTrend(trend, latestPeriod, filterLabel) {
+  trend = normalizeFinancialTrend(trend);
+  const finalPeriod = latestPeriod || trend.at(-1)?.label || null;
+  setText("trendDataThrough", finalPeriod ? `Data through ${finalPeriod}${filterLabel ? `, ${filterLabel}` : ""}` : "No trend data for this selection");
   const series = trend.flatMap(row => [row.revenue, row.expense, row.profit]).filter(value => value !== null).map(Number);
   const maximum = Math.max(...series, 1);
   const minimum = Math.min(...series, 0);
   const revenuePath = linePath(trend.map(row => row.revenue), 820, 240, 10, minimum, maximum);
   document.getElementById("revenueLine").setAttribute("d", revenuePath);
-  document.getElementById("revenueArea").setAttribute("d", `${revenuePath} L820,260 L0,260 Z`);
+  document.getElementById("revenueArea").setAttribute("d", "");
   const expenses = trend.map(row => row.expense);
   const profits = trend.map(row => row.profit);
   document.getElementById("expenseLine").setAttribute("d", expenses.every(value => value === null) ? "" : linePath(expenses, 820, 240, 10, minimum, maximum));
@@ -487,35 +480,103 @@ function selectedValues(select) {
 }
 
 async function initializeFarmProduction() {
-  const end = new Date();
-  const start = new Date(end); start.setDate(start.getDate() - 29);
-  document.getElementById("farmStartDate").value = isoDate(start);
-  document.getElementById("farmEndDate").value = isoDate(end);
+  syncFarmDatesFromCanonicalPeriod();
   document.querySelectorAll("[data-farm-days]").forEach(button => button.addEventListener("click", () => {
     const nextEnd = new Date(); const nextStart = new Date(nextEnd);
     nextStart.setDate(nextStart.getDate() - Number(button.dataset.farmDays) + 1);
-    document.getElementById("farmStartDate").value = isoDate(nextStart);
-    document.getElementById("farmEndDate").value = isoDate(nextEnd);
+    setCanonicalFarmRange(isoDate(nextStart), isoDate(nextEnd));
     loadFarmProduction();
   }));
-  ["farmStartDate", "farmEndDate", "farmGrouping"].forEach(id => document.getElementById(id).addEventListener("change", () => loadFarmProduction()));
+  ["farmStartDate", "farmEndDate"].forEach(id => document.getElementById(id).addEventListener("change", () => {
+    setCanonicalFarmRange(
+      document.getElementById("farmStartDate").value,
+      document.getElementById("farmEndDate").value,
+    );
+    loadFarmProduction();
+  }));
   document.getElementById("farmAreaFilter").addEventListener("change", handleFarmAreaChange);
   document.getElementById("farmFieldToggle").addEventListener("click", () => toggleFarmSelector("farmFieldPanel", "farmFieldToggle"));
   document.getElementById("farmVegetableToggle").addEventListener("click", () => toggleFarmSelector("farmVegetablePanel", "farmVegetableToggle"));
   document.getElementById("farmFieldApply").addEventListener("click", () => applyFarmSelector("farmFieldPanel", "farmFieldToggle"));
   document.getElementById("farmVegetableApply").addEventListener("click", () => applyFarmSelector("farmVegetablePanel", "farmVegetableToggle"));
   document.getElementById("farmCropSearch").addEventListener("input", filterFarmCropChoices);
-  document.getElementById("farmTotalsSearch").addEventListener("input", filterFarmVegetableTotals);
   document.getElementById("farmSelectAll").addEventListener("click", () => setAllFarmCrops(true));
   document.getElementById("farmClearAll").addEventListener("click", () => setAllFarmCrops(false));
+  document.getElementById("farmZoomIn").addEventListener("click", () => adjustFarmChartZoom(12));
+  document.getElementById("farmZoomOut").addEventListener("click", () => adjustFarmChartZoom(-12));
+  document.getElementById("farmZoomReset").addEventListener("click", resetFarmChartZoom);
+  document.getElementById("farmScrollStart").addEventListener("click", () => scrollFarmChartTo("start"));
+  document.getElementById("farmScrollLatest").addEventListener("click", () => scrollFarmChartTo("latest"));
+  document.getElementById("farmDailyStackedChart").addEventListener("scroll", updateFarmChartNavigation);
+  if (!farmChartResizeBound) {
+    farmChartResizeBound = true;
+    window.addEventListener("resize", () => {
+      clearTimeout(farmChartResizeTimer);
+      farmChartResizeTimer = setTimeout(() => farmChartModel && renderFarmStackedBars(), 120);
+    });
+  }
   await loadFarmProduction();
 }
 
+function canonicalFarmDateRange() {
+  const period = periodPayload();
+  if (period.type === "year") return [`${period.year}-01-01`, `${period.year}-12-31`];
+  if (period.type === "month") {
+    const month = String(period.month).padStart(2, "0");
+    const last = new Date(period.year, period.month, 0).getDate();
+    return [`${period.year}-${month}-01`, `${period.year}-${month}-${last}`];
+  }
+  if (period.type === "week") {
+    const [year, week] = String(period.value || "").split("-W").map(Number);
+    const januaryFourth = new Date(Date.UTC(year, 0, 4));
+    const mondayOffset = (januaryFourth.getUTCDay() + 6) % 7;
+    const start = new Date(januaryFourth);
+    start.setUTCDate(januaryFourth.getUTCDate() - mondayOffset + (week - 1) * 7);
+    const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+    return [isoDate(start), isoDate(end)];
+  }
+  return [period.start, period.end];
+}
+
+function syncFarmDatesFromCanonicalPeriod() {
+  const start = document.getElementById("farmStartDate");
+  const end = document.getElementById("farmEndDate");
+  if (!start || !end) return;
+  [start.value, end.value] = canonicalFarmDateRange();
+}
+
+function setCanonicalFarmRange(start, end) {
+  if (!start || !end) return;
+  periodType = "range";
+  filterElements.rangeStart.value = start;
+  filterElements.rangeEnd.value = end;
+  document.querySelectorAll(".period-chip").forEach(item =>
+    item.classList.toggle("active", item.dataset.periodType === "range")
+  );
+  updatePeriodControls();
+  syncFarmDatesFromCanonicalPeriod();
+}
+
+function farmGroupingForPeriod(period = periodPayload()) {
+  if (period.type === "year") return "monthly";
+  if (period.type === "month" || period.type === "week") return "daily";
+  const start = new Date(`${period.start}T00:00:00Z`);
+  const end = new Date(`${period.end}T00:00:00Z`);
+  const days = Math.floor((end - start) / 86400000) + 1;
+  if (days <= 45) return "daily";
+  if (days <= 120) return "weekly";
+  return "monthly";
+}
+
 function farmPayload() {
+  syncFarmDatesFromCanonicalPeriod();
+  const [start_date, end_date] = canonicalFarmDateRange();
   const filters = {
-    start_date: document.getElementById("farmStartDate").value,
-    end_date: document.getElementById("farmEndDate").value,
-    grouping: document.getElementById("farmGrouping").value,
+    start_date,
+    end_date,
+    grouping:farmGroupingForPeriod(),
+    sector:filterElements.sector.value,
+    business_unit:filterElements.businessUnit.value,
     farm_area_ids: [...document.querySelectorAll(".farm-area-check:checked")].filter(input => input.value !== "all").map(input => Number(input.value)),
   };
   const cropInputs = [...document.querySelectorAll(".farm-crop-check")];
@@ -541,14 +602,187 @@ function renderFarmProduction(data) {
   if (!choices.children.length) choices.innerHTML = data.available_crops.map(row => `<label><input class="farm-crop-check" type="checkbox" value="${row.id}" ${data.selected_crop_ids.includes(row.id) ? "checked" : ""}><span>${escapeHtml(row.crop_name)}</span></label>`).join("");
   choices.querySelectorAll("input").forEach(input => { if (!input.dataset.bound) { input.dataset.bound="1"; input.addEventListener("change", handleFarmCropChange); }});
   updateFarmSelectorSummaries();
-  const totals = data.totals || [];
-  document.getElementById("farmProductionKpis").innerHTML = totals.length ? totals.map((row,index) => `<article class="metric-card"><div class="metric-label"><span>Overall Production</span><span class="metric-icon">${index+1}</span></div><strong>${formatFull(row.quantity)}</strong><small>${escapeHtml(row.unit)} · selected fields</small></article>`).join("") : '<div class="empty-state">No production exists for this selection.</div>';
+  renderFarmProductionSummary(data);
   setText("farmLastData", data.last_data_date ? `Last data ${formatDate(data.last_data_date)}` : "No data");
-  renderFarmFieldSummary(data.summary_by_area || []);
-  renderFarmVegetableTotals(data.summary_by_crop || []);
-  renderFarmTrend(data.combined_rows || []);
+  setText("farmChartGrouping", `${{daily:"Daily",weekly:"Weekly",monthly:"Monthly"}[data.bucket_grouping] || "Period"} buckets`);
+  setFarmChartData(data.daily_stacked || [], data.bucket_grouping || farmGroupingForPeriod());
   const combinedRows=data.combined_rows||[];
-  document.getElementById("farmProductionBody").innerHTML = combinedRows.length ? combinedRows.map(row => `<tr><td>${escapeHtml(formatDate(row.production_date))}</td><td>${escapeHtml(row.crop_name)}</td><td>${escapeHtml(row.farm_area)}</td><td>${formatFull(row.quantity)}</td><td>${escapeHtml(row.unit || "Unspecified")}</td></tr>`).join("") : '<tr><td colspan="5"><div class="empty-state">No production exists for this period and selection.</div></td></tr>';
+  document.getElementById("farmProductionBody").innerHTML = combinedRows.length ? combinedRows.map(row => `<tr><td>${escapeHtml(formatDate(row.production_date))}</td><td>${escapeHtml(row.crop_name)}</td><td>${escapeHtml(row.farm_area)}</td><td>${formatProductionQuantity(row.quantity)}</td><td>${escapeHtml(row.unit || "Unspecified")}</td></tr>`).join("") : '<tr><td colspan="5"><div class="empty-state">No production exists for this period and selection.</div></td></tr>';
+}
+
+function renderFarmProductionSummary(data) {
+  const summary = data.summary || {};
+  const totalUnit = summary.unit || summary.total_unit || "Unspecified";
+  const totalsByUnit = data.totals || [];
+  const mixedBreakdown = totalUnit === "Mixed units"
+    ? totalsByUnit.map(row => `${formatProductionTotal(row.quantity)} ${row.unit}`).join(" · ")
+    : "selected period and filters";
+  const kpis = [
+    ["TOTAL PRODUCTION", totalUnit === "Mixed units" ? "Mixed units" : `${formatProductionTotal(summary.total_quantity ?? summary.total_production)} ${totalUnit}`, mixedBreakdown],
+    ["ACTIVE CROPS", String(summary.active_crop_count ?? summary.active_crops ?? 0), "produced in selection"],
+    ["PRODUCTION DAYS", String(summary.production_day_count ?? summary.production_days ?? 0), "canonical periods with production"],
+    ["LATEST PRODUCTION DATE", summary.latest_production_date ? formatDate(summary.latest_production_date) : "—", "latest matching record"],
+  ];
+  document.getElementById("farmProductionKpis").innerHTML = kpis.map(([label, value, note]) =>
+    `<article class="farm-summary-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`
+  ).join("");
+  const cropTotals = data.crop_totals || [];
+  document.getElementById("farmCropTotals").innerHTML = cropTotals.map(row => {
+    const value = row.unit === "Mixed units"
+      ? "Mixed units"
+      : `${formatProductionTotal(row.quantity)} ${row.unit}`;
+    const breakdown = row.unit === "Mixed units"
+      ? (row.quantities_by_unit || []).map(item => `${formatProductionTotal(item.quantity)} ${item.unit}`).join(" · ")
+      : row.crop_code;
+    return `<article class="farm-crop-total-card"><span>${escapeHtml(row.crop_name)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(breakdown || "")}</small></article>`;
+  }).join("") || '<div class="empty-state">No crops are selected.</div>';
+  document.getElementById("farmSummaryEmpty").hidden = Number(summary.total_quantity ?? summary.total_production ?? 0) !== 0;
+}
+
+function normalizeFarmChartRows(rows) {
+  return (rows || []).map(row => ({
+    period: String(row.period || ""),
+    label: String(row.label || ""),
+    total: Number(row.total || 0),
+    totalUnit: String(row.total_unit || "Unspecified"),
+    crops: Object.fromEntries(Object.entries(row.crops || {}).map(([name, value]) => [name, Number(value) || 0])),
+    cropUnits: Object.fromEntries(Object.entries(row.crop_units || {}).map(([name, unit]) => [name, String(unit || "Unspecified")]))
+  }));
+}
+
+function setFarmChartData(rows, grouping) {
+  const previousGrouping = farmChartModel?.grouping;
+  farmChartModel = {
+    rows: normalizeFarmChartRows(rows),
+    grouping,
+    bucketWidth: previousGrouping === grouping ? farmChartModel.bucketWidth : FARM_BUCKET_WIDTH[grouping],
+    autoScroll: previousGrouping !== grouping,
+  };
+  renderFarmStackedBars();
+}
+
+function farmChartLabel(period, fallback, grouping) {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return String(fallback || "").replace(/,? 00:00:00 GMT$/, "");
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (grouping === "monthly") {
+    const month = date.toLocaleDateString("en-US", {month:"short", timeZone:"UTC"});
+    return periodType === "year" ? month : `${month} ${match[1]}`;
+  }
+  if (grouping === "weekly" && periodType === "range") {
+    return `W${Math.ceil(Number(match[3]) / 7)} ${date.toLocaleDateString("en-US", {month:"short", timeZone:"UTC"})}`;
+  }
+  return `${Number(match[3])} ${date.toLocaleDateString("en-US", {month:"short", timeZone:"UTC"})}`;
+}
+
+function farmTooltipPeriod(period, grouping) {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return String(period || "").replace(/,? 00:00:00 GMT$/, "");
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  const longDate = date.toLocaleDateString("en-GB", {day:"numeric", month:"short", year:"numeric", timeZone:"UTC"});
+  if (grouping === "monthly") return `Month: ${date.toLocaleDateString("en-US", {month:"long", year:"numeric", timeZone:"UTC"})}`;
+  if (grouping === "weekly") return `Week of: ${longDate}`;
+  return `Date: ${longDate}`;
+}
+
+function renderFarmStackedBars() {
+  const chart = document.getElementById("farmDailyStackedChart");
+  if (!chart) return;
+  const normalized = farmChartModel?.rows || [];
+  const grouping = farmChartModel?.grouping || "daily";
+  const crops = [...new Set(normalized.flatMap(row => Object.keys(row.crops)))];
+  if (!normalized.length || !crops.length) {
+    chart.replaceChildren();
+    chart.innerHTML = '<div class="empty-state">No crops are selected.</div>';
+    updateFarmChartNavigation();
+    return;
+  }
+  const max = Math.max(...normalized.map(row => row.total), 1);
+  const axisWidth = 48, rightPadding = 18, height = 420, base = 350, plotHeight = 310;
+  const viewportWidth = Math.max(chart.clientWidth || 0, 520);
+  const step = farmChartModel.bucketWidth;
+  const width = Math.max(viewportWidth, axisWidth + rightPadding + normalized.length * step);
+  const barWidth = Math.max(18, Math.min(step * .68, 72));
+  const minimumLabelSpacing = grouping === "monthly" ? 34 : 38;
+  const labelStride = Math.max(1, Math.ceil(minimumLabelSpacing / step));
+  const rects = [], labels = [], grid = [];
+  for (let tick = 0; tick <= 4; tick += 1) {
+    const value = max * tick / 4;
+    const y = base - plotHeight * tick / 4;
+    grid.push(`<line x1="${axisWidth}" y1="${y}" x2="${width - rightPadding}" y2="${y}" stroke="currentColor" opacity=".12"/><text class="farm-y-label" x="${axisWidth - 7}" y="${y + 4}" text-anchor="end">${escapeHtml(formatProductionQuantity(value))}</text>`);
+  }
+  normalized.forEach((row, column) => {
+    let y = base;
+    const x = axisWidth + column * step + (step - barWidth) / 2;
+    crops.forEach((crop, index) => {
+      const value = row.crops[crop] || 0;
+      if (value <= 0) return;
+      const segmentHeight = value / max * plotHeight;
+      y -= segmentHeight;
+      const totalKind = {daily:"Daily",weekly:"Weekly",monthly:"Monthly"}[grouping];
+      const cropUnit = row.cropUnits[crop] || "Unspecified";
+      const totalText = row.totalUnit === "Mixed units"
+        ? "Mixed units"
+        : `${formatProductionQuantity(row.total)} ${row.totalUnit}`;
+      rects.push(`<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${segmentHeight.toFixed(2)}" fill="${analyticsColors[index % analyticsColors.length]}"><title>${escapeHtml(farmTooltipPeriod(row.period, grouping))}\nCrop: ${escapeHtml(crop)}\nQuantity: ${formatProductionQuantity(value)} ${escapeHtml(cropUnit)}\n${totalKind} Total: ${escapeHtml(totalText)}</title></rect>`);
+    });
+    if (column % labelStride === 0 || column === normalized.length - 1) {
+      const labelX = (x + barWidth / 2).toFixed(2);
+      labels.push(`<text class="farm-stack-label" x="${labelX}" y="${base + 24}" text-anchor="middle">${escapeHtml(farmChartLabel(row.period, row.label, grouping))}</text>`);
+    }
+  });
+  chart.dataset.labels = String(normalized.length);
+  chart.dataset.datasets = String(crops.length);
+  chart.dataset.bucketWidth = String(farmChartModel.bucketWidth);
+  chart.replaceChildren();
+  chart.innerHTML = `<svg class="farm-stack-svg" role="img" aria-label="${escapeHtml(grouping)} production composition" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${grid.join("")}${rects.join("")}${labels.join("")}</svg>`;
+  updateFarmZoomControls();
+  requestAnimationFrame(() => {
+    if (farmChartModel?.autoScroll && chart.scrollWidth > chart.clientWidth) {
+      chart.scrollLeft = chart.scrollWidth;
+      farmChartModel.autoScroll = false;
+    }
+    updateFarmChartNavigation();
+  });
+}
+
+function adjustFarmChartZoom(delta) {
+  if (!farmChartModel) return;
+  farmChartModel.bucketWidth = Math.max(FARM_BUCKET_WIDTH_MIN, Math.min(FARM_BUCKET_WIDTH_MAX, farmChartModel.bucketWidth + delta));
+  farmChartModel.autoScroll = false;
+  renderFarmStackedBars();
+}
+
+function resetFarmChartZoom() {
+  if (!farmChartModel) return;
+  farmChartModel.bucketWidth = FARM_BUCKET_WIDTH[farmChartModel.grouping];
+  farmChartModel.autoScroll = false;
+  renderFarmStackedBars();
+}
+
+function updateFarmZoomControls() {
+  const width = farmChartModel?.bucketWidth;
+  const out = document.getElementById("farmZoomOut"), zoomIn = document.getElementById("farmZoomIn");
+  if (out) out.disabled = width <= FARM_BUCKET_WIDTH_MIN;
+  if (zoomIn) zoomIn.disabled = width >= FARM_BUCKET_WIDTH_MAX;
+}
+
+function updateFarmChartNavigation() {
+  const chart = document.getElementById("farmDailyStackedChart");
+  if (!chart) return;
+  const scrollable = chart.scrollWidth > chart.clientWidth + 1;
+  const hint = document.getElementById("farmScrollHint");
+  const start = document.getElementById("farmScrollStart");
+  const latest = document.getElementById("farmScrollLatest");
+  if (hint) hint.hidden = !scrollable;
+  if (start) start.hidden = !scrollable;
+  if (latest) latest.hidden = !scrollable;
+}
+
+function scrollFarmChartTo(edge) {
+  const chart = document.getElementById("farmDailyStackedChart");
+  if (!chart) return;
+  chart.scrollTo({left: edge === "latest" ? chart.scrollWidth : 0, behavior:"smooth"});
 }
 
 function handleFarmAreaChange(event) {
@@ -571,52 +805,43 @@ function updateFarmSelectorSummaries(){
   const cropCount=document.querySelectorAll(".farm-crop-check:checked").length; setText("farmVegetableCount",`${cropCount} selected`); const cropToggle=document.getElementById("farmVegetableToggle"); if(cropToggle)cropToggle.innerHTML=`Vegetables: ${cropCount} selected <span>▾</span>`;
 }
 
-function renderFarmFieldSummary(rows) {
-  document.getElementById("farmFieldSummary").innerHTML=rows.map(row=>`<article class="summary-card"><h3>${escapeHtml(row.farm_area)}</h3><div class="summary-quantities">${(row.quantities_by_unit||[]).map(total=>`<strong>${formatFull(total.quantity)} <small>${escapeHtml(total.unit)}</small></strong>`).join("")||'<strong>0 <small>No production</small></strong>'}</div><p>${formatFull(row.crop_count)} vegetable varieties</p><p>Latest: ${row.latest_production_date?escapeHtml(formatDate(row.latest_production_date)):"No production"}</p></article>`).join("")||'<div class="empty-state">No active fields are available.</div>';
-}
-
-function renderFarmVegetableTotals(rows) {
-  document.getElementById("farmVegetableTotals").innerHTML=rows.map(row=>{const change=row.percentage_change===null?"No valid previous comparison":`${Number(row.percentage_change)>=0?"+":""}${Number(row.percentage_change).toFixed(1)}% vs previous period`; return `<article class="summary-card vegetable-total-card" data-crop-name="${escapeHtml(row.crop_name.toLowerCase())}"><h3>${escapeHtml(row.crop_name)}</h3><strong>${formatFull(row.quantity)} <small>${escapeHtml(row.unit)}</small></strong><p class="${Number(row.percentage_change)>=0?"positive":"negative"}">${escapeHtml(change)}</p></article>`;}).join("")||'<div class="empty-state">No vegetables were produced for this selection.</div>';
-  filterFarmVegetableTotals();
-}
-
-function filterFarmVegetableTotals(){const input=document.getElementById("farmTotalsSearch"); if(!input)return; const query=input.value.trim().toLowerCase(); document.querySelectorAll(".vegetable-total-card").forEach(card=>card.hidden=!card.dataset.cropName.includes(query));}
-
-function renderFarmTrend(rows) {
-  const chart = document.getElementById("farmTrendChart"), legend=document.getElementById("farmLegend");
-  if (!rows.length) { chart.innerHTML='<div class="empty-state">No production exists for this period and selection.</div>'; legend.innerHTML=""; return; }
-  const units=[...new Set(rows.map(row=>row.unit||"Unspecified"))];
-  let colorIndex=0; const legends=[];
-  chart.innerHTML=units.map(unit=>{
-    const unitRows=rows.filter(row=>(row.unit||"Unspecified")===unit), dates=[...new Set(unitRows.map(row=>row.production_date))].sort();
-    const seriesKeys=[...new Set(unitRows.map(row=>String(row.crop_id)))];
-    const maximum=Math.max(...unitRows.map(row=>Number(row.quantity)),1);
-    const dense=dates.length>30;
-    const lines=seriesKeys.map(key=>{const sample=unitRows.find(row=>String(row.crop_id)===key); const color=analyticsColors[colorIndex++%analyticsColors.length]; legends.push({label:`${sample.crop_name} · ${unit}`,color}); const values=dates.map(date=>Number(unitRows.find(row=>row.production_date===date&&String(row.crop_id)===key)?.quantity||0)); const points=dates.map((date,index)=>{const row=unitRows.find(item=>item.production_date===date&&String(item.crop_id)===key); if(!row)return ""; const x=dates.length===1?410:index*820/(dates.length-1), y=12+(220-24)*(1-Number(row.quantity)/maximum); const tooltip=`${date} · ${row.crop_name} · ${row.farm_area} · ${formatFull(row.quantity)} ${unit}`; return `<g class="farm-point-group"><circle class="farm-point-marker" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="${color}" stroke="${color}"></circle><circle class="farm-point-hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8"><title>${escapeHtml(tooltip)}</title></circle></g>`;}).join(""); return `<path d="${linePath(values,820,220,12,0,maximum)}" stroke="${color}"></path>${points}`;}).join("");
-    return `<div><strong>${escapeHtml(unit)}</strong><svg class="${dense?"dense-series":""}" viewBox="0 0 820 240" preserveAspectRatio="none" aria-label="Farm production trend for ${escapeHtml(unit)}">${lines}</svg><div class="x-labels">${dates.filter((_,i)=>dates.length<8||i%Math.ceil(dates.length/7)===0).map(date=>`<span>${escapeHtml(date)}</span>`).join("")}</div></div>`;
-  }).join("");
-  legend.innerHTML=legends.map(row=>`<span><i style="background:${row.color}"></i>${escapeHtml(row.label)}</span>`).join("");
-}
-
 function filterFarmCropChoices() { const q=document.getElementById("farmCropSearch").value.toLowerCase(); document.querySelectorAll("#farmCropChoices label").forEach(label=>label.hidden=!label.textContent.toLowerCase().includes(q)); }
 function setAllFarmCrops(checked) { document.querySelectorAll(".farm-crop-check").forEach(input=>input.checked=checked); updateFarmSelectorSummaries(); if(!isMobileFarmFilters())loadFarmProduction(); }
 
+function initializeInventoryDashboard() {
+  document.getElementById("inventorySummaryMonth").addEventListener("change",event=>{inventoryState.month=Number(event.target.value);loadInventoryDashboard();});
+  syncInventoryStateFromGlobal();loadInventoryDashboard();
+}
+
+function syncInventoryStateFromGlobal(){const period=periodPayload();inventoryState.period_mode=period.type;if(period.type==="year"){inventoryState.year=period.year;inventoryState.month=null;}else if(period.type==="month"){inventoryState.year=period.year;inventoryState.month=period.month;}else{const value=period.start||new Date().toISOString().slice(0,10);inventoryState.year=Number(value.slice(0,4));inventoryState.month=Number(value.slice(5,7));}const label=document.getElementById("inventorySummaryMonthLabel");if(label)label.hidden=inventoryState.period_mode!=="year";}
+
 async function loadInventoryDashboard() {
   const error=document.getElementById("inventoryError"); error.innerHTML=""; content.classList.add("loading-state");
-  try { const payload=await apiJson("/api/dashboard/inventory"); renderInventoryDashboard(payload.data); }
+  setText("inventorySummaryStatus","Loading production summary...");
+  const month=inventoryState.month===null?"":`&month=${encodeURIComponent(inventoryState.month)}`;
+  const mode=`&period_mode=${encodeURIComponent(inventoryState.period_mode)}`;
+  try { const payload=await apiJson(`/api/dashboard/inventory?year=${encodeURIComponent(inventoryState.year)}${month}${mode}`); inventoryState.year=payload.data.selected_year;inventoryState.month=payload.data.selected_month;renderInventoryDashboard(payload.data); }
   catch(exc){ error.innerHTML=`<div class="data-error">${escapeHtml(exc.message)}</div>`; }
   finally { content.classList.remove("loading-state"); }
 }
 
 function renderInventoryDashboard(data) {
   setText("inventoryLastUpdated", data.last_updated ? `Updated ${formatDate(data.last_updated)}` : "No data");
-  document.getElementById("inventoryKpis").innerHTML=(data.bottle_totals||[]).map((row,index)=>`<article class="metric-card"><div class="metric-label"><span>${escapeHtml(row.bottle_type)}</span><span class="metric-icon">${index+1}</span></div><strong>${formatFull(row.current_quantity)}</strong><small>bottles</small></article>`).join("")||'<div class="empty-state">No current inventory.</div>';
+  const kpis=[["Current Inventory Value",formatCompactMmk(data.total_inventory_value),"Current canonical valuation"],["Current Stock Bottles",formatFull(data.total_bottles),"bottles"],["Lifetime Production Bottles",formatFull(data.lifetime_production_bottles),"bottles produced"],["Current Month Production",formatFull(data.current_month_production),"bottles"],["Current Month Sales",formatFull(data.current_month_sales),"bottles"]];if(data.factory_utilization_available)kpis.push(["Factory Utilization",`${data.factory_utilization}%`,"authoritative capacity"]);document.getElementById("inventoryKpis").innerHTML=kpis.map(([label,value,note],index)=>`<article class="metric-card"><div class="metric-label"><span>${escapeHtml(label)}</span><span class="metric-icon">${index+1}</span></div><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`).join("");
+  document.getElementById("inventoryProductValues").innerHTML=`<thead><tr><th>Bottle Type</th><th>Lifetime Produced</th><th>Current Stock</th><th>Sold</th><th>Inventory Value</th></tr></thead><tbody>${(data.lifetime_by_bottle_type||[]).map(row=>`<tr><td>${escapeHtml(row.bottle_type)}</td><td>${formatFull(row.lifetime_produced)}</td><td>${formatFull(row.current_stock)}</td><td>${formatFull(row.sold)}</td><td>${formatMmk(row.inventory_value)}</td></tr>`).join("")}</tbody>`;
+  const monthName=data.production_summary_label;setText("inventoryMonthTitle",`${monthName} Production Summary`);setText("inventoryMonthTotal",`${formatFull(data.selected_month_total)} bottles`);setText("inventorySummaryStatus",data.production_summary_has_data?"Canonical production ledger":`No production recorded for ${monthName}.`);const selector=document.getElementById("inventorySummaryMonth");selector.innerHTML=(data.available_production_months||[]).map(month=>`<option value="${month}">${new Date(data.selected_year,month-1,1).toLocaleString(undefined,{month:"long",year:"numeric"})}</option>`).join("");if(!selector.options.length)selector.innerHTML=`<option value="${data.selected_month}">${escapeHtml(monthName)}</option>`;selector.value=String(data.selected_month);document.getElementById("inventoryMonthSummary").innerHTML=(data.selected_month_production||[]).map(row=>`<article><span>${escapeHtml(row.bottle_type)}</span><strong>${formatFull(row.quantity)}</strong><small>bottles</small></article>`).join("");
+  renderProductionBars("inventoryProductionChart",data.monthly_production||[],data.bottle_types||[]);
+  const maxValue=Math.max(...(data.lifetime_by_bottle_type||[]).map(row=>Number(row.inventory_value)),1);document.getElementById("inventoryValueChart").innerHTML=(data.lifetime_by_bottle_type||[]).map(row=>`<p><span>${escapeHtml(row.bottle_type)}</span><i style="width:${Number(row.inventory_value)/maxValue*100}%"></i><strong>${formatMmk(row.inventory_value)}</strong></p>`).join("");
+  renderComparisonBars(data.production_vs_sales||[]);
   const types=data.bottle_types||[], colors=Object.fromEntries(types.map((type,i)=>[type,analyticsColors[i%analyticsColors.length]])), max=Math.max(...(data.store_totals||[]).map(row=>row.current_quantity),1);
   document.getElementById("inventoryStackedChart").innerHTML=(data.store_totals||[]).map(store=>{const segments=types.map(type=>{const row=data.stock.find(item=>item.store===store.store&&item.bottle_type===type); const qty=Number(row?.current_quantity||0); return `<span style="width:${qty/max*100}%;background:${colors[type]}" title="${escapeHtml(store.store)} · ${escapeHtml(type)} · ${formatFull(qty)}"></span>`;}).join(""); return `<div><label>${escapeHtml(store.store)} <strong>${formatFull(store.current_quantity)}</strong></label><p>${segments}</p></div>`;}).join("")||'<div class="empty-state">No current inventory.</div>';
   document.getElementById("inventoryLegend").innerHTML=types.map(type=>`<span><i style="background:${colors[type]}"></i>${escapeHtml(type)}</span>`).join("");
   const stores=(data.store_totals||[]).map(row=>row.store);
-  document.getElementById("inventoryMatrix").innerHTML=`<thead><tr><th>Store</th>${types.map(type=>`<th>${escapeHtml(type)}</th>`).join("")}<th>Total</th></tr></thead><tbody>${stores.map(store=>`<tr><td>${escapeHtml(store)}</td>${types.map(type=>`<td>${formatFull(data.stock.find(row=>row.store===store&&row.bottle_type===type)?.current_quantity||0)}</td>`).join("")}<td>${formatFull(data.store_totals.find(row=>row.store===store).current_quantity)}</td></tr>`).join("")}</tbody>`;
+  document.getElementById("inventoryMatrix").innerHTML=`<thead><tr><th>Store</th>${types.map(type=>`<th>${escapeHtml(type)}</th>`).join("")}<th>Total bottles</th><th>Inventory value</th></tr></thead><tbody>${stores.map(store=>{const total=data.store_totals.find(row=>row.store===store);return `<tr><td>${escapeHtml(store)}</td>${types.map(type=>`<td>${formatFull(data.stock.find(row=>row.store===store&&row.bottle_type===type)?.current_quantity||0)}</td>`).join("")}<td>${formatFull(total.current_quantity)}</td><td>${formatMmk(total.inventory_value)}</td></tr>`;}).join("")}</tbody>`;
 }
+
+function renderProductionBars(id,rows,types){const colors=["#176b5d","#4b8f8c","#d59d3a","#8b6f47"],maximum=Math.max(...rows.flatMap(row=>types.map(type=>Number(row.production?.[type]||0))),1);document.getElementById(id).innerHTML=rows.map(row=>`<div class="production-month-group"><div class="production-bars">${types.map((type,index)=>`<i style="height:${Number(row.production?.[type]||0)/maximum*180}px;background:${colors[index]}" title="${escapeHtml(row.label)} · ${escapeHtml(type)} · ${formatFull(row.production?.[type]||0)} bottles"></i>`).join("")}</div><small>${escapeHtml(row.label)}</small></div>`).join("")||'<div class="empty-state">No production for this year.</div>'}
+function renderComparisonBars(rows){const maximum=Math.max(...rows.flatMap(row=>[Number(row.production),Number(row.sales)]),1);document.getElementById("inventoryProductionSalesChart").innerHTML=rows.map(row=>`<div class="production-month-group"><div class="production-bars"><i style="height:${Number(row.production)/maximum*180}px;background:#176b5d" title="Production ${formatFull(row.production)}"></i><i style="height:${Number(row.sales)/maximum*180}px;background:#d59d3a" title="Sales ${formatFull(row.sales)}"></i></div><small>${escapeHtml(row.label)}</small></div>`).join("")||'<div class="empty-state">No production or sales for this year.</div>'}
 
 function renderTopCustomers(rows) {
   const body = document.getElementById("topCustomersBody");
@@ -839,17 +1064,22 @@ function scheduleRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
     if (activePage === "executive") loadExecutiveDashboard();
-    if (activePage === "payments") loadPaymentsDashboard();
+    if (activePage === "inventory") { syncInventoryStateFromGlobal(); loadInventoryDashboard(); }
+    if (activePage === "farm-production") {
+      syncFarmDatesFromCanonicalPeriod();
+      loadFarmProduction();
+    }
   }, 250);
 }
 
 async function downloadExport(kind) {
   try {
     showToast(`Preparing ${kind.toUpperCase()} from the validated report renderer…`);
-    const response = await fetch(`/api/dashboard/export/${kind}`, {
+    const farmExport = activePage === "farm-production";
+    const response = await fetch(farmExport ? `/api/dashboard/farm-production/export/${kind}` : `/api/dashboard/export/${kind}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(filterPayload(false))
+      body: JSON.stringify(farmExport ? farmPayload() : filterPayload(false))
     });
     if (response.status === 401) {
       showLogin("Please sign in to continue.");
@@ -863,7 +1093,7 @@ async function downloadExport(kind) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `BigShot_Executive_Dashboard.${kind === "excel" ? "xlsx" : "pdf"}`;
+    link.download = `${farmExport ? "BigShot_Farm_Production" : "BigShot_Executive_Dashboard"}.${kind === "excel" ? "xlsx" : "pdf"}`;
     link.click();
     URL.revokeObjectURL(url);
   } catch (error) {
@@ -900,6 +1130,15 @@ document.addEventListener("click", event => {
   }
 });
 
+document.addEventListener("keydown", event => {
+  const nav = event.target.closest('[data-page][role="button"]');
+  if (nav && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    if (!authenticatedUser) return showLogin("Please sign in to continue.");
+    renderPage(nav.dataset.page);
+  }
+});
+
 loginForm.addEventListener("submit", async event => {
   event.preventDefault();
   loginError.textContent = "";
@@ -920,7 +1159,7 @@ document.querySelectorAll(".logout-button").forEach(button => {
 });
 document.getElementById("menuButton").addEventListener("click", () => sidebar.classList.toggle("open"));
 document.getElementById("moreFilters").addEventListener("click", () => expandedFilters.classList.toggle("open"));
-document.getElementById("refreshDashboard").addEventListener("click", () => activePage === "payments" ? loadPaymentsDashboard(true) : loadExecutiveDashboard(true));
+document.getElementById("refreshDashboard").addEventListener("click", () => activePage === "inventory" ? loadInventoryDashboard() : activePage === "farm-production" ? loadFarmProduction() : loadExecutiveDashboard(true));
 document.getElementById("exportPdf").addEventListener("click", () => downloadExport("pdf"));
 document.getElementById("exportExcel").addEventListener("click", () => downloadExport("excel"));
 document.getElementById("saveView").addEventListener("click", () => {

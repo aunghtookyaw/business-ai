@@ -146,17 +146,58 @@ class DashboardOperationsTest(unittest.TestCase):
         self.assertEqual([], result["totals"])
 
     @patch("tools.formula_engine._fetch_all", return_value=[])
-    @patch("tools.formula_engine.sotephwar_inventory_stock")
-    def test_inventory_groups_store_and_dynamic_bottle_types(self, stock, _fetch):
-        stock.return_value = {"stock": [
-            {"store": "Home", "product": "Sote Phwar 4L", "stock_qty": 7},
-            {"store": "Home", "product": "Sote Phwar 500 mL", "stock_qty": 11},
-            {"store": "North", "product": "SotePhwar 4 L", "stock_qty": 3},
+    @patch("tools.formula_engine.calculate_inventory_value")
+    def test_inventory_groups_quantities_and_values_by_store_and_product(self, valuation, _fetch):
+        valuation.return_value = {"total_inventory_value": 1051000, "stock": [
+            {"store": "Home", "product": "Sote Phwar 4L", "stock_qty": 7, "unit_cost": 125000, "inventory_value": 875000},
+            {"store": "Home", "product": "Sote Phwar 500 mL", "stock_qty": 11, "unit_cost": 16000, "inventory_value": 176000},
+            {"store": "North", "product": "Sote Phwar 100 mL", "stock_qty": 3, "unit_cost": 0, "inventory_value": 0},
         ]}
         result = formula_engine.sotephwar_inventory_dashboard()
-        self.assertEqual(["4 L", "500 mL"], result["bottle_types"])
-        self.assertEqual(10, next(row["current_quantity"] for row in result["bottle_totals"] if row["bottle_type"] == "4 L"))
+        self.assertEqual(["100 mL", "4 L", "500 mL"], result["bottle_types"])
+        self.assertEqual(7, next(row["current_quantity"] for row in result["bottle_totals"] if row["bottle_type"] == "4 L"))
         self.assertEqual(18, next(row["current_quantity"] for row in result["store_totals"] if row["store"] == "Home"))
+        self.assertEqual(1051000, next(row["inventory_value"] for row in result["store_totals"] if row["store"] == "Home"))
+        self.assertEqual(21, result["total_bottles"])
+        self.assertEqual(1051000, result["total_inventory_value"])
+        placeholder = next(row for row in result["bottle_totals"] if row["bottle_type"] == "100 mL")
+        self.assertEqual(3, placeholder["current_quantity"])
+        self.assertEqual(0, placeholder["inventory_value"])
+
+    @patch("tools.formula_engine._fetch_all")
+    @patch("tools.formula_engine.sotephwar_inventory_dashboard")
+    def test_production_inventory_dashboard_uses_canonical_movement_rows(self, inventory, fetch_all):
+        inventory.return_value = {
+            "total_inventory_value": 320000, "total_bottles": 10, "stock": [], "store_totals": [],
+            "bottle_totals": [{"bottle_type": "1 L", "current_quantity": 10, "inventory_value": 320000}],
+        }
+        fetch_all.return_value = [
+            {"production_month": date(2026, 6, 1), "product": "Sote Phwar 1L", "movement_type": "Production", "quantity": 20},
+            {"production_month": date(2026, 7, 1), "product": "Sote Phwar 1L", "movement_type": "Production", "quantity": 30},
+            {"production_month": date(2026, 7, 1), "product": "Sote Phwar 1L", "movement_type": "Sale", "quantity": 12},
+        ]
+        result = formula_engine.sotephwar_production_inventory_dashboard(2026, 7)
+        one_litre = next(row for row in result["lifetime_by_bottle_type"] if row["bottle_type"] == "1 L")
+        self.assertEqual(50, result["lifetime_production_bottles"])
+        self.assertEqual(30, result["current_month_production"])
+        self.assertEqual(12, result["current_month_sales"])
+        self.assertEqual(10, one_litre["current_stock"])
+        self.assertEqual(12, one_litre["sold"])
+        self.assertFalse(result["factory_utilization_available"])
+        self.assertIn("Sotephwar_Inventory", fetch_all.call_args.args[0])
+
+    @patch("tools.formula_engine._fetch_all", return_value=[
+        {"production_month": date(2026, 6, 1), "product": "Sote Phwar 1L", "movement_type": "Production", "quantity": 10},
+        {"production_month": date(2026, 7, 1), "product": "Sote Phwar 500 mL", "movement_type": "Production", "quantity": 20},
+    ])
+    @patch("tools.formula_engine.sotephwar_inventory_dashboard", return_value={"total_inventory_value": 0, "total_bottles": 0, "stock": [], "store_totals": [], "bottle_totals": []})
+    def test_year_default_uses_latest_real_production_month_and_explicit_month_is_preserved(self, inventory, fetch_all):
+        year = formula_engine.sotephwar_production_inventory_dashboard(2026)
+        june = formula_engine.sotephwar_production_inventory_dashboard(2026, 6)
+        self.assertEqual("July 2026", year["production_summary_label"])
+        self.assertEqual(20, year["selected_month_total"])
+        self.assertEqual("June 2026", june["production_summary_label"])
+        self.assertEqual(10, june["selected_month_total"])
 
     def test_new_dashboard_apis_require_authentication(self):
         client = dashboard_server.app.test_client()

@@ -1,6 +1,6 @@
 import unittest
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 
 
 class ReceivePaymentServerTest(unittest.TestCase):
@@ -40,14 +40,15 @@ class ReceivePaymentServerTest(unittest.TestCase):
         receive_payment_server._list_vouchers = fake_list_vouchers
         try:
             client = receive_payment_server.app.test_client()
-            response = client.get("/receive-payment-basic")
+            response = client.get("/business-os/receive-payment")
         finally:
             receive_payment_server._list_vouchers = original_list_vouchers
 
         self.assertEqual(200, response.status_code)
         html = response.get_data(as_text=True)
-        self.assertIn("<h1>Receive Payment Basic</h1>", html)
-        self.assertIn('action="/receive-payment-basic"', html)
+        self.assertIn("<h1>Receive Payment</h1>", html)
+        self.assertIn("BigShot Business OS", html)
+        self.assertIn('action="/business-os/receive-payment"', html)
         self.assertIn('name="voucher_number"', html)
         self.assertIn('name="invoice_date"', html)
         self.assertIn('name="customer"', html)
@@ -75,13 +76,14 @@ class ReceivePaymentServerTest(unittest.TestCase):
         receive_payment_server._list_vouchers = fake_list_vouchers
         try:
             client = receive_payment_server.app.test_client()
-            response = client.get("/receive-payment-basic")
+            response = client.get("/business-os/receive-payment")
         finally:
             receive_payment_server._list_vouchers = original_list_vouchers
 
         self.assertEqual(200, response.status_code)
         html = response.get_data(as_text=True)
-        self.assertIn("<h1>Receive Payment Basic</h1>", html)
+        self.assertIn("<h1>Receive Payment</h1>", html)
+        self.assertIn("BigShot Business OS", html)
         self.assertIn("Could not load vouchers: database unavailable", html)
         self.assertIn("No vouchers are available.", html)
 

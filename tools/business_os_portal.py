@@ -44,6 +44,7 @@ def render_shell(content: str, title: str, active: str = "dashboard") -> str:
       {_nav_item('/business-os', 'Dashboard', active, 'dashboard')}
       <div class="bos-nav-group"><span>Daily Entry</span>{_nav_item('/business-os/farm-voucher', 'Farm Voucher', active, 'farm-voucher')}{_nav_item('/business-os/sotephwar-voucher', 'SotePhwar Voucher', active, 'sotephwar-voucher')}{_nav_item('/business-os/sotephwar-inventory', 'SotePhwar Inventory', active, 'sotephwar-inventory')}{_nav_item('/business-os/general-transaction', 'General Transaction', active, 'general-transaction')}{_nav_item('/business-os/receive-payment', 'Receive Payment', active, 'receive-payment')}{_nav_item('/business-os/veggies-production', 'Veggies Production', active, 'veggies-production')}</div>
       <div class="bos-nav-group"><span>Master Data</span>{_nav_item('/business-os/customers', 'Customers', active, 'customers')}{_nav_item('/business-os/veggies-production/crops', 'Veggies Crop Master', active, 'crop-master')}</div>
+      <div class="bos-nav-group"><span>Admin</span>{_nav_item('/data-audit', 'Data Audit', active, 'data-audit')}</div>
     </nav>
     <div class="bos-status">Local Business OS<br><span>Local network access</span></div>
   </aside>
@@ -73,10 +74,7 @@ def _extract_body(html: str) -> str:
 
 def integrate_module_html(html: str, title: str, active: str) -> str:
     """Wrap legacy module markup without changing its business behavior."""
-    replacements = (
-        ('/veggies-production', '/business-os/veggies-production'),
-        ('/receive-payment-basic', '/business-os/receive-payment'),
-    )
+    replacements = (('/veggies-production', '/business-os/veggies-production'),)
     lower = html.lower()
     styles = []
     cursor = 0
@@ -137,16 +135,14 @@ def register_business_os(app, connect) -> None:
         if request.headers.get("X-Business-OS-Request") != "uuid-v1":
             return {"ok": False, "error": "Protected Business OS endpoint"}, 403
         return {"ok": True, "token": str(uuid4())}
-    app.add_url_rule(
-        "/business-os/receive-payment", "business_os_receive_payment",
-        app.view_functions["receive_payment_basic_page"], methods=["GET", "POST"],
-    )
     aliases = (
         ("/business-os/veggies-production", "business_os_veggies_production", "veggies_production_basic", ["GET", "POST"]),
         ("/business-os/veggies-production/crops", "business_os_crop_master", "veggies_crop_master_page", ["GET"]),
         ("/business-os/veggies-production/crops/<int:crop_id>", "business_os_crop_update", "veggies_crop_master_update", ["POST"]),
         ("/business-os/veggies-production/<int:batch_id>", "business_os_production_detail", "veggies_production_detail", ["GET"]),
         ("/business-os/veggies-production/<int:batch_id>/edit", "business_os_production_edit", "veggies_production_edit", ["GET", "POST"]),
+        ("/business-os/veggies-production/<int:batch_id>/pdf", "business_os_production_pdf", "veggies_production_pdf", ["GET"]),
+        ("/business-os/veggies-production/<int:batch_id>/excel", "business_os_production_excel", "veggies_production_excel", ["GET"]),
         ("/business-os/veggies-production/<int:batch_id>/delete", "business_os_production_delete", "veggies_production_delete", ["POST"]),
     )
     for rule, endpoint, legacy_endpoint, methods in aliases:
@@ -168,6 +164,7 @@ def register_business_os(app, connect) -> None:
             ("Veggies Production", "Enter and review daily vegetable production.", "/business-os/veggies-production", "Available"),
             ("Veggies Crop Master", "Manage active crops and display settings.", "/business-os/veggies-production/crops", "Available"),
             ("Customers", "Search, add and maintain the operational Customer Master.", "/business-os/customers", "Available"),
+            ("Data Audit", "Upload, compare, review and safely apply approved Excel differences.", "/data-audit", "Admin only"),
         )
         card_html = "".join(
             f'<a class="bos-module-card" href="{path}"><span>{escape(status)}</span><h2>{escape(name)}</h2><p>{escape(description)}</p></a>'
@@ -201,10 +198,10 @@ def register_business_os(app, connect) -> None:
             return response
         location = response.headers.get("Location")
         if location:
-            response.headers["Location"] = location.replace("/veggies-production", "/business-os/veggies-production").replace("/receive-payment-basic", "/business-os/receive-payment")
+            response.headers["Location"] = location.replace("/veggies-production", "/business-os/veggies-production")
         if response.status_code < 300 and response.mimetype == "text/html":
             titles = {
-                "business_os_receive_payment": ("Receive Payment", "receive-payment"),
+                "receive_payment_basic_page": ("Receive Payment", "receive-payment"),
                 "business_os_farm_voucher": ("Farm Voucher", "farm-voucher"),
                 "business_os_sotephwar_voucher": ("SotePhwar Voucher", "sotephwar-voucher"),
                 "business_os_sotephwar_inventory": ("SotePhwar Inventory", "sotephwar-inventory"),

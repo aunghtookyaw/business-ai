@@ -1,10 +1,17 @@
 """Native Business OS page and protected APIs for SotePhwar inventory movements."""
+import json
+import logging
+import sys
+import traceback
+from uuid import uuid4
+
 from flask import jsonify, request
 
 from tools import sotephwar_inventory
 
 
 API_HEADER = "inventory-v1"
+LOGGER = logging.getLogger(__name__)
 PAGE = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SotePhwar Inventory</title></head><body>
 <link rel="stylesheet" href="/static/sotephwar_inventory.css?v=20260718-2">
 <link rel="stylesheet" href="/static/operational_history.css"><main class="si-app" data-operational-module="inventory" data-operational-api="/business-os/api/sotephwar-inventory">
@@ -36,13 +43,33 @@ PAGE = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name=
 
 
 def _error(exc):
+    trace_id = str(uuid4())
+    body = request.get_json(silent=True) if request.is_json else None
+    body = body if isinstance(body, dict) else {}
+    _exc_type, _exc_value, exc_traceback = sys.exc_info()
+    frames = traceback.extract_tb(exc_traceback) if exc_traceback else []
+    failing = frames[-1] if frames else None
+    traceback_text = "".join(traceback.format_exception(type(exc), exc, exc_traceback))
+    last_line = traceback_text.rstrip().splitlines()[-1] if traceback_text.strip() else f"{type(exc).__name__}: {exc}"
+    LOGGER.error(
+        "SotePhwar Inventory endpoint exception trace_id=%s exception_type=%s exception_message=%s "
+        "filename=%s line_number=%s failing_function=%s request_json=%s movement_type=%s product=%s "
+        "quantity=%s from_store=%s to_store=%s\n%s",
+        trace_id, type(exc).__name__, str(exc), failing.filename if failing else None,
+        failing.lineno if failing else None, failing.name if failing else None,
+        json.dumps(body, default=str, ensure_ascii=False), body.get("type") or body.get("movement_type"),
+        body.get("product"), body.get("quantity"), body.get("from_store"), body.get("to_store"),
+        traceback_text,
+    )
+    payload = {"ok": False, "error": str(exc), "traceback": last_line, "trace_id": trace_id}
     if isinstance(exc, sotephwar_inventory.InventoryValidationError):
-        return jsonify({"ok": False, "error": "Validation failed", "errors": exc.errors}), 400
+        payload["errors"] = exc.errors
+        return jsonify(payload), 400
     if isinstance(exc, LookupError):
-        return jsonify({"ok": False, "error": str(exc)}), 404
+        return jsonify(payload), 404
     if isinstance(exc, (ValueError, TypeError, RuntimeError)):
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    return jsonify({"ok": False, "error": "SotePhwar Inventory operation failed"}), 500
+        return jsonify(payload), 400
+    return jsonify(payload), 500
 
 
 def _protected():
@@ -95,7 +122,7 @@ def register_sotephwar_inventory(app):
     def create_draft():
         denied=_protected()
         if denied:return denied
-        try:return jsonify({"ok":True,"draft":sotephwar_inventory.create_draft(request.get_json(silent=True) or {},"Business OS")}),201
+        try:return jsonify({"ok":True,"draft":sotephwar_inventory.create_draft(request.get_json(silent=True) or {},"Business OS")})
         except Exception as exc:return _error(exc)
     app.add_url_rule(f"{api}/drafts","business_os_sotephwar_inventory_create_draft",create_draft,methods=["POST"])
 

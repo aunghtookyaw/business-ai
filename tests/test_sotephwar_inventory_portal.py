@@ -1,8 +1,10 @@
 import unittest
+from uuid import UUID
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 from tools import sotephwar_inventory
 
 
@@ -112,6 +114,37 @@ class SotePhwarInventoryPortalTest(unittest.TestCase):
             sotephwar_inventory.submit_movement(values, connection=connection)
         connection.rollback.assert_called_once()
 
+    def test_inventory_draft_uuid_is_bound_as_postgres_safe_text(self):
+        connection = MagicMock(); connection.__enter__.return_value = connection
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = {
+            "id": 1, "submission_key": "d52cc195-adde-4442-92c8-b4e657133252", "status": "draft",
+            "movement_date": date(2026, 7, 22), "movement_type": "Production", "product": "Sote Phwar 1L",
+            "from_store": "", "to_store": "Factory", "quantity": 1, "note": "Test", "version": 1,
+        }
+        with patch.object(sotephwar_inventory.formula_engine, "_connect", return_value=connection):
+            result = sotephwar_inventory.create_draft(self.movement(quantity=1), "tester")
+        bound_key = cursor.execute.call_args.args[1][0]
+        self.assertIsInstance(bound_key, str)
+        UUID(bound_key)
+        self.assertEqual(1, result["id"])
+        sql_text = str(cursor.execute.call_args.args[0])
+        self.assertIn("business_os_inventory_movement_draft", sql_text)
+        self.assertNotIn("Sotephwar_Inventory", sql_text)
+
+    def test_draft_create_validate_and_preview_endpoints_return_200_without_ledger_insert(self):
+        client = receive_payment_server.app.test_client()
+        draft = {"id": 7, "submission_key": "d52cc195-adde-4442-92c8-b4e657133252", "status": "draft", "version": 1}
+        headers = {"X-Business-OS-Request": "inventory-v1"}
+        with patch.object(sotephwar_inventory, "create_draft", return_value=draft) as create, \
+             patch.object(sotephwar_inventory, "set_draft_state", side_effect=[{"draft": {**draft, "status": "validated"}}, {"draft": {**draft, "status": "previewed"}}]) as state, \
+             patch.object(sotephwar_inventory, "submit_movement") as ledger_insert:
+            created = client.post("/business-os/api/sotephwar-inventory/drafts", json=self.movement(quantity=1), headers=headers)
+            validated = client.post("/business-os/api/sotephwar-inventory/drafts/7/validated", headers=headers)
+            previewed = client.post("/business-os/api/sotephwar-inventory/drafts/7/previewed", headers=headers)
+        self.assertEqual([200, 200, 200], [created.status_code, validated.status_code, previewed.status_code])
+        create.assert_called_once(); self.assertEqual(2, state.call_count); ledger_insert.assert_not_called()
+
     def test_page_mobile_rendering_and_protected_api(self):
         client = receive_payment_server.app.test_client()
         page = client.get("/business-os/sotephwar-inventory")
@@ -137,6 +170,27 @@ class SotePhwarInventoryPortalTest(unittest.TestCase):
         self.assertNotIn("Sotephwar_Transection", adapter)
         self.assertNotIn("farm_transection", adapter)
         self.assertNotIn("business_os_voucher_draft", adapter)
+
+    def test_unexpected_endpoint_error_exposes_trace_id_and_logs_request_context(self):
+        client = receive_payment_server.app.test_client()
+        body = self.movement("Transfer", from_store="Factory", to_store="Tatkone Store", quantity=7)
+        with patch("tools.sotephwar_inventory_portal.sotephwar_inventory.create_draft", side_effect=Exception("missing draft column")), \
+             patch("tools.sotephwar_inventory_portal.LOGGER.error") as logged:
+            response = client.post(
+                "/business-os/api/sotephwar-inventory/drafts",
+                json=body,
+                headers={"X-Business-OS-Request": "inventory-v1"},
+            )
+        payload = response.get_json()
+        self.assertEqual(500, response.status_code)
+        self.assertEqual("missing draft column", payload["error"])
+        self.assertEqual("Exception: missing draft column", payload["traceback"])
+        UUID(payload["trace_id"])
+        logged.assert_called_once()
+        rendered = " ".join(str(value) for value in logged.call_args.args)
+        for expected in ("exception_type", "exception_message", "filename", "line_number", "failing_function",
+                         "request_json", "Transfer", "Sote Phwar 1L", "7", "Factory", "Tatkone Store", "Traceback"):
+            self.assertIn(expected, rendered)
 
 
 if __name__ == "__main__":

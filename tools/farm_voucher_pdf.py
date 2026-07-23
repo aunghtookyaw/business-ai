@@ -1,6 +1,7 @@
 """Single A4 renderer used by Farm Voucher Preview and downloadable PDF."""
 from html import escape
 from pathlib import Path
+from decimal import Decimal
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -211,11 +212,11 @@ def _text(value, fallback="-"):
 
 
 def _money(value):
-    return f"{value:,.2f} MMK"
+    return f"{Decimal(str(value or 0)):,.2f} MMK"
 
 
 def _number(value):
-    return f"{value:,.2f}"
+    return f"{Decimal(str(value or 0)):,.2f}"
 
 
 def _address_lines():
@@ -285,6 +286,7 @@ def voucher_document(voucher):
         "amount_received": _money(voucher.get("amount_received")),
         "outstanding": _money(voucher.get("outstanding_balance")),
         "payment_status": _text(voucher.get("payment_status")),
+        "latest_payment_date": _text(voucher.get("latest_payment_date"), ""),
         "adjustment_reason": _text(voucher.get("adjustment_reason"), ""),
         "note": _text(voucher.get("note"), "-"),
     }
@@ -430,9 +432,12 @@ def write_farm_voucher_pdf(voucher, output_path):
         amount_rows.append(("CASHBACK", document["cashback_amount"], styles["total"]))
     amount_rows.extend([
         ("NET AMOUNT", document["net_amount"], styles["total_emphasis"]),
-        ("PAID", document["amount_received"], styles["total"]),
-        ("TOTAL DUE", document["outstanding"], styles["total_emphasis"]),
+        ("PAID / TOTAL RECEIVED TO DATE", document["amount_received"], styles["total"]),
+        ("OUTSTANDING / TOTAL DUE", document["outstanding"], styles["total_emphasis"]),
+        ("PAYMENT STATUS", document["payment_status"].upper(), styles["total_emphasis"]),
     ])
+    if document["latest_payment_date"]:
+        amount_rows.append(("LATEST PAYMENT DATE", document["latest_payment_date"], styles["small"]))
     if document["adjustment_reason"]:
         amount_rows.append(("ADJUSTMENT REASON", document["adjustment_reason"], styles["small"]))
     amount_block = Table(

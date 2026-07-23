@@ -1,11 +1,13 @@
 """Farm Voucher routes mounted in the local BigShot Business OS service."""
 import logging
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 
-from flask import jsonify, request, send_file, url_for
+from flask import after_this_request, jsonify, request, send_file, url_for
 
 from tools import farm_voucher_repository, voucher_engine
+from tools.payment_state import current_voucher_payment_state
 from tools.farm_voucher_pdf import write_farm_voucher_pdf
 
 
@@ -130,8 +132,30 @@ def register_farm_voucher(app):
             if not draft:
                 raise LookupError("Farm voucher draft not found")
             if draft.get("status") == "submitted":
-                path = farm_voucher_repository.submitted_pdf_path(draft)
-                voucher = draft.get("submitted_voucher") or draft
+                original_path = farm_voucher_repository.submitted_pdf_path(draft)
+                voucher = deepcopy(draft.get("submitted_voucher") or draft)
+                if request.args.get("original") == "1":
+                    path = original_path
+                else:
+                    current = current_voucher_payment_state(
+                        "Farm", voucher["voucher_number"],
+                        invoice_date=voucher.get("voucher_date"), customer=voucher.get("customer_name"),
+                    )
+                    voucher["amount_received"] = current["current_received"]
+                    voucher["outstanding_balance"] = current["current_outstanding"]
+                    voucher["payment_status"] = current["current_payment_status"]
+                    voucher["latest_payment_date"] = current["latest_payment_date"]
+                    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+                    path = Path(handle.name)
+                    handle.close()
+                    write_farm_voucher_pdf(voucher, path)
+                    @after_this_request
+                    def remove_current_statement(response):
+                        try:
+                            path.unlink(missing_ok=True)
+                        except OSError:
+                            LOGGER.exception("Could not remove temporary current Farm statement %s", path)
+                        return response
             else:
                 voucher = voucher_engine.preview(draft.get("submitted_voucher") or draft)
                 handle = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
@@ -184,5 +208,8 @@ def register_farm_voucher(app):
 
     @app.get("/business-os/api/farm-voucher/summary")
     def business_os_farm_voucher_summary():
-        try:return jsonify({"ok":True,"summary":farm_voucher_repository.operational_summary()})
+        try:
+            response = jsonify({"ok":True,"summary":farm_voucher_repository.operational_summary()})
+            response.headers["Cache-Control"] = "no-store"
+            return response
         except Exception as exc:return _error(exc)

@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import date
 from decimal import Decimal, InvalidOperation
 import json
+import logging
 import re
 from uuid import uuid4
 
@@ -31,6 +32,7 @@ MOVEMENT_TYPES = ("Production", "Transfer", "Sale")
 SUBMISSION_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,100}$")
 SUBMISSION_MARKER = "Business OS inventory submission:"
 DRAFT_TABLE = "business_os_inventory_movement_draft"
+LOGGER = logging.getLogger(__name__)
 
 
 class InventoryValidationError(ValueError):
@@ -204,7 +206,8 @@ def submit_movement(values, connection=None, commit=True):
         if commit:
             connection.commit()
         return {"movement_id": movement_id, "idempotent": False, "movement": movement, "stock": inventory_summary() if commit else None}
-    except Exception:
+    except Exception as exc:
+        LOGGER.exception("SotePhwar Inventory submit_movement rollback: %s", exc)
         connection.rollback()
         raise
     finally:
@@ -242,10 +245,13 @@ def get_draft(draft_id,connection=None,for_update=False):
 
 def create_draft(values,created_by):
     values=values or {}
+    # Match General Transaction: bind canonical UUID text because this psycopg2
+    # installation does not globally register the Python UUID adapter.
+    submission_key = str(uuid4())
     with formula_engine._connect() as connection,connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         cursor.execute(sql.SQL('INSERT INTO {}.{} (submission_key,movement_date,movement_type,product,from_store,to_store,quantity,note,created_by) '
             'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *').format(sql.Identifier(config.TRANSACTION_SCHEMA),sql.Identifier(DRAFT_TABLE)),(
-            uuid4(),values.get("date") or date.today(),_text(values.get("type")),_text(values.get("product")),_text(values.get("from_store")),
+            submission_key,values.get("date") or date.today(),_text(values.get("type")),_text(values.get("product")),_text(values.get("from_store")),
             _text(values.get("to_store")),int(values.get("quantity") or 0),_text(values.get("note")),created_by))
         row=cursor.fetchone();connection.commit();return _draft_payload(row)
 
@@ -294,7 +300,8 @@ def submit_draft(draft_id,submission_key,submitted_by,connection=None,commit=Tru
                 sql.Identifier(config.TRANSACTION_SCHEMA),sql.Identifier(DRAFT_TABLE)),(result["movement_id"],json.dumps({**result["movement"],"submitted_by":submitted_by}),int(draft_id)));saved=cursor.fetchone()
         if commit: connection.commit()
         return {"draft":_draft_payload(saved),"movement_id":result["movement_id"],"idempotent":result["idempotent"]}
-    except Exception:
+    except Exception as exc:
+        LOGGER.exception("SotePhwar Inventory submit_draft rollback: %s", exc)
         connection.rollback();raise
     finally:
         if owns: connection.close()

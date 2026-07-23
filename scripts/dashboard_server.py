@@ -5,7 +5,7 @@ import secrets
 import json
 import logging
 import requests
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from functools import wraps
 from hmac import compare_digest
@@ -24,6 +24,7 @@ from tools import farm_voucher_repository, voucher_engine
 from tools.farm_voucher_pdf import write_farm_voucher_pdf
 from tools.bi_reports import write_excel_report
 from tools.dashboard_pdf import write_dashboard_pdf
+from tools.farm_production_pdf import write_farm_production_excel, write_farm_production_pdf
 
 
 STATIC_ROOT = PROJECT_ROOT / "dashboard-prototype"
@@ -46,13 +47,13 @@ LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("DASHBOARD_LOGIN_WINDOW_SECONDS"
 PUBLIC_API_PATHS = {"/api/auth/login", "/api/auth/session", "/health", "/ready"}
 DASHBOARD_PAGE_PATHS = {
     "/executive",
-    "/payments",
-    "/customers",
     "/inventory",
     "/farm-production",
     "/financial",
     "/insights",
     "/farm-voucher",
+    "/data-audit",
+    "/excel-import",
 }
 
 
@@ -166,6 +167,20 @@ def _proxy_internal_dashboard(relative_path):
             "error": "Dashboard data service is unavailable.",
         }), 502
 
+    content = upstream.content
+    if relative_path.strip("/") == "executive" and upstream.ok:
+        try:
+            payload = upstream.json()
+            requested = (request.get_json(silent=True) or {}).get("filters", {}).get("period", {})
+            if requested.get("type") == "year" and int(requested.get("year") or 0) == date.today().year:
+                trend = payload.get("data", {}).get("trend") or []
+                month_labels = {date(2000, month, 1).strftime("%b"): month for month in range(1, 13)}
+                trend = [row for row in trend if month_labels.get(row.get("label"), 13) <= date.today().month]
+                payload["data"]["trend"] = trend
+                payload["data"]["latest_trend_period"] = trend[-1].get("label") if trend else None
+                content = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            _log_event(logging.WARNING, "legacy_trend_compatibility_failed", path=request.path)
     response_headers = {}
     for name in ("Content-Type", "Content-Disposition"):
         value = upstream.headers.get(name)
@@ -177,7 +192,7 @@ def _proxy_internal_dashboard(relative_path):
         path=request.path,
         upstream_status=upstream.status_code,
     )
-    return Response(upstream.content, status=upstream.status_code, headers=response_headers)
+    return Response(content, status=upstream.status_code, headers=response_headers)
 
 
 def _required_env_status():
@@ -238,6 +253,8 @@ def require_dashboard_auth():
         return None
     if request.path.startswith("/api/dashboard") and not _is_authenticated():
         return jsonify({"ok": False, "error": "Authentication required"}), 401
+    if request.path.startswith("/api/data-audit") and not _is_authenticated():
+        return jsonify({"ok": False, "error": "Authentication required"}), 401
     if request.path in DASHBOARD_PAGE_PATHS and not _is_authenticated():
         return redirect(url_for("dashboard_page", login="required"))
     return None
@@ -245,7 +262,12 @@ def require_dashboard_auth():
 
 @app.after_request
 def security_headers(response):
-    response.headers["Cache-Control"] = "no-store"
+    if request.path.endswith((".js", ".css")) and request.args.get("v"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif response.mimetype == "text/html":
+        response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+    else:
+        response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -270,14 +292,17 @@ def dashboard_page():
 
 
 @app.get("/executive")
-@app.get("/payments")
-@app.get("/customers")
 @app.get("/inventory")
 @app.get("/farm-production")
 @app.get("/financial")
 @app.get("/insights")
 def dashboard_named_page():
     return app.send_static_file("index.html")
+
+@app.get("/payments")
+@app.get("/customers")
+def retired_dashboard_page():
+    return redirect("/executive")
 
 
 @app.get("/health")
@@ -365,9 +390,9 @@ def dashboard_meta():
         "read_only": True,
         "business_logic": "canonical_bi_engine",
         "milestone": 1,
-        "pages": ["executive", "payments", "customers", "inventory", "farm-production", "farm-voucher", "financial", "insights"],
+        "pages": ["executive", "inventory", "farm-production", "financial", "insights"],
         "executive_read_only": True,
-        "write_modules": ["farm-voucher"],
+        "write_modules": [],
         "roles_ready": FUTURE_ROLES,
     })
 
@@ -413,11 +438,40 @@ def _farm_production_response():
     filters = dashboard_service.parse_farm_production_filters(request.get_json(silent=True))
     return jsonify({"ok": True, "data": dashboard_service.farm_production_dashboard(filters)})
 
+def _farm_production_pdf_response():
+    filters = dashboard_service.parse_farm_production_filters(request.get_json(silent=True))
+    data = dashboard_service.farm_production_dashboard(filters)
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    path = Path(handle.name)
+    handle.close()
+    write_farm_production_pdf(data, path)
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name="BigShot_Farm_Production.pdf",
+        mimetype="application/pdf",
+    )
+
+
+def _farm_production_excel_response():
+    filters = dashboard_service.parse_farm_production_filters(request.get_json(silent=True))
+    data = dashboard_service.farm_production_dashboard(filters)
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    path = Path(handle.name)
+    handle.close()
+    write_farm_production_excel(data, path)
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name="BigShot_Farm_Production.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
 
 def _inventory_response():
-    return jsonify({"ok": True, "data": dashboard_service.inventory_dashboard()})
-
-
+    return jsonify({"ok": True, "data": dashboard_service.inventory_dashboard(
+        year=request.args.get("year"), month=request.args.get("month"),
+    )})
 def _payments_response():
     filters = _filters_from_request()
     return jsonify({"ok": True, "data": dashboard_service.payments_dashboard(filters)})
@@ -466,6 +520,33 @@ def farm_production_dashboard():
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         app.logger.exception("Farm Production dashboard failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+@app.post("/api/dashboard/farm-production/export/pdf")
+@login_required
+def farm_production_pdf():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("farm-production/export/pdf")
+    try:
+        return _farm_production_pdf_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Farm Production PDF failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/dashboard/farm-production/export/excel")
+@login_required
+def farm_production_excel():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("farm-production/export/excel")
+    try:
+        return _farm_production_excel_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Farm Production Excel failed")
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
@@ -738,6 +819,31 @@ def internal_v1_farm_production():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
 
+@app.post("/internal/v1/dashboard/farm-production/export/pdf")
+@internal_api_required
+def internal_v1_farm_production_pdf():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("farm-production/export/pdf")
+    try:
+        return _farm_production_pdf_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/internal/v1/dashboard/farm-production/export/excel")
+@internal_api_required
+def internal_v1_farm_production_excel():
+    if _internal_api_client_enabled():
+        return _proxy_internal_dashboard("farm-production/export/excel")
+    try:
+        return _farm_production_excel_response()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
 
 @app.get("/internal/v1/dashboard/inventory")
 @internal_api_required
@@ -783,6 +889,11 @@ def internal_v1_export_pdf():
         return _export_pdf_response()
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+from tools.data_audit_portal import register_data_audit
+
+register_data_audit(app, login_required, _current_user)
 
 
 if __name__ == "__main__":

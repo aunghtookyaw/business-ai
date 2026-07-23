@@ -4,7 +4,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from scripts import receive_payment_server
+import business_os_app as receive_payment_server
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -10,6 +10,18 @@ mkdir -p "$LOG_DIR"
 export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 cd "$PROJECT_ROOT" || exit 1
 
+for _ in $(seq 1 50); do
+  if ! lsof -nP -iTCP:5059 -sTCP:LISTEN >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+
+if lsof -nP -iTCP:5059 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "$(date -Iseconds) Port 5059 is already owned by another process" >&2
+  exit 1
+fi
+
 if ! docker info >/dev/null 2>&1; then
   open -ga Docker >/dev/null 2>&1 || true
 fi

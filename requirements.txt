@@ -3,6 +3,7 @@ certifi
 requests==2.31.0
 urllib3<2
 openpyxl==3.1.5
+xlrd==2.0.1
 flask==3.0.3
 waitress==3.0.2
 psycopg2-binary==2.9.9

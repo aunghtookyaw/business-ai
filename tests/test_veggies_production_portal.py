@@ -1,9 +1,13 @@
+import io
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from scripts import receive_payment_server
+from openpyxl import load_workbook
+from pypdf import PdfReader
+
+import business_os_app as receive_payment_server
 from tools import veggies_production_portal as portal
 from tools.veggies_production import CropDefinition
 
@@ -246,16 +250,29 @@ class VeggiesProductionPortalTest(unittest.TestCase):
         self.assertIn("Zucchini", html)
         self.assertIn("2.5", html)
 
-    def test_quantities_display_with_one_decimal_without_rounding_edit_values(self):
+    def test_pdf_and_excel_exports_display_two_decimals_without_rounding_cell_value(self):
+        precise = record()
+        precise["items"][0]["quantity"] = Decimal("10.567")
+        with patch.object(portal, "get_record", return_value=precise):
+            pdf_response = self.client.get("/veggies-production/7/pdf")
+            excel_response = self.client.get("/veggies-production/7/excel")
+        pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf_response.data)).pages)
+        quantity_cell = load_workbook(io.BytesIO(excel_response.data), data_only=True).active[7][1]
+        self.assertIn("10.57", pdf_text)
+        self.assertEqual(Decimal("10.567"), Decimal(str(quantity_cell.value)))
+        self.assertEqual("0.00", quantity_cell.number_format)
+
+    def test_quantities_display_with_two_decimals_in_detail_and_edit(self):
         precise = record()
         precise["items"][0]["quantity"] = Decimal("2.5678")
         with patch.object(portal, "get_record", return_value=precise):
             detail_html = self.client.get("/veggies-production/7").get_data(as_text=True)
         with patch.object(portal, "portal_crops", return_value=CROPS), patch.object(portal, "get_record", return_value=precise):
             edit_html = self.client.get("/veggies-production/7/edit").get_data(as_text=True)
-        self.assertIn("2.6", detail_html)
+        self.assertIn("2.57", detail_html)
         self.assertNotIn("2.5678", detail_html)
-        self.assertIn('value="2.5678"', edit_html)
+        self.assertIn('value="2.57"', edit_html)
+        self.assertIn('data-stored-value="2.5678"', edit_html)
 
     def test_edit_requires_confirmation_then_updates(self):
         updates = []
@@ -297,7 +314,7 @@ class VeggiesProductionPortalTest(unittest.TestCase):
             html = self.client.get("/veggies-production").get_data(as_text=True)
         self.today_patcher.start()
         self.assertIn("Today’s Total Production", html)
-        self.assertIn("245.5", html)
+        self.assertIn("245.50", html)
         self.assertIn("Today’s Number of Submissions", html)
         self.assertIn("Unit configuration pending", html)
         self.assertIn("09:45:02", html)

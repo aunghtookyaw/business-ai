@@ -186,6 +186,50 @@ def _normalise_row(table_config, row):
     return cleaned
 
 
+def clean_value_for_column(table_key, column, value):
+    """Reuse importer coercion rules for one audited update value."""
+    table_config = TABLES[table_key]
+    if column not in table_config["columns"]:
+        raise ValueError(f"{column} is not an importable {table_config['label']} field")
+    if column in table_config["numeric"]:
+        return _clean_number(value, column)
+    if column in table_config["date"]:
+        return _clean_date(value, column)
+    return _clean_text(value)
+
+
+def insert_rows_transactional(connection, table_key, rows, commit=False):
+    """Insert validated import rows using one caller-owned transaction."""
+    if table_key not in TABLES:
+        raise ValueError("Unsupported import table")
+    table_config = TABLES[table_key]
+    table_ref = table_config["table_ref"]()
+    columns = table_config["columns"]
+    quoted_columns = ", ".join(f'"{column}"' for column in columns)
+    placeholders = ", ".join(f"%({column})s" for column in columns)
+    statement = f"""
+        INSERT INTO {table_ref}
+          ({quoted_columns})
+        VALUES
+          ({placeholders})
+        RETURNING id
+    """
+    inserted = []
+    try:
+        with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            for row in rows:
+                cleaned = _normalise_row(table_config, row)
+                cursor.execute(statement, cleaned)
+                inserted.append({"row_number": row.get("__row_number"), "id": cursor.fetchone()["id"]})
+        if commit:
+            connection.commit()
+        return {"table": table_config["label"], "inserted": inserted, "errors": []}
+    except Exception:
+        if commit:
+            connection.rollback()
+        raise
+
+
 def _insert_rows(connection, table_key, rows):
     table_config = TABLES[table_key]
     table_ref = table_config["table_ref"]()
